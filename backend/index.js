@@ -1,0 +1,23 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+
+require('./db/connection');
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.get('/api', (req, res) => {
+    res.json({
+        mensaje: 'Servidor SIGAP funcionando correctamente',
+        version: '1.0.0'
+    });
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Servidor corriendo en http://localhost:${PORT}`);
+});
