@@ -4,12 +4,14 @@ const cors = require('cors');
 
 require('./db/connection');
 const usuariosRouter = require('./routes/usuarios');
+const agendaRouter = require('./routes/agenda');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use('/api/usuarios', usuariosRouter);
+app.use('/api/agenda', agendaRouter);
 
 app.get('/api', (req, res) => {
     res.json({
