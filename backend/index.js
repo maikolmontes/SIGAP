@@ -3,11 +3,13 @@ const express = require('express');
 const cors = require('cors');
 
 require('./db/connection');
+const usuariosRouter = require('./routes/usuarios');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use('/api/usuarios', usuariosRouter);
 
 app.get('/api', (req, res) => {
     res.json({
