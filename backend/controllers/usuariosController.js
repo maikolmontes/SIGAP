@@ -14,11 +14,11 @@ const getAll = async (req, res) => {
                 pa.nombre_programa AS programa,
                 STRING_AGG(r.nombre_rol, ', ') AS roles
             FROM usuarios u
-            JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
-            JOIN programa_academico pa  ON u.id_programa  = pa.id_programa
-            JOIN usuario_rol ur         ON u.id_usuario   = ur.id_usuario
-            JOIN roles r                ON ur.id_rol      = r.id_rol
-            WHERE u.activo = TRUE
+            LEFT JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
+LEFT JOIN programa_academico pa  ON u.id_programa  = pa.id_programa
+LEFT JOIN usuario_rol ur ON u.id_usuario = ur.id_usuario
+LEFT JOIN roles r ON ur.id_rol = r.id_rol
+            
             GROUP BY
                 u.id_usuario, u.nombres, u.apellidos,
                 u.correo, u.activo,
