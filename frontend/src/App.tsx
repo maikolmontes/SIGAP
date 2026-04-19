@@ -1,15 +1,17 @@
-
-import './App.css'
+import { Routes, Route, Navigate } from 'react-router-dom'
+import DashboardPlaneacion from './pages/planeacion/DashboardPlaneacion'
+import Docentes from './pages/planeacion/Docentes'
+import DashboardDirector from './pages/director/DashboardDirector'
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <h1 className="text-3xl font-bold text-blue-600">
-        SIGAP funcionando con Tailwind
-      </h1>
-    </div>
+    <Routes>
+      <Route path="/" element={<Navigate to="/planeacion/dashboard" replace />} />
+      <Route path="/planeacion/dashboard" element={<DashboardPlaneacion />} />
+      <Route path="/planeacion/docentes" element={<Docentes />} />
+      <Route path="/director/dashboard" element={<DashboardDirector />} />
+    </Routes>
   )
 }
 
 export default App
-
