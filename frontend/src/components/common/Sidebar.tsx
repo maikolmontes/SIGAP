@@ -16,17 +16,27 @@ const menuDirector = [
 
 interface SidebarProps {
     rol: 'planeacion' | 'director'
+    onClose?: () => void
 }
 
-export default function Sidebar({ rol }: SidebarProps) {
+export default function Sidebar({ rol, onClose }: SidebarProps) {
     const menu = rol === 'planeacion' ? menuPlaneacion : menuDirector
     const rolLabel = rol === 'planeacion' ? 'Planeación' : 'Director'
 
     return (
-        <aside className="w-52 min-h-screen bg-[#063759] flex flex-col">
-            <div className="px-4 py-5 border-b border-white/10">
-                <div className="text-white font-medium text-sm">SIGAP</div>
-                <div className="text-white/50 text-xs mt-1">{rolLabel} · 2025 IIP</div>
+        <aside className="w-64 min-h-screen bg-[#063759] flex flex-col shadow-2xl lg:shadow-none">
+            <div className="px-4 py-5 border-b border-white/10 flex justify-between items-center">
+                <div>
+                    <div className="text-white font-medium text-sm">SIGAP</div>
+                    <div className="text-white/50 text-xs mt-1">{rolLabel} · 2025 IIP</div>
+                </div>
+                {onClose && (
+                    <button onClick={onClose} className="lg:hidden text-white/50 hover:text-white p-1 rounded-md transition-colors">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                )}
             </div>
 
             <div className="px-3 py-3">

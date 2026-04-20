@@ -42,10 +42,11 @@ const loginGoogle = async (req, res) => {
 
         const user = result.rows[0];
         user.roles = user.roles || '';
+        user.imagen_perfil = payload.picture || null; // <--- Extraemos la foto
 
         // Generar JWT propio
         const token = jwt.sign(
-            { id: user.id_usuario, correo: user.correo, roles: user.roles },
+            { id: user.id_usuario, correo: user.correo, roles: user.roles, imagen_perfil: user.imagen_perfil },
             process.env.JWT_SECRET || 'jwt_secret_key_sigap_2026',
             { expiresIn: '8h' } // El token expirará en 8 horas
         );

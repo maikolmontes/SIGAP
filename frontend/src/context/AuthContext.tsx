@@ -6,6 +6,9 @@ interface User {
   id: number;
   correo: string;
   roles: string;
+  nombres?: string;
+  apellidos?: string;
+  imagen_perfil?: string;
 }
 
 interface AuthContextType {
