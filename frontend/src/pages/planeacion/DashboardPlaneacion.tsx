@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Layout from '../../components/common/Layout'
+// @ts-ignore
 import { getUsuarios, createUsuario, toggleActivo } from '../../services/usuariosService'
 
 interface Docente {

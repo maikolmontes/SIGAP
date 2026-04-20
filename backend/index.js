@@ -6,6 +6,7 @@ require('./db/connection');
 const usuariosRouter = require('./routes/usuarios');
 const agendaRouter = require('./routes/agenda');
 const funcionesRouter = require('./routes/funciones');
+const authRouter = require('./routes/auth');
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.use(express.json());
 app.use('/api/usuarios', usuariosRouter);
 app.use('/api/agenda', agendaRouter);
 app.use('/api/funciones', funcionesRouter);
+app.use('/api/auth', authRouter);
 
 app.get('/api', (req, res) => {
     res.json({
