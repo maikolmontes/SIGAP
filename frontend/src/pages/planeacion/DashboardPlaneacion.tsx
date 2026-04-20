@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import Layout from '../../components/common/Layout'
+import * as XLSX from 'xlsx'
 // @ts-ignore
-import { getUsuarios, createUsuario, toggleActivo } from '../../services/usuariosService'
+import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios } from '../../services/usuariosService'
 
 interface Docente {
     id_usuario: number
@@ -24,10 +25,13 @@ interface NuevoDocente {
 export default function DashboardPlaneacion() {
     const [docentes, setDocentes] = useState<Docente[]>([])
     const [busqueda, setBusqueda] = useState('')
+    const [filtroEstado, setFiltroEstado] = useState<'Todos'|'Activos'|'Inactivos'>('Todos')
     const [cargando, setCargando] = useState(true)
     const [error, setError] = useState('')
     const [modalAgregar, setModalAgregar] = useState(false)
     const [modalImportar, setModalImportar] = useState(false)
+    const [archivoImportar, setArchivoImportar] = useState<File | null>(null)
+    const [importando, setImportando] = useState(false)
     const [guardando, setGuardando] = useState(false)
     const [editandoId, setEditandoId] = useState<number | null>(null)
 
@@ -54,9 +58,12 @@ export default function DashboardPlaneacion() {
         }
     }
 
-    const docentesFiltrados = docentes.filter(d =>
-        `${d.nombres} ${d.apellidos}`.toLowerCase().includes(busqueda.toLowerCase())
-    )
+    const docentesFiltrados = docentes.filter(d => {
+        const matchBusqueda = `${d.nombres} ${d.apellidos}`.toLowerCase().includes(busqueda.toLowerCase())
+        if (filtroEstado === 'Activos') return matchBusqueda && d.activo
+        if (filtroEstado === 'Inactivos') return matchBusqueda && !d.activo
+        return matchBusqueda
+    })
 
     const handleToggle = async (id: number) => {
         try {
@@ -106,6 +113,57 @@ export default function DashboardPlaneacion() {
             setError('Error al crear el docente. Verifica que el correo no esté registrado.')
         } finally {
             setGuardando(false)
+        }
+    }
+
+    const handleDownloadTemplate = () => {
+        const ws = XLSX.utils.aoa_to_sheet([
+            ['Nombres', 'Apellidos', 'Correo', 'Rol'],
+            ['Diego', 'Villarreal', 'diego@correo.com', 'Docente'],
+            ['Maria', 'Gomez', 'maria@correo.com', 'Planeacion']
+        ])
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, "Plantilla Docentes")
+        XLSX.writeFile(wb, "plantilla_docentes_SIGAP.xlsx")
+    }
+
+    const handleImportSubmit = async () => {
+        if (!archivoImportar) {
+            setError('Por favor selecciona un archivo primero.')
+            return
+        }
+        
+        try {
+            setImportando(true)
+            setError('')
+            
+            const data = await archivoImportar.arrayBuffer()
+            const workbook = XLSX.read(data)
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]]
+            const jsonData = XLSX.utils.sheet_to_json<any>(worksheet)
+            
+            const payload = jsonData.map(row => ({
+                nombres: row.Nombres || row.nombres || '',
+                apellidos: row.Apellidos || row.apellidos || '',
+                correo: row.Correo || row.correo || '',
+                rol: row.Rol || row.rol || 'Docente'
+            })).filter(u => u.nombres && u.apellidos && u.correo)
+
+            if(payload.length === 0) {
+                setError('El Excel no tiene datos válidos. Revisa las columnas (Nombres, Apellidos, Correo).')
+                return
+            }
+
+            const res = await createBulkUsuarios(payload)
+            setModalImportar(false)
+            setArchivoImportar(null)
+            await cargarDocentes()
+            alert(res.data.mensaje || 'Docentes importados correctamente')
+            
+        } catch (err: any) {
+            setError(err.response?.data?.error || 'Falló la importación del Excel.')
+        } finally {
+            setImportando(false)
         }
     }
 
@@ -169,6 +227,19 @@ export default function DashboardPlaneacion() {
                         onChange={e => setBusqueda(e.target.value)}
                         className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
                     />
+                </div>
+
+                {/* Filtro de Estado */}
+                <div className="flex-shrink-0">
+                    <select 
+                        value={filtroEstado} 
+                        onChange={e => setFiltroEstado(e.target.value as any)}
+                        className="h-full w-full sm:w-auto px-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                    >
+                        <option value="Todos">Todos los Estados</option>
+                        <option value="Activos">Solo Activos</option>
+                        <option value="Inactivos">Solo Inactivos</option>
+                    </select>
                 </div>
 
                 {/* Botones */}
@@ -403,7 +474,7 @@ export default function DashboardPlaneacion() {
                                 <h3 className="text-white font-medium text-sm">Importar docentes desde Excel</h3>
                                 <p className="text-white/50 text-xs mt-0.5">Sube un archivo .xlsx o .csv</p>
                             </div>
-                            <button onClick={() => setModalImportar(false)} className="text-white/50 hover:text-white transition-colors">
+                            <button onClick={() => { setModalImportar(false); setArchivoImportar(null); setError('') }} className="text-white/50 hover:text-white transition-colors">
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                 </svg>
@@ -415,11 +486,19 @@ export default function DashboardPlaneacion() {
                                 <svg className="w-10 h-10 text-gray-300 group-hover:text-blue-400 transition-colors mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                 </svg>
-                                <p className="text-sm font-medium text-gray-600 mb-1">Arrastra tu archivo aquí</p>
-                                <p className="text-xs text-gray-400 mb-3">o haz clic para seleccionar</p>
-                                <input type="file" accept=".xlsx,.csv" className="hidden" id="file-import" />
-                                <label htmlFor="file-import" className="px-4 py-2 text-xs border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors">
-                                    Seleccionar archivo
+                                <p className="text-sm font-medium text-gray-600 mb-1">
+                                    {archivoImportar ? archivoImportar.name : 'Arrastra tu archivo aquí'}
+                                </p>
+                                {!archivoImportar && <p className="text-xs text-gray-400 mb-3">o haz clic para seleccionar</p>}
+                                <input 
+                                    type="file" 
+                                    accept=".xlsx,.csv" 
+                                    className="hidden" 
+                                    id="file-import" 
+                                    onChange={(e) => setArchivoImportar(e.target.files ? e.target.files[0] : null)}
+                                />
+                                <label htmlFor="file-import" className="px-4 py-2 text-xs border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors mt-2 inline-block">
+                                    {archivoImportar ? 'Elegir otro archivo' : 'Seleccionar archivo'}
                                 </label>
                             </div>
 
@@ -432,7 +511,7 @@ export default function DashboardPlaneacion() {
                                         </span>
                                     ))}
                                 </div>
-                                <button className="text-blue-500 hover:underline mt-2 block">
+                                <button type="button" onClick={handleDownloadTemplate} className="text-blue-500 hover:underline mt-2 block">
                                     Descargar plantilla de ejemplo ↓
                                 </button>
                             </div>
@@ -440,16 +519,32 @@ export default function DashboardPlaneacion() {
 
                         <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
                             <button
-                                onClick={() => setModalImportar(false)}
+                                onClick={() => { setModalImportar(false); setArchivoImportar(null); setError('') }}
                                 className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
                             >
                                 Cancelar
                             </button>
-                            <button className="px-5 py-2 text-sm bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors flex items-center gap-2">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                </svg>
-                                Importar docentes
+                            <button 
+                                onClick={handleImportSubmit}
+                                disabled={importando || !archivoImportar}
+                                className="px-5 py-2 text-sm bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {importando ? (
+                                    <>
+                                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                        </svg>
+                                        Importando...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                        </svg>
+                                        Importar docentes
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
