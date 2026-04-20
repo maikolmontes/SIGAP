@@ -93,10 +93,13 @@ const create = async (req, res) => {
         numero_documento,
         correo,
         id_contrato,
-        id_programa
+        id_programa,
+        rol // Nuevo campo esperado (ej: 'Docente')
     } = req.body;
 
     try {
+        await pool.query('BEGIN'); // Iniciar transacción
+
         const result = await pool.query(`
             INSERT INTO usuarios
                 (nombres, apellidos, tipo_documento,
@@ -104,15 +107,88 @@ const create = async (req, res) => {
                  id_contrato, id_programa, activo)
             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
             RETURNING id_usuario, nombres, apellidos, correo
-        `, [nombres, apellidos, tipo_documento,
-            numero_documento, correo,
-            id_contrato, id_programa]);
+        `, [
+            nombres, apellidos, 
+            tipo_documento || 'CC', 
+            numero_documento || '0000000000', 
+            correo, 
+            id_contrato || 1, 
+            id_programa || 1
+        ]);
 
-        res.status(201).json(result.rows[0]);
+        const nuevoUsuario = result.rows[0];
+
+        // Insertar rol si se proporciona
+        if (rol) {
+            const roleResult = await pool.query('SELECT id_rol FROM roles WHERE nombre_rol = $1', [rol]);
+            if (roleResult.rows.length > 0) {
+                const idRol = roleResult.rows[0].id_rol;
+                await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2)', [nuevoUsuario.id_usuario, idRol]);
+            }
+        }
+
+        await pool.query('COMMIT');
+        res.status(201).json(nuevoUsuario);
 
     } catch (error) {
-        console.error('Error en create usuario:', error.message);
-        res.status(500).json({ error: 'Error al crear el usuario' });
+        await pool.query('ROLLBACK');
+        console.error('Error en create usuario:', error);
+        res.status(500).json({ error: 'Error al crear el usuario. Posible correo duplicado.' });
+    }
+};
+
+const createBulk = async (req, res) => {
+    const usuarios = req.body;
+
+    if (!Array.isArray(usuarios) || usuarios.length === 0) {
+        return res.status(400).json({ error: 'No se enviaron usuarios para importar.' });
+    }
+
+    try {
+        await pool.query('BEGIN');
+        let insertados = 0;
+        let errores = [];
+
+        // Obtener todos los roles para no consultar en cada iteración
+        const rolesResult = await pool.query('SELECT id_rol, nombre_rol FROM roles');
+        const rolesMap = {};
+        rolesResult.rows.forEach(r => { rolesMap[r.nombre_rol.toLowerCase()] = r.id_rol; });
+
+        for (const u of usuarios) {
+            try {
+                // Insertar usuario
+                const userRes = await pool.query(`
+                    INSERT INTO usuarios (nombres, apellidos, tipo_documento, numero_documento, correo, id_contrato, id_programa, activo)
+                    VALUES ($1, $2, 'CC', '0000000000', $3, 1, 1, TRUE)
+                    RETURNING id_usuario
+                `, [u.nombres, u.apellidos, u.correo]);
+
+                const idUsuario = userRes.rows[0].id_usuario;
+
+                // Insertar rol
+                const idRol = rolesMap[(u.rol || 'Docente').toLowerCase()] || rolesMap['docente'];
+                if (idRol) {
+                    await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2)', [idUsuario, idRol]);
+                }
+
+                insertados++;
+            } catch (err) {
+                // Capturar el error pero seguir con los demás
+                errores.push({ correo: u.correo, motivo: err.message });
+            }
+        }
+
+        await pool.query('COMMIT');
+        res.status(201).json({
+            mensaje: `Se importaron ${insertados} usuarios exitosamente.`,
+            insertados,
+            errores
+        });
+
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('Error en createBulk:', error);
+        res.status(500).json({ error: 'Fallo crítico al realizar la carga masiva.' });
     }
 };
 
@@ -143,5 +219,6 @@ module.exports = {
     getAll,
     getById,
     create,
+    createBulk,
     toggleActivo
 };
