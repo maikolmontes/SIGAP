@@ -4,6 +4,7 @@ import Login from './pages/auth/Login'
 import DashboardPlaneacion from './pages/planeacion/DashboardPlaneacion'
 import Docentes from './pages/planeacion/Docentes'
 import DashboardDirector from './pages/director/DashboardDirector'
+import DashboardDocente from './pages/docente/Dashboard'
 import Perfil from './pages/common/Perfil'
 import Configuracion from './pages/common/Configuracion'
 
@@ -11,18 +12,26 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/" element={<Navigate to="/planeacion/dashboard" replace />} />
+      <Route path="/" element={<Navigate to="/login" replace />} />
 
-      {/* Rutas Protegidas */}
-      <Route element={<ProtectedRoute />}>
-        {/* Planeación */}
+      {/* Rutas Protegidas - Planeación */}
+      <Route element={<ProtectedRoute allowedRoles={['Planeacion', 'Admin']} />}>
         <Route path="/planeacion/dashboard" element={<DashboardPlaneacion />} />
         <Route path="/planeacion/docentes" element={<Docentes />} />
-        
-        {/* Director */}
+      </Route>
+
+      {/* Rutas Protegidas - Director */}
+      <Route element={<ProtectedRoute allowedRoles={['Director']} />}>
         <Route path="/director/dashboard" element={<DashboardDirector />} />
-        
-        {/* Comunes (Independiente del Rol principal) */}
+      </Route>
+
+      {/* Rutas Protegidas - Docente */}
+      <Route element={<ProtectedRoute allowedRoles={['Docente']} />}>
+        <Route path="/docente/dashboard" element={<DashboardDocente />} />
+      </Route>
+
+      {/* Rutas Comunes (cualquier usuario autenticado) */}
+      <Route element={<ProtectedRoute />}>
         <Route path="/perfil" element={<Perfil />} />
         <Route path="/configuracion" element={<Configuracion />} />
       </Route>

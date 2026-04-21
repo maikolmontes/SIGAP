@@ -14,14 +14,21 @@ const menuDirector = [
     { label: 'Observaciones', path: '/director/observaciones' },
 ]
 
+const menuDocente = [
+    { label: 'Dashboard', path: '/docente/dashboard' },
+    { label: 'Mi Agenda', path: '/docente/agenda' },
+    { label: 'Evidencias', path: '/docente/evidencias' },
+    { label: 'Seguimiento', path: '/docente/seguimiento' },
+]
+
 interface SidebarProps {
-    rol: 'planeacion' | 'director'
+    rol: 'planeacion' | 'director' | 'docente'
     onClose?: () => void
 }
 
 export default function Sidebar({ rol, onClose }: SidebarProps) {
-    const menu = rol === 'planeacion' ? menuPlaneacion : menuDirector
-    const rolLabel = rol === 'planeacion' ? 'Planeación' : 'Director'
+    const menu = rol === 'planeacion' ? menuPlaneacion : rol === 'director' ? menuDirector : menuDocente
+    const rolLabel = rol === 'planeacion' ? 'Planeación' : rol === 'director' ? 'Director' : 'Docente'
 
     return (
         <aside className="w-64 min-h-screen bg-[#063759] flex flex-col shadow-2xl lg:shadow-none">

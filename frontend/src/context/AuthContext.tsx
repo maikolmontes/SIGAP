@@ -49,6 +49,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Determinar a qué panel redirigir basado en el rol principal
     if (newUser.roles && newUser.roles.includes('Director')) {
         navigate('/director/dashboard', { replace: true });
+    } else if (newUser.roles && newUser.roles.includes('Docente')) {
+        navigate('/docente/dashboard', { replace: true });
     } else {
         navigate('/planeacion/dashboard', { replace: true });
     }
