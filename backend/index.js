@@ -8,6 +8,7 @@ const agendaRouter = require('./routes/agenda');
 const funcionesRouter = require('./routes/funciones');
 const authRouter = require('./routes/auth');
 const docenteRouter = require('./routes/docente');
+const userRouter = require('./routes/user');
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use('/api/agenda', agendaRouter);
 app.use('/api/funciones', funcionesRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/docente', docenteRouter);
+app.use('/api/user', userRouter);
 
 app.get('/api', (req, res) => {
     res.json({

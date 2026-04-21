@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ProtectedRoute } from './components/common/ProtectedRoute'
 import Login from './pages/auth/Login'
+import RoleSelection from './pages/auth/RoleSelection'
 import DashboardPlaneacion from './pages/planeacion/DashboardPlaneacion'
 import Docentes from './pages/planeacion/Docentes'
 import DashboardDirector from './pages/director/DashboardDirector'
@@ -12,6 +13,7 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/role-selection" element={<RoleSelection />} />
       <Route path="/" element={<Navigate to="/login" replace />} />
 
       {/* Rutas Protegidas - Planeación */}

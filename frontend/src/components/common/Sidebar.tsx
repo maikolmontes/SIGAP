@@ -31,7 +31,7 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
     const rolLabel = rol === 'planeacion' ? 'Planeación' : rol === 'director' ? 'Director' : 'Docente'
 
     return (
-        <aside className="w-64 min-h-screen bg-[#063759] flex flex-col shadow-2xl lg:shadow-none">
+        <aside className="w-64 h-screen overflow-y-auto bg-[#063759] flex flex-col shadow-2xl lg:shadow-none overflow-x-hidden relative">
             <div className="px-4 py-5 border-b border-white/10 flex justify-between items-center">
                 <div>
                     <div className="text-white font-medium text-sm">SIGAP</div>
