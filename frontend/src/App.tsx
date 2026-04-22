@@ -27,6 +27,7 @@ function App() {
         {/* Comunes (Independiente del Rol principal) */}
         <Route path="/perfil" element={<Perfil />} />
         <Route path="/configuracion" element={<Configuracion />} />
+
       </Route>
     </Routes>
   )
