@@ -20,10 +20,10 @@ function App() {
         <Route path="/planeacion/dashboard" element={<DashboardPlaneacion />} />
         <Route path="/planeacion/docentes" element={<Docentes />} />
         <Route path="/planeacion/periodos" element={<Periodos />} />
-        
+
         {/* Director */}
         <Route path="/director/dashboard" element={<DashboardDirector />} />
-        
+
         {/* Comunes (Independiente del Rol principal) */}
         <Route path="/perfil" element={<Perfil />} />
         <Route path="/configuracion" element={<Configuracion />} />

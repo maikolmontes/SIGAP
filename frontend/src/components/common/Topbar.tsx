@@ -4,15 +4,16 @@ import { Link } from 'react-router-dom';
 
 interface TopbarProps {
     path: string
-    rol: 'planeacion' | 'director'
+    rol: 'planeacion' | 'director' | 'docente'
     onOpenMenu?: () => void
+    onToggleDesktop?: () => void
 }
 
-export default function Topbar({ path, rol, onOpenMenu }: TopbarProps) {
+export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: TopbarProps) {
     const { user, logout } = useAuth();
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-    const rolLabel = rol === 'planeacion' ? 'Planeación' : 'Director'
-    const iniciales = rol === 'planeacion' ? 'PL' : 'DI'
+    const rolLabel = rol === 'planeacion' ? 'Planeación' : rol === 'director' ? 'Director' : 'Docente'
+    const iniciales = rol === 'planeacion' ? 'PL' : rol === 'director' ? 'DI' : 'DO'
 
     return (
         <header className="h-14 sm:h-11 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-5 flex-shrink-0 z-10 w-full relative">
@@ -28,7 +29,18 @@ export default function Topbar({ path, rol, onOpenMenu }: TopbarProps) {
                         </svg>
                     </button>
                 )}
-                <span className="text-gray-400 text-xs hidden sm:block">{path}</span>
+                {onToggleDesktop && (
+                    <button 
+                        onClick={onToggleDesktop} 
+                        className="hidden lg:block text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md focus:outline-none p-1.5 -ml-1 transition-colors"
+                        title="Alternar menú"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                    </button>
+                )}
+                <span className="text-gray-400 text-xs hidden sm:block ml-2">{path}</span>
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
