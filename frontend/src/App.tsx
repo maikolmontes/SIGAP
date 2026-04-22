@@ -6,6 +6,7 @@ import DashboardPlaneacion from './pages/planeacion/DashboardPlaneacion'
 import Docentes from './pages/planeacion/Docentes'
 import DashboardDirector from './pages/director/DashboardDirector'
 import DashboardDocente from './pages/docente/Dashboard'
+import AgendaDocente from './pages/docente/Agenda'
 import Perfil from './pages/common/Perfil'
 import Configuracion from './pages/common/Configuracion'
 
@@ -30,6 +31,7 @@ function App() {
       {/* Rutas Protegidas - Docente */}
       <Route element={<ProtectedRoute allowedRoles={['Docente']} />}>
         <Route path="/docente/dashboard" element={<DashboardDocente />} />
+        <Route path="/docente/agenda" element={<AgendaDocente />} />
       </Route>
 
       {/* Rutas Comunes (cualquier usuario autenticado) */}
