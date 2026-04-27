@@ -157,4 +157,141 @@ const getAgenda = async (req, res) => {
     }
 };
 
-module.exports = { getAgenda };
+const getAgendaBase = async (req, res) => {
+    const { id_usuario } = req.params;
+
+    try {
+        const funciones = await pool.query(`
+            SELECT
+                af.id_funciones,
+                af.funcion_sustantiva,
+                af.horas_funcion,
+                af.estado_agenda
+            FROM usuario_asignacion ua
+            JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
+            WHERE ua.id_usuario = $1
+            ORDER BY af.id_funciones
+        `, [id_usuario]);
+
+        const actividades = await pool.query(`
+            SELECT
+                aa.id_asignacionact,
+                aa.id_funciones,
+                aa.rol_seleccionado,
+                aa.horas_rol,
+                ea.codigo_espacio,
+                ea.nombre_espacio,
+                ea.id_espacio_aca,
+                
+                d.id_descripcion,
+                d.resultado_esperado,
+                d.meta,
+                
+                i.id_indicadores as id_indicador,
+                i.nombre_indicador
+                
+            FROM usuario_asignacion ua
+            JOIN asignacion_funciones af    ON ua.id_funciones     = af.id_funciones
+            JOIN asignacion_actividades aa  ON af.id_funciones     = aa.id_funciones
+            LEFT JOIN espacio_academico ea  ON aa.id_espacio_aca   = ea.id_espacio_aca
+            LEFT JOIN descripcion d         ON aa.id_asignacionact = d.id_asignacionact
+            LEFT JOIN indicadores i         ON i.id_descripcion    = d.id_descripcion
+            WHERE ua.id_usuario = $1
+            ORDER BY af.id_funciones, aa.id_asignacionact, d.id_descripcion, i.id_indicadores
+        `, [id_usuario]);
+
+        res.json({
+            funciones: funciones.rows,
+            actividades: actividades.rows
+        });
+
+    } catch (error) {
+        console.error('Error en getAgendaBase:', error.message);
+        res.status(500).json({ error: 'Error al obtener la agenda base' });
+    }
+};
+
+// ================================================================
+// guardarFuncionDocente:
+// Recibe el id_funciones y la lista de actividades con sus detalles
+// (rol_seleccionado, resultado_esperado, meta, indicadores).
+// Actualiza las actividades existentes y crea descripción/indicadores.
+// Marca la función como "Aceptado".
+// ================================================================
+const guardarFuncionDocente = async (req, res) => {
+    const { id_funciones, actividades } = req.body;
+
+    if (!id_funciones || !actividades || !Array.isArray(actividades)) {
+        return res.status(400).json({ error: 'Se requiere id_funciones y un arreglo de actividades.' });
+    }
+
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        for (const act of actividades) {
+            const idAct = act.id_asignacionact;
+            const rol = act.actividadLibre || '';
+            const resultadoEsperado = act.resultadoEsperado || '';
+            const meta = act.meta || '';
+            const indicadores = act.indicadores || [];
+
+            // Actualizar el rol_seleccionado de la actividad si cambió
+            if (idAct && rol) {
+                await client.query(
+                    'UPDATE asignacion_actividades SET rol_seleccionado = $1 WHERE id_asignacionact = $2',
+                    [rol, idAct]
+                );
+            }
+
+            // Si hay resultado esperado, gestionar descripción e indicadores
+            if (idAct && resultadoEsperado) {
+                // Borrar indicadores y descripciones anteriores de esta actividad
+                await client.query(`
+                    DELETE FROM indicadores WHERE id_descripcion IN (
+                        SELECT id_descripcion FROM descripcion WHERE id_asignacionact = $1
+                    )
+                `, [idAct]);
+                await client.query('DELETE FROM descripcion WHERE id_asignacionact = $1', [idAct]);
+
+                // Insertar nueva descripción
+                const descRes = await client.query(`
+                    INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta)
+                    VALUES ($1, $2, $3) RETURNING id_descripcion
+                `, [idAct, resultadoEsperado, meta || '1']);
+
+                const idDescripcion = descRes.rows[0].id_descripcion;
+
+                // Insertar indicadores
+                for (const ind of indicadores) {
+                    if (ind.nombre_indicador) {
+                        await client.query(`
+                            INSERT INTO indicadores (id_descripcion, nombre_indicador)
+                            VALUES ($1, $2)
+                        `, [idDescripcion, ind.nombre_indicador]);
+                    }
+                }
+            }
+        }
+
+        // Marcar la función como "Aceptado"
+        await client.query(
+            "UPDATE asignacion_funciones SET estado_agenda = 'Aceptado' WHERE id_funciones = $1",
+            [id_funciones]
+        );
+
+        await client.query('COMMIT');
+
+        res.json({ mensaje: 'Función guardada y aceptada correctamente.' });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en guardarFuncionDocente:', error.message);
+        res.status(500).json({ error: 'Error al guardar la función del docente.', detalles: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+module.exports = { getAgenda, getAgendaBase, guardarFuncionDocente };

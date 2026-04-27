@@ -24,6 +24,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/periodos', periodosRouter);
 app.use('/api/docente', docenteRouter);
 app.use('/api/user', userRouter);
+app.use('/api/director', require('./routes/director'));
 
 app.get('/api', (req, res) => {
     res.json({
