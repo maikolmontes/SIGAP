@@ -1,23 +1,28 @@
-const { Pool } = require('pg');
-require('dotenv').config();
+const pool = require('./db/connection');
+const xlsx = require('xlsx');
+const { importarAsignaciones } = require('./controllers/directorController');
 
-const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-});
+// Creando mock req
+const workbook = xlsx.utils.book_new();
+const worksheet = xlsx.utils.json_to_sheet([
+  {
+    "INSCRIPCIÓN": "1085312456",
+    "DOCENTES": "Maikol Jefersson",
+    "PROGRAMAS": "HORAS ADMINISTRATIVAS",
+    "ASIGNATURAS": "ESTRATEGIAS SABER PRO",
+    "SEMESTRE": "11-M",
+    "PERIODO": "1 / 2026",
+    "VIN": "MT",
+    "HORAS": 2
+  }
+]);
+xlsx.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
-pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'").then(res => {
-    console.log("TABLES:", res.rows.map(r => r.table_name).join(', '));
-    
-    // Check structure of periodos or similar table
-    pool.query("SELECT column_name, data_type FROM information_schema.columns WHERE table_name LIKE '%periodo%'").then(res2 => {
-        console.log("PERIODO COLUMNS:", res2.rows);
-        process.exit(0);
-    });
-}).catch(err => {
-    console.error(err);
-    process.exit(1);
-});
+const req = { file: { buffer } };
+const res = {
+  status: function(code) { console.log("Status:", code); this.code = code; return this; },
+  json: function(data) { console.log("RES:", this.code, data); process.exit(0); }
+};
+
+importarAsignaciones(req, res).catch(console.error);
