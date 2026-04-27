@@ -100,7 +100,8 @@ export default function DashboardPlaneacion() {
                 tipo_documento: 'CC',
                 numero_documento: '0000000000',
                 id_contrato: 1,
-                id_programa: 1
+                id_programa: 1,
+                rol: nuevoDocente.rol
             })
             setDocentes(prev => [...prev, {
                 ...res.data,
