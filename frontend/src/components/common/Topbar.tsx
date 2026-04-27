@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { RefreshCw } from 'lucide-react';
 
 interface TopbarProps {
     path: string
@@ -11,7 +12,12 @@ interface TopbarProps {
 
 export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: TopbarProps) {
     const { user, logout } = useAuth();
+    const navigate = useNavigate();
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+    // Verificar si el usuario tiene más de un rol
+    const rolesArray = user?.roles ? user.roles.split(',').map(r => r.trim()) : [];
+    const hasMultipleRoles = rolesArray.length > 1;
     const rolLabel = rol === 'planeacion' ? 'Planeación' : rol === 'director' ? 'Director' : 'Docente'
     const iniciales = rol === 'planeacion' ? 'PL' : rol === 'director' ? 'DI' : 'DO'
 
@@ -47,6 +53,17 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
                 <span className="hidden md:inline-block bg-yellow-50 text-yellow-800 border border-yellow-300 rounded px-2 py-0.5 text-xs font-medium">
                     {rolLabel} · 2025 IIP
                 </span>
+
+                {hasMultipleRoles && (
+                    <button 
+                        onClick={() => navigate('/role-selection')}
+                        className="flex items-center gap-1.5 px-2 py-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors group"
+                        title="Cambiar de Rol"
+                    >
+                        <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:rotate-180 duration-500" />
+                        <span className="text-xs font-medium hidden sm:inline">Cambiar de Rol</span>
+                    </button>
+                )}
 
                 {/* Contenedor del Dropdown */}
                 <div className="relative">
@@ -96,6 +113,9 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
                                     Configuración
                                 </Link>
                                 <div className="border-t border-gray-100 mt-1"></div>
+                                
+
+
                                 <button 
                                     onClick={() => {
                                         setIsDropdownOpen(false);
