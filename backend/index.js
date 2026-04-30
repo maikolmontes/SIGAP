@@ -25,6 +25,7 @@ app.use('/api/periodos', periodosRouter);
 app.use('/api/docente', docenteRouter);
 app.use('/api/user', userRouter);
 app.use('/api/director', require('./routes/director'));
+app.use('/api/semanas', require('./routes/semanas'));
 
 app.get('/api', (req, res) => {
     res.json({

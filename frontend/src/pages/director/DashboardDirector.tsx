@@ -64,12 +64,43 @@ export default function DashboardDirector() {
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [yaImporto, setYaImporto] = useState(false);
   
+  const [semanaActiva, setSemanaActiva] = useState(false);
+  const [tiempoRestanteTexto, setTiempoRestanteTexto] = useState('');
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileUpdateRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const init = async () => {
       try {
+        try {
+          const semanasRes = await api.get('/semanas');
+          const semanaCero = semanasRes.data.find((s: any) => s.numero_semana === '0');
+          if (semanaCero && semanaCero.habilitada && semanaCero.fecha_inicio && semanaCero.fecha_fin) {
+              const ahora = new Date();
+              const inicio = new Date(semanaCero.fecha_inicio);
+              inicio.setHours(0, 0, 0, 0);
+              const fin = new Date(semanaCero.fecha_fin);
+              fin.setHours(23, 59, 59, 999);
+              
+              if (ahora >= inicio && ahora <= fin) {
+                  setSemanaActiva(true);
+                  const diffMs = fin.getTime() - ahora.getTime();
+                  const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                  const horas = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                  setTiempoRestanteTexto(`Semana 0: ${dias}d ${horas}h restantes`);
+              } else {
+                  setSemanaActiva(false);
+                  setTiempoRestanteTexto('Semana 0 Finalizada');
+              }
+          } else {
+              setSemanaActiva(false);
+              setTiempoRestanteTexto(semanaCero ? 'Semana 0 Deshabilitada' : 'Sin Semana 0 Activa');
+          }
+        } catch (error) {
+            console.error("Error al cargar semanas:", error);
+        }
+
         // Verificar si ya hay asignaciones importadas
         const res = await api.get('/agenda/base/1'); // Check any user
         if (res.data?.funciones?.length > 0) {
@@ -155,10 +186,20 @@ export default function DashboardDirector() {
           <h1 className="text-3xl font-extrabold text-white mb-2 tracking-tight">
             Bienvenido, Director(a) {MOCK_DATA.director.nombre.split(' ')[0]}
           </h1>
-          <p className="text-blue-200 text-sm font-medium flex-wrap flex items-center gap-2">
-            <span className="bg-blue-900/50 px-2 py-1 rounded-md mb-2 sm:mb-0">{MOCK_DATA.director.programa}</span>
-            <span className="bg-white/10 px-2 py-1 rounded-md mb-0">Período Activo: {MOCK_DATA.director.periodo}</span>
-          </p>
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <p className="text-blue-200 text-sm font-medium flex items-center gap-2">
+              <span className="bg-blue-900/50 px-2 py-1 rounded-md">{MOCK_DATA.director.programa}</span>
+              <span className="bg-white/10 px-2 py-1 rounded-md">Período Activo: {MOCK_DATA.director.periodo}</span>
+            </p>
+            {tiempoRestanteTexto && (
+              <div className={`px-3 py-1 rounded-md font-bold text-xs ${semanaActiva ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
+                  <div className="flex items-center justify-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      {tiempoRestanteTexto}
+                  </div>
+              </div>
+            )}
+          </div>
         </div>
         
         <div className="relative z-10 mt-2 xl:mt-0 w-full xl:w-auto flex flex-col sm:flex-row gap-3">

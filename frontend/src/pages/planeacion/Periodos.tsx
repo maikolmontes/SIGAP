@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Layout from '../../components/common/Layout'
 // @ts-ignore
-import { getPeriodos, createPeriodo, cerrarPeriodo, getDocentesPeriodo, asignarDocentesPeriodo, desasignarDocentePeriodo } from '../../services/periodosService'
+import { getPeriodos, createPeriodo, cerrarPeriodo, habilitarPeriodo, getDocentesPeriodo, asignarDocentesPeriodo, desasignarDocentePeriodo } from '../../services/periodosService'
 // @ts-ignore
 import { getUsuarios } from '../../services/usuariosService'
 
@@ -51,10 +51,14 @@ export default function Periodos() {
     const [cargandoDocentes, setCargandoDocentes] = useState(false)
     const [asignando, setAsignando] = useState(false)
 
-    // Confirmación de cerrar
+    // Confirmación de cerrar/habilitar
     const [modalCerrar, setModalCerrar] = useState(false)
     const [periodoCerrar, setPeriodoCerrar] = useState<Periodo | null>(null)
     const [cerrando, setCerrando] = useState(false)
+    
+    const [modalHabilitar, setModalHabilitar] = useState(false)
+    const [periodoHabilitar, setPeriodoHabilitar] = useState<Periodo | null>(null)
+    const [habilitando, setHabilitando] = useState(false)
 
     // Modal de reportes
     const [modalReportes, setModalReportes] = useState(false)
@@ -127,6 +131,24 @@ export default function Periodos() {
             setError(err.response?.data?.error || 'Error al cerrar el período.')
         } finally {
             setCerrando(false)
+        }
+    }
+
+    const handleHabilitar = async () => {
+        if (!periodoHabilitar) return
+        try {
+            setHabilitando(true)
+            setError('')
+            await habilitarPeriodo(periodoHabilitar.id_periodo)
+            setModalHabilitar(false)
+            setPeriodoHabilitar(null)
+            setExito('Período habilitado correctamente.')
+            setTimeout(() => setExito(''), 4000)
+            await cargarPeriodos()
+        } catch (err: any) {
+            setError(err.response?.data?.error || 'Error al habilitar el período.')
+        } finally {
+            setHabilitando(false)
         }
     }
 
@@ -384,6 +406,13 @@ export default function Periodos() {
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                                         Ver reportes
                                                     </button>
+                                                    <button
+                                                        onClick={() => { setPeriodoHabilitar(p); setModalHabilitar(true) }}
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600 border border-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium shadow-sm ml-auto"
+                                                    >
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                                        Habilitar
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -532,6 +561,38 @@ export default function Periodos() {
                                 className="px-5 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2"
                             >
                                 {cerrando ? 'Cerrando...' : 'Sí, cerrar período'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ══════════ MODAL HABILITAR PERÍODO ══════════ */}
+            {modalHabilitar && periodoHabilitar && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
+                        <div className="px-6 py-8 text-center">
+                            <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-900 mb-2">¿Habilitar período {etiquetaPeriodo(periodoHabilitar)}?</h3>
+                            <p className="text-sm text-gray-500">
+                                Esta acción volverá a establecer el período como activo. Al hacerlo, las ventanas de semanas y reportes estarán vinculadas a este ciclo.
+                            </p>
+                        </div>
+                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-center gap-3">
+                            <button
+                                onClick={() => { setModalHabilitar(false); setPeriodoHabilitar(null) }}
+                                className="px-5 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleHabilitar}
+                                disabled={habilitando}
+                                className="px-5 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {habilitando ? 'Habilitando...' : 'Sí, habilitar período'}
                             </button>
                         </div>
                     </div>

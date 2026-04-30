@@ -188,7 +188,10 @@ const getAgendaBase = async (req, res) => {
                 d.meta,
                 
                 i.id_indicadores as id_indicador,
-                i.nombre_indicador
+                i.nombre_indicador,
+                i.ejecucion_8,
+                i.ejecucion_16,
+                i.observaciones
                 
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af    ON ua.id_funciones     = af.id_funciones
@@ -294,4 +297,43 @@ const guardarFuncionDocente = async (req, res) => {
     }
 };
 
-module.exports = { getAgenda, getAgendaBase, guardarFuncionDocente };
+const guardarAvanceDocente = async (req, res) => {
+    const { indicadores } = req.body;
+
+    if (!indicadores || !Array.isArray(indicadores)) {
+        return res.status(400).json({ error: 'Se requiere un arreglo de indicadores con su ejecución.' });
+    }
+
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        for (const ind of indicadores) {
+            await client.query(`
+                UPDATE indicadores 
+                SET ejecucion_8 = $1, 
+                    ejecucion_16 = $2, 
+                    observaciones = $3
+                WHERE id_indicadores = $4
+            `, [
+                ind.ejecucion_8 || 0, 
+                ind.ejecucion_16 || 0, 
+                ind.observaciones || '',
+                ind.id_indicador
+            ]);
+        }
+
+        await client.query('COMMIT');
+        res.json({ mensaje: 'Avance guardado correctamente.' });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en guardarAvanceDocente:', error.message);
+        res.status(500).json({ error: 'Error al guardar el avance.', detalles: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+module.exports = { getAgenda, getAgendaBase, guardarFuncionDocente, guardarAvanceDocente };

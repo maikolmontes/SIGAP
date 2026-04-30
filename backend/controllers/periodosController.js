@@ -130,6 +130,33 @@ const cerrar = async (req, res) => {
     }
 };
 
+const habilitar = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const activo = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE');
+        if (activo.rows.length > 0) {
+            return res.status(409).json({
+                error: 'Ya existe un período activo. Debe cerrar el período actual antes de habilitar otro.'
+            });
+        }
+
+        const result = await pool.query(
+            'UPDATE periodo SET activo = TRUE WHERE id_periodo = $1 RETURNING *',
+            [id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Período no encontrado.' });
+        }
+        res.json({
+            mensaje: 'Período habilitado exitosamente.',
+            periodo: result.rows[0]
+        });
+    } catch (error) {
+        console.error('Error al habilitar período:', error);
+        res.status(500).json({ error: 'Error al habilitar el período.' });
+    }
+};
+
 const getDocentesAsignados = async (req, res) => {
     const { id } = req.params;
     try {
@@ -259,6 +286,7 @@ module.exports = {
     getById,
     create,
     cerrar,
+    habilitar,
     getDocentesAsignados,
     asignarDocentes,
     desasignarDocente

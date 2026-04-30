@@ -68,11 +68,44 @@ export default function DashboardDocente() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [semanaActiva, setSemanaActiva] = useState(false);
+  const [tiempoRestanteTexto, setTiempoRestanteTexto] = useState('');
+
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
         setLoading(true);
         setError(null);
+
+        // Fetch semanas para el indicador de Semana 0
+        try {
+          const semanasRes = await api.get('/semanas');
+          const semanaCero = semanasRes.data.find((s: any) => s.numero_semana === '0');
+          if (semanaCero && semanaCero.habilitada && semanaCero.fecha_inicio && semanaCero.fecha_fin) {
+              const ahora = new Date();
+              const inicio = new Date(semanaCero.fecha_inicio);
+              inicio.setHours(0, 0, 0, 0);
+              const fin = new Date(semanaCero.fecha_fin);
+              fin.setHours(23, 59, 59, 999);
+              
+              if (ahora >= inicio && ahora <= fin) {
+                  setSemanaActiva(true);
+                  const diffMs = fin.getTime() - ahora.getTime();
+                  const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                  const horas = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                  setTiempoRestanteTexto(`Semana 0 (Planeación): ${dias}d ${horas}h restantes`);
+              } else {
+                  setSemanaActiva(false);
+                  setTiempoRestanteTexto('Semana 0 Finalizada');
+              }
+          } else {
+              setSemanaActiva(false);
+              setTiempoRestanteTexto(semanaCero ? 'Semana 0 Deshabilitada' : 'Sin Semana 0 Activa');
+          }
+        } catch (error) {
+            console.error("Error al cargar semanas:", error);
+        }
+
         const response = await api.get('/docente/dashboard');
         setData(response.data);
       } catch (err: any) {
@@ -149,10 +182,20 @@ export default function DashboardDocente() {
               {docente.programa} · {docente.tipoContrato}
             </p>
           </div>
-          <button className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-lg text-white text-sm font-medium transition-colors border border-white/20">
-            <Download className="w-4 h-4" />
-            Descargar Informe
-          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+            {tiempoRestanteTexto && (
+              <div className={`px-4 py-2 w-full sm:w-auto rounded-lg font-bold text-sm shrink-0 ${semanaActiva ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
+                  <div className="flex items-center justify-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      {tiempoRestanteTexto}
+                  </div>
+              </div>
+            )}
+            <button className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-lg text-white text-sm font-medium transition-colors border border-white/20">
+              <Download className="w-4 h-4" />
+              Descargar Informe
+            </button>
+          </div>
         </div>
 
         {/* Métricas - Basadas en funciones del Docente (DIAGRAMAER.md) */}

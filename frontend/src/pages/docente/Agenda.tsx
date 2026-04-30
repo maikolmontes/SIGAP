@@ -40,6 +40,9 @@ export default function AgendaDocente() {
     const [mensaje, setMensaje] = useState<{ tipo: 'exito' | 'error', texto: string } | null>(null);
     const [activeFunctionIndex, setActiveFunctionIndex] = useState(0);
 
+    const [semanaActiva, setSemanaActiva] = useState(false);
+    const [tiempoRestanteTexto, setTiempoRestanteTexto] = useState('');
+
     // Mapeo dinámico del catálogo
     const getActividadesDelCatalogo = (funcionNombre: string, sourceCatalogo = catalogoGlobal) => {
         const funcItem = sourceCatalogo.find((c: any) => c.funcion_sustantiva === funcionNombre);
@@ -62,6 +65,35 @@ export default function AgendaDocente() {
         const cargarData = async () => {
             setCargandoEspacios(true);
             try {
+                try {
+                    const semanasRes = await axios.get('http://localhost:3000/api/semanas');
+                    const semanaCero = semanasRes.data.find((s: any) => s.numero_semana === '0');
+                    if (semanaCero && semanaCero.habilitada && semanaCero.fecha_inicio && semanaCero.fecha_fin) {
+                        const ahora = new Date();
+                        const inicio = new Date(semanaCero.fecha_inicio);
+                        inicio.setHours(0, 0, 0, 0);
+                        const fin = new Date(semanaCero.fecha_fin);
+                        fin.setHours(23, 59, 59, 999);
+                        
+                        if (ahora >= inicio && ahora <= fin) {
+                            setSemanaActiva(true);
+                            const diffMs = fin.getTime() - ahora.getTime();
+                            const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                            const horas = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                            setTiempoRestanteTexto(`Tiempo restante: ${dias} días / ${horas} horas`);
+                        } else {
+                            setSemanaActiva(false);
+                            setTiempoRestanteTexto('Semana finalizada');
+                        }
+                    } else {
+                        setSemanaActiva(false);
+                        setTiempoRestanteTexto(semanaCero ? 'Semana 0 Deshabilitada' : 'Semana finalizada');
+                    }
+                } catch (error) {
+                    console.error("Error al cargar semanas:", error);
+                    setSemanaActiva(true); // Fallback en caso de error
+                }
+
                 const catRes = await axios.get('http://localhost:3000/api/funciones/catalogo');
                 const catalogoData = catRes.data;
                 setCatalogoGlobal(catalogoData);
@@ -266,14 +298,33 @@ export default function AgendaDocente() {
     return (
         <Layout rol="docente" path="Agenda / Crear Agenda">
             <div className="bg-[#1a2744] rounded-xl px-6 py-6 mb-6 shadow-sm">
-                <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                    <BookOpen className="w-6 h-6 text-blue-400" />
-                    Planificación de Agenda
-                </h1>
-                <p className="text-blue-100 text-sm mt-1">
-                    Completa la información importada por tu director utilizando el catálogo oficial. Presiona <strong>Aceptar</strong> en cada función para confirmar.
-                </p>
+                <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+                    <div>
+                        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                            <BookOpen className="w-6 h-6 text-blue-400" />
+                            Planificación de Agenda
+                        </h1>
+                        <p className="text-blue-100 text-sm mt-1">
+                            Completa la información importada por tu director utilizando el catálogo oficial. Presiona <strong>Aceptar</strong> en cada función para confirmar.
+                        </p>
+                    </div>
+                    {tiempoRestanteTexto && (
+                        <div className={`px-4 py-2 rounded-lg font-bold text-sm shrink-0 ${semanaActiva ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
+                            <div className="flex items-center gap-2">
+                                <Clock className="w-4 h-4" />
+                                {tiempoRestanteTexto}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
+
+            {!semanaActiva && !cargandoEspacios && tiempoRestanteTexto && (
+                <div className="p-4 mb-6 rounded-xl flex items-start gap-3 bg-red-50 border border-red-200 text-red-800">
+                    <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                    <p className="font-medium text-sm">La Semana 0 está cerrada. Ya no es posible modificar la agenda.</p>
+                </div>
+            )}
 
             {mensaje && (
                 <div className={`p-4 mb-6 rounded-xl flex items-start gap-3 border ${mensaje.tipo === 'exito' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
@@ -411,9 +462,10 @@ export default function AgendaDocente() {
                                                                 />
                                                             ) : (
                                                                 <select
-                                                                    className={`w-full border ${!actividad.actividadLibre ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'} rounded-lg px-3 py-2 text-sm focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none`}
+                                                                    className={`w-full border ${!actividad.actividadLibre ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'} rounded-lg px-3 py-2 text-sm focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none disabled:opacity-60 disabled:bg-gray-100`}
                                                                     value={actividad.actividadLibre}
                                                                     onChange={(e) => cambiarActividad(fIndex, aIndex, 'actividadLibre', e.target.value)}
+                                                                    disabled={!semanaActiva}
                                                                 >
                                                                     <option value="">Seleccionar actividad del catálogo...</option>
                                                                     {catsActs.map((act:any) => (
@@ -427,7 +479,8 @@ export default function AgendaDocente() {
                                                                 <input
                                                                     type="text"
                                                                     placeholder="Escribe la actividad"
-                                                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-2 text-sm focus:border-purple-500 focus:ring-1 outline-none"
+                                                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-2 text-sm focus:border-purple-500 focus:ring-1 outline-none disabled:opacity-60 disabled:bg-gray-100"
+                                                                    disabled={!semanaActiva}
                                                                 />
                                                             )}
                                                         </div>
@@ -454,11 +507,12 @@ export default function AgendaDocente() {
                                                                         Descripción de Resultados <span className="text-gray-400 font-normal">(Escribe libremente)</span>
                                                                     </label>
                                                                     <textarea
-                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none bg-white resize-y min-h-[60px]"
+                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100"
                                                                         rows={2}
                                                                         placeholder="Describe qué actividades realizarás en docencia indirecta..."
                                                                         value={actividad.resultadoEsperado}
                                                                         onChange={(e) => cambiarActividad(fIndex, aIndex, 'resultadoEsperado', e.target.value)}
+                                                                        disabled={!semanaActiva}
                                                                     />
                                                                 </div>
 
@@ -467,11 +521,12 @@ export default function AgendaDocente() {
                                                                         <Target className="w-3.5 h-3.5" /> Construcción de Fichas de Desarrollo Temático
                                                                     </label>
                                                                     <textarea
-                                                                        className="w-full border border-cyan-200 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none bg-white resize-y min-h-[60px]"
+                                                                        className="w-full border border-cyan-200 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100"
                                                                         rows={2}
                                                                         placeholder="Describe las fichas de desarrollo temático..."
                                                                         value={actividad.indicadores[0]?.nombre_indicador || ''}
                                                                         onChange={(e) => cambiarIndicador(fIndex, aIndex, 0, e.target.value)}
+                                                                        disabled={!semanaActiva}
                                                                     />
                                                                 </div>
                                                             </>
@@ -491,10 +546,10 @@ export default function AgendaDocente() {
                                                                     />
                                                                 ) : (
                                                                     <select
-                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white transition-colors"
+                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white transition-colors disabled:opacity-60 disabled:bg-gray-100"
                                                                         value={actividad.resultadoEsperado}
                                                                         onChange={(e) => cambiarActividad(fIndex, aIndex, 'resultadoEsperado', e.target.value)}
-                                                                        disabled={!actividad.actividadLibre || actividad.actividadLibre==='otro'}
+                                                                        disabled={!semanaActiva || !actividad.actividadLibre || actividad.actividadLibre==='otro'}
                                                                     >
                                                                         <option value="">
                                                                             {!actividad.actividadLibre 
@@ -514,10 +569,11 @@ export default function AgendaDocente() {
                                                                     </label>
                                                                     <input
                                                                         type="number"
-                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white"
+                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white disabled:opacity-60 disabled:bg-gray-100"
                                                                         value={actividad.meta}
                                                                         onChange={(e) => cambiarActividad(fIndex, aIndex, 'meta', parseInt(e.target.value) || '')}
                                                                         placeholder="100"
+                                                                        disabled={!semanaActiva}
                                                                     />
                                                                 </div>
                                                             )}
@@ -532,7 +588,8 @@ export default function AgendaDocente() {
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => agregarIndicador(fIndex, aIndex)}
-                                                                        className="text-[11px] font-bold text-orange-600 bg-orange-100 hover:bg-orange-200 px-2 py-1 rounded transition-colors flex items-center gap-1"
+                                                                        className="text-[11px] font-bold text-orange-600 bg-orange-100 hover:bg-orange-200 px-2 py-1 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                        disabled={!semanaActiva}
                                                                     >
                                                                         <Plus className="w-3 h-3" /> Añadir 
                                                                     </button>
@@ -544,10 +601,10 @@ export default function AgendaDocente() {
                                                                             <div className="relative flex-1">
                                                                                 <div className="absolute left-3 top-2.5 w-1.5 h-1.5 bg-orange-400 rounded-full"></div>
                                                                                 <select
-                                                                                    className="w-full border border-orange-200 rounded-md pl-7 pr-3 py-1.5 text-xs outline-none bg-white font-medium text-orange-900"
+                                                                                    className="w-full border border-orange-200 rounded-md pl-7 pr-3 py-1.5 text-xs outline-none bg-white font-medium text-orange-900 disabled:opacity-60 disabled:bg-gray-100"
                                                                                     value={ind.nombre_indicador}
                                                                                     onChange={(e) => cambiarIndicador(fIndex, aIndex, iIndex, e.target.value)}
-                                                                                    disabled={!actividad.resultadoEsperado || actividad.resultadoEsperado==='otro'}
+                                                                                    disabled={!semanaActiva || !actividad.resultadoEsperado || actividad.resultadoEsperado==='otro'}
                                                                                 >
                                                                                     <option value="">
                                                                                         {!actividad.resultadoEsperado 
@@ -563,7 +620,8 @@ export default function AgendaDocente() {
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => eliminarIndicador(fIndex, aIndex, iIndex)}
-                                                                                    className="text-gray-400 hover:text-red-500 p-1.5 rounded self-start mt-0.5"
+                                                                                    className="text-gray-400 hover:text-red-500 p-1.5 rounded self-start mt-0.5 disabled:opacity-50 disabled:hover:text-gray-400 disabled:cursor-not-allowed"
+                                                                                    disabled={!semanaActiva}
                                                                                 >
                                                                                     <Trash2 className="w-3.5 h-3.5" />
                                                                                 </button>
@@ -593,8 +651,8 @@ export default function AgendaDocente() {
                                             <div className="ml-auto">
                                                 <button
                                                     onClick={() => aceptarFuncion(fIndex)}
-                                                    disabled={guardando}
-                                                    className={`px-6 py-2.5 font-bold rounded-lg shadow-md flex items-center gap-2 transition-all transform hover:scale-105 disabled:opacity-50 ${
+                                                    disabled={guardando || !semanaActiva}
+                                                    className={`px-6 py-2.5 font-bold rounded-lg shadow-md flex items-center gap-2 transition-all transform hover:scale-105 disabled:opacity-50 disabled:transform-none disabled:cursor-not-allowed ${
                                                         funcion.estadoAgenda === 'Aceptado'
                                                             ? 'bg-green-600 hover:bg-green-700 text-white shadow-green-500/20'
                                                             : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20'

@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
+import api from '../../services/api'
 
 type MenuItem = {
     label: string;
@@ -46,15 +48,40 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ rol, onClose }: SidebarProps) {
+    const [periodoEtiqueta, setPeriodoEtiqueta] = useState<string>('Cargando...')
+    const [tienePeriodo, setTienePeriodo] = useState<boolean>(false)
     const menu = rol === 'planeacion' ? menuPlaneacion : rol === 'director' ? menuDirector : menuDocente
     const rolLabel = rol === 'planeacion' ? 'Planeación' : rol === 'director' ? 'Director' : 'Docente'
+
+    useEffect(() => {
+        const fetchPeriodoActivo = async () => {
+            try {
+                const res = await api.get('/periodos')
+                const activo = res.data.find((p: any) => p.activo)
+                if (activo) {
+                    setPeriodoEtiqueta(`${activo.anio}-${activo.semestre === 1 ? 'I' : 'II'}`)
+                    setTienePeriodo(true)
+                } else {
+                    setPeriodoEtiqueta('Sin período activo')
+                    setTienePeriodo(false)
+                }
+            } catch (error) {
+                console.error("Error cargando periodo en sidebar:", error)
+                setPeriodoEtiqueta('Desconocido')
+                setTienePeriodo(false)
+            }
+        }
+        fetchPeriodoActivo()
+    }, [])
 
     return (
         <aside className="w-64 h-screen overflow-y-auto bg-[#063759] flex flex-col shadow-2xl lg:shadow-none overflow-x-hidden relative">
             <div className="px-4 py-5 border-b border-white/10 flex justify-between items-center sticky top-0 bg-[#063759] z-10">
                 <div>
                     <div className="text-white font-bold text-sm tracking-wide">SIGAP</div>
-                    <div className="text-white/60 text-xs mt-0.5">{rolLabel} · 2025 IIP</div>
+                    <div className="text-white/60 text-xs mt-0.5">
+                        {rolLabel} {tienePeriodo && `· ${periodoEtiqueta}`}
+                    </div>
                 </div>
                 {onClose && (
                     <button onClick={onClose} className="lg:hidden text-white/50 hover:text-white p-1 rounded-md transition-colors">
@@ -68,7 +95,7 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
             <div className="px-3 py-4">
                 <div className="bg-white/10 border border-white/5 rounded-lg px-3 py-2.5">
                     <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider mb-0.5">Período activo</div>
-                    <div className="text-white text-sm font-medium">2025 IIP</div>
+                    <div className="text-white text-sm font-medium">{periodoEtiqueta}</div>
                 </div>
             </div>
 
