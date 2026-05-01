@@ -28,7 +28,7 @@ const mapFuncionSustantiva = async (client, programaStr) => {
         { keywords: ['admin'], funcion: null },
         { keywords: ['calidad', 'aseguramiento'], funcion: null },
         { keywords: ['indirecta'], funcion: null },
-        { keywords: ['vicerrectoria', 'vicerrectoría'], funcion: null },
+        { keywords: ['vicerrectoria', 'vicerrectoría', 'proyeccion', 'proyección'], funcion: null },
     ];
     
     // Llenar con los nombres reales del catálogo
@@ -113,6 +113,10 @@ const fuzzyMatch = (excelStr, dbStr) => {
 // Calcular score de match para ranking
 // ================================================================
 const calcFuzzyScore = (excelStr, dbStr) => {
+    const exAlpha = String(excelStr).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
+    const dbAlpha = String(dbStr).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (exAlpha === dbAlpha) return 1000;
+    
     const excelWords = String(excelStr).toLowerCase().split(/\s+/);
     const dbWords = String(dbStr).toLowerCase().split(/\s+/);
     let score = 0;
@@ -331,9 +335,10 @@ const importarAsignaciones = async (req, res) => {
             const programasRaw = row['programas'];
             const horasRaw = row['horas'];
             
+            if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
+
             if (!inscripcion) {
                 if (!programasRaw && !asignaturas) continue;
-                if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
                 errores.push(`Fila ${i+2}: No tiene campo Inscripción.`);
                 continue;
             }
@@ -523,9 +528,10 @@ const actualizarImportacion = async (req, res) => {
             const programasRaw = row['programas'];
             const horasRaw = row['horas'];
             
+            if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
+
             if (!inscripcion) {
                 if (!programasRaw && !asignaturas) continue;
-                if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
                 errores.push(`Fila ${i+2}: No tiene campo Inscripción.`);
                 continue;
             }
