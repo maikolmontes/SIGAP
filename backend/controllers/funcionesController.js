@@ -128,7 +128,7 @@ const getCatalogoJerarquico = async (req, res) => {
                         const d = {
                             id_descripcion: row.id_descripcion,
                             resultado_esperado: row.resultado_esperado,
-                            meta: row.meta,
+                            meta: '',
                             indicadores: []
                         };
                         descMap.set(row.id_descripcion, d);

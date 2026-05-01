@@ -262,7 +262,7 @@ const guardarFuncionDocente = async (req, res) => {
                 const descRes = await client.query(`
                     INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta)
                     VALUES ($1, $2, $3) RETURNING id_descripcion
-                `, [idAct, resultadoEsperado, meta || '1']);
+                `, [idAct, resultadoEsperado, meta || null]);
 
                 const idDescripcion = descRes.rows[0].id_descripcion;
 
