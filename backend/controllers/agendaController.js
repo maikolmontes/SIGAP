@@ -182,7 +182,8 @@ const getAgendaBase = async (req, res) => {
                 ea.codigo_espacio,
                 ea.nombre_espacio,
                 ea.id_espacio_aca,
-                
+                s.nombre_sem AS semestre_nombre,
+
                 d.id_descripcion,
                 d.resultado_esperado,
                 d.meta,
@@ -197,6 +198,7 @@ const getAgendaBase = async (req, res) => {
             JOIN asignacion_funciones af    ON ua.id_funciones     = af.id_funciones
             JOIN asignacion_actividades aa  ON af.id_funciones     = aa.id_funciones
             LEFT JOIN espacio_academico ea  ON aa.id_espacio_aca   = ea.id_espacio_aca
+            LEFT JOIN semestres s           ON ea.id_semestre      = s.id_semestre
             LEFT JOIN descripcion d         ON aa.id_asignacionact = d.id_asignacionact
             LEFT JOIN indicadores i         ON i.id_descripcion    = d.id_descripcion
             WHERE ua.id_usuario = $1
@@ -248,8 +250,8 @@ const guardarFuncionDocente = async (req, res) => {
                 );
             }
 
-            // Si hay resultado esperado, gestionar descripción e indicadores
-            if (idAct && resultadoEsperado) {
+            // Si hay resultado esperado o descripciones fijas, gestionar descripción e indicadores
+            if (idAct && (resultadoEsperado || (act.descripciones && act.descripciones.length > 0))) {
                 // Borrar indicadores y descripciones anteriores de esta actividad
                 await client.query(`
                     DELETE FROM indicadores WHERE id_descripcion IN (
@@ -258,21 +260,27 @@ const guardarFuncionDocente = async (req, res) => {
                 `, [idAct]);
                 await client.query('DELETE FROM descripcion WHERE id_asignacionact = $1', [idAct]);
 
-                // Insertar nueva descripción
-                const descRes = await client.query(`
-                    INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta)
-                    VALUES ($1, $2, $3) RETURNING id_descripcion
-                `, [idAct, resultadoEsperado, meta || null]);
+                const descsToInsert = act.descripciones && act.descripciones.length > 0
+                    ? act.descripciones
+                    : [{ resultadoEsperado, meta, indicadores }];
 
-                const idDescripcion = descRes.rows[0].id_descripcion;
+                for (const descData of descsToInsert) {
+                    // Insertar nueva descripción
+                    const descRes = await client.query(`
+                        INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta)
+                        VALUES ($1, $2, $3) RETURNING id_descripcion
+                    `, [idAct, descData.resultadoEsperado, descData.meta || null]);
 
-                // Insertar indicadores
-                for (const ind of indicadores) {
-                    if (ind.nombre_indicador) {
-                        await client.query(`
-                            INSERT INTO indicadores (id_descripcion, nombre_indicador)
-                            VALUES ($1, $2)
-                        `, [idDescripcion, ind.nombre_indicador]);
+                    const idDescripcion = descRes.rows[0].id_descripcion;
+
+                    // Insertar indicadores
+                    for (const ind of descData.indicadores) {
+                        if (ind.nombre_indicador) {
+                            await client.query(`
+                                INSERT INTO indicadores (id_descripcion, nombre_indicador)
+                                VALUES ($1, $2)
+                            `, [idDescripcion, ind.nombre_indicador]);
+                        }
                     }
                 }
             }

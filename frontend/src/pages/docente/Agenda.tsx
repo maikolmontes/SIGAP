@@ -17,6 +17,9 @@ interface Actividad {
     resultadoEsperado: string;
     meta: number | '';
     indicadores: Indicador[];
+    semestre?: string;
+    grupo?: string;
+    nombreEspacio?: string;
 }
 
 interface FuncionBloque {
@@ -112,11 +115,14 @@ export default function AgendaDocente() {
                                 actMap.set(act.id_asignacionact, {
                                     id: act.id_asignacionact,
                                     idEspacioAcademico: act.id_espacio_aca || '',
-                                    actividadLibre: act.rol_seleccionado || '',
+                                    actividadLibre: f.funcion_sustantiva === 'Docencia Directa' ? '' : (act.rol_seleccionado || ''),
                                     horasActividad: parseFloat(act.horas_rol) || '',
                                     resultadoEsperado: act.resultado_esperado || '',
                                     meta: act.meta ? parseInt(act.meta) : '',
-                                    indicadores: []
+                                    indicadores: [],
+                                    semestre: f.funcion_sustantiva === 'Docencia Directa' ? act.semestre_nombre : act.semestre_nombre,
+                                    grupo: f.funcion_sustantiva === 'Docencia Directa' ? (act.rol_seleccionado ? act.rol_seleccionado.replace(act.semestre_nombre, '') : 'N/A') : act.grupo_nombre,
+                                    nombreEspacio: act.nombre_espacio
                                 });
                             }
                             const mappedA = actMap.get(act.id_asignacionact);
@@ -249,11 +255,16 @@ export default function AgendaDocente() {
         const erroresValidacion: string[] = [];
         funcion.actividades.forEach((act, i) => {
             const num = i + 1;
-            if (!act.actividadLibre) erroresValidacion.push(`Actividad ${num}: Falta seleccionar la actividad del catálogo.`);
-            if (!act.resultadoEsperado) erroresValidacion.push(`Actividad ${num}: Falta seleccionar la descripción/resultado esperado.`);
-            if (!act.meta && act.meta !== 0) erroresValidacion.push(`Actividad ${num}: Falta ingresar la meta (%).`);
-            const tieneIndicador = act.indicadores.some(ind => ind.nombre_indicador && ind.nombre_indicador.trim() !== '');
-            if (!tieneIndicador) erroresValidacion.push(`Actividad ${num}: Falta al menos un indicador (entregable).`);
+            const esIndirecta = funcion.funcionSustantiva === 'Docencia Indirecta';
+            const esDirecta = funcion.funcionSustantiva === 'Docencia Directa';
+            
+            if (!esDirecta) {
+                if (!act.actividadLibre) erroresValidacion.push(`Actividad ${num}: Falta seleccionar la actividad del catálogo.`);
+                if (!act.resultadoEsperado) erroresValidacion.push(`Actividad ${num}: Falta seleccionar la descripción/resultado esperado.`);
+                if (!esIndirecta && !act.meta && act.meta !== 0) erroresValidacion.push(`Actividad ${num}: Falta ingresar la meta (%).`);
+                const tieneIndicador = act.indicadores.some(ind => ind.nombre_indicador && ind.nombre_indicador.trim() !== '');
+                if (!tieneIndicador) erroresValidacion.push(`Actividad ${num}: Falta al menos un indicador (entregable).`);
+            }
         });
 
         if (erroresValidacion.length > 0) {
@@ -270,13 +281,28 @@ export default function AgendaDocente() {
         try {
             const payload = {
                 id_funciones: funcion.id,
-                actividades: funcion.actividades.map(a => ({
-                    id_asignacionact: a.id,
-                    actividadLibre: a.actividadLibre,
-                    resultadoEsperado: a.resultadoEsperado,
-                    meta: a.meta,
-                    indicadores: a.indicadores
-                }))
+                actividades: funcion.actividades.map(a => {
+                    const esDirecta = funcion.funcionSustantiva === 'Docencia Directa';
+                    if (esDirecta) {
+                        return {
+                            id_asignacionact: a.id,
+                            actividadLibre: a.nombreEspacio || 'Espacio Académico',
+                            descripciones: [
+                                { resultadoEsperado: 'Microcurrículo y ficha temática actualizados', meta: 2, indicadores: [{ nombre_indicador: 'Microcurrículo y ficha aprobados y cargados en el sistema institucional' }] },
+                                { resultadoEsperado: 'Desarrollo de espacio académico', meta: 16, indicadores: [{ nombre_indicador: 'Registros de seguimiento semana a semana en el sistema académico institucional' }] },
+                                { resultadoEsperado: 'Registro de calificaciones', meta: 3, indicadores: [{ nombre_indicador: 'Registros de calificaciones en el sistema académico institucional' }] },
+                                { resultadoEsperado: 'Entrega física de notas finales firmadas por el docente', meta: 1, indicadores: [{ nombre_indicador: 'Evidencia de entrega de notas finales' }] }
+                            ]
+                        };
+                    }
+                    return {
+                        id_asignacionact: a.id,
+                        actividadLibre: a.actividadLibre,
+                        resultadoEsperado: a.resultadoEsperado,
+                        meta: funcion.funcionSustantiva === 'Docencia Indirecta' ? 1 : a.meta,
+                        indicadores: a.indicadores
+                    };
+                })
             };
             await axios.post('http://localhost:3000/api/agenda/guardar-funcion', payload);
             
@@ -391,7 +417,7 @@ export default function AgendaDocente() {
                         const fIndex = activeFunctionIndex;
                         const esDocenciaDirecta = funcion.funcionSustantiva === 'Docencia Directa';
                         const esIndirecta = funcion.funcionSustantiva === 'Docencia Indirecta';
-                        const esDeshabilitado = esDocenciaDirecta;
+                        const esDeshabilitado = false;
 
                         return (
                         <div className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden relative ${esDeshabilitado ? 'border-gray-200 opacity-60' : 'border-blue-100'}`}>
@@ -445,10 +471,22 @@ export default function AgendaDocente() {
                                                     <div className="lg:col-span-12 xl:col-span-5 space-y-4">
                                                         <div>
                                                             <label className="block text-xs font-bold text-gray-700 mb-1.5 flex justify-between">
-                                                                <span>Actividad según Base de Datos</span>
-                                                                {!actividad.actividadLibre && !esDeshabilitado && !esIndirecta && <span className="text-red-500 font-normal">Falta Seleccionar</span>}
+                                                                <span>{esDocenciaDirecta ? 'Espacio Académico (Asignatura)' : 'Actividad según Base de Datos'}</span>
+                                                                {!actividad.actividadLibre && !esDeshabilitado && !esIndirecta && !esDocenciaDirecta && <span className="text-red-500 font-normal">Falta Seleccionar</span>}
                                                             </label>
-                                                            {esDeshabilitado ? (
+                                                            {esDocenciaDirecta ? (
+                                                                <div>
+                                                                    <input 
+                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 font-semibold text-blue-900 mb-2"
+                                                                        readOnly
+                                                                        value={actividad.nombreEspacio || actividad.actividadLibre || 'Cargando Espacio...'}    
+                                                                    />
+                                                                    <div className="flex gap-2">
+                                                                        <span className="text-xs bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-md font-medium border border-indigo-200">Semestre: {actividad.semestre || 'N/A'}</span>
+                                                                        <span className="text-xs bg-purple-100 text-purple-800 px-2.5 py-1 rounded-md font-medium border border-purple-200">Grupo: {actividad.grupo || 'N/A'}</span>
+                                                                    </div>
+                                                                </div>
+                                                            ) : esDeshabilitado ? (
                                                                 <input 
                                                                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 italic"
                                                                     readOnly
@@ -499,8 +537,32 @@ export default function AgendaDocente() {
                                                     </div>
 
                                                     <div className="lg:col-span-12 xl:col-span-7 space-y-4">
-                                                        {/* === LAYOUT DOCENCIA INDIRECTA === */}
-                                                        {esIndirecta ? (
+                                                        {/* === LAYOUT DOCENCIA DIRECTA === */}
+                                                        {esDocenciaDirecta ? (
+                                                            <div className="bg-blue-50/50 rounded-xl p-5 border border-blue-100">
+                                                                <h4 className="text-sm font-bold text-blue-900 mb-4 flex items-center gap-2">
+                                                                    <BookOpen className="w-4 h-4" /> Desglose Fijo de Actividades
+                                                                </h4>
+                                                                <div className="space-y-3">
+                                                                    {[
+                                                                        { d: 'Microcurrículo y ficha temática actualizados', m: 2, i: 'Microcurrículo y ficha aprobados y cargados en el sistema institucional' },
+                                                                        { d: 'Desarrollo de espacio académico', m: 16, i: 'Registros de seguimiento semana a semana en el sistema académico institucional' },
+                                                                        { d: 'Registro de calificaciones', m: 3, i: 'Registros de calificaciones en el sistema académico institucional' },
+                                                                        { d: 'Entrega física de notas finales firmadas por el docente', m: 1, i: 'Evidencia de entrega de notas finales' }
+                                                                    ].map((item, idx) => (
+                                                                        <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200 text-xs">
+                                                                            <div className="flex justify-between items-start mb-2">
+                                                                                <span className="font-bold text-gray-800">{item.d}</span>
+                                                                                <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold whitespace-nowrap ml-2">Meta: {item.m}</span>
+                                                                            </div>
+                                                                            <div className="text-gray-600 flex items-center gap-1.5 mt-2 pt-2 border-t border-gray-100">
+                                                                                <Target className="w-3.5 h-3.5 text-gray-400" /> {item.i}
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ) : esIndirecta ? (
                                                             <>
                                                                 <div>
                                                                     <label className="block text-xs font-bold text-gray-700 mb-1.5">
