@@ -221,7 +221,7 @@ const importarAsignaciones = async (req, res) => {
     const normalizeObjectKeys = (obj) => {
         const newObj = {};
         for (let key in obj) {
-            const newKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+            const newKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
             newObj[newKey] = obj[key];
         }
         return newObj;
@@ -329,11 +329,11 @@ const importarAsignaciones = async (req, res) => {
         for (let i = 0; i < records.length; i++) {
             const row = normalizeObjectKeys(records[i]);
             
-            const inscripcion = row['inscripcion'];
-            const asignaturas = row['asignaturas'];
+            const inscripcion = row['inscripcion'] || row['documento'];
+            const asignaturas = row['asignaturas'] || row['espaciosacademicos'] || row['espacioacademico'];
             const semestreRaw = row['semestre'];
             const programasRaw = row['programas'];
-            const horasRaw = row['horas'];
+            const horasRaw = row['horas'] || row['horassemana'] || row['horassemanales'];
             
             if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
 
@@ -409,9 +409,17 @@ const importarAsignaciones = async (req, res) => {
                 await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
             }
 
-            // Buscar espacio académico
+            // Buscar o crear espacio académico
             let idEspacioAca = null;
-            if (asignaturas) {
+            if (funcionSustantivaStr === 'Docencia Directa' && asignaturas) {
+                const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 AND id_semestre = $2 LIMIT 1', [String(asignaturas).toLowerCase().trim(), idSemestre]);
+                if (espRes.rows.length > 0) {
+                    idEspacioAca = espRes.rows[0].id_espacio_aca;
+                } else {
+                    const newEsp = await client.query('INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca', [String(asignaturas).trim(), idSemestre]);
+                    idEspacioAca = newEsp.rows[0].id_espacio_aca;
+                }
+            } else if (asignaturas) {
                 const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 LIMIT 1', [String(asignaturas).toLowerCase().trim()]);
                 if (espRes.rows.length > 0) {
                     idEspacioAca = espRes.rows[0].id_espacio_aca;
@@ -426,6 +434,8 @@ const importarAsignaciones = async (req, res) => {
             console.log(`[IMPORT] Fila ${i+2}: Función="${funcionSustantivaStr}" | Asignatura="${asignaturas}" → Match=${matchResult ? matchResult.rolSeleccionado : 'NINGUNO'}`);
             if (matchResult) {
                 rolToInsert = matchResult.rolSeleccionado;
+            } else if (funcionSustantivaStr === 'Docencia Directa') {
+                rolToInsert = semestreRaw || ''; // Guardamos "6E-N" aquí para mostrarlo en el frontend
             } else {
                 // Si tiene catálogo pero no se encontró match, dejar vacío para que el docente elija
                 const esFuncionCatalogo = await client.query(`
@@ -522,11 +532,11 @@ const actualizarImportacion = async (req, res) => {
         for (let i = 0; i < records.length; i++) {
             const row = normalizeObjectKeys(records[i]);
             
-            const inscripcion = row['inscripcion'];
-            const asignaturas = row['asignaturas'];
+            const inscripcion = row['inscripcion'] || row['documento'];
+            const asignaturas = row['asignaturas'] || row['espaciosacademicos'] || row['espacioacademico'];
             const semestreRaw = row['semestre'];
             const programasRaw = row['programas'];
-            const horasRaw = row['horas'];
+            const horasRaw = row['horas'] || row['horassemana'] || row['horassemanales'];
             
             if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
 
@@ -591,9 +601,17 @@ const actualizarImportacion = async (req, res) => {
                 await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
             }
 
-            // Espacio académico
+            // Buscar o crear espacio académico
             let idEspacioAca = null;
-            if (asignaturas) {
+            if (funcionSustantivaStr === 'Docencia Directa' && asignaturas) {
+                const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 AND id_semestre = $2 LIMIT 1', [String(asignaturas).toLowerCase().trim(), idSemestre]);
+                if (espRes.rows.length > 0) {
+                    idEspacioAca = espRes.rows[0].id_espacio_aca;
+                } else {
+                    const newEsp = await client.query('INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca', [String(asignaturas).trim(), idSemestre]);
+                    idEspacioAca = newEsp.rows[0].id_espacio_aca;
+                }
+            } else if (asignaturas) {
                 const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 LIMIT 1', [String(asignaturas).toLowerCase().trim()]);
                 if (espRes.rows.length > 0) {
                     idEspacioAca = espRes.rows[0].id_espacio_aca;
@@ -606,6 +624,8 @@ const actualizarImportacion = async (req, res) => {
             console.log(`[ACTUALIZAR] Fila ${i+2}: Función="${funcionSustantivaStr}" | Asignatura="${asignaturas}" → Match=${matchResult ? matchResult.rolSeleccionado : 'NINGUNO'}`);
             if (matchResult) {
                 rolToInsert = matchResult.rolSeleccionado;
+            } else if (funcionSustantivaStr === 'Docencia Directa') {
+                rolToInsert = semestreRaw || ''; // Guardamos "6E-N" aquí para mostrarlo en el frontend
             } else {
                 const esFuncionCatalogo = await client.query(`
                     SELECT COUNT(*) as cnt FROM asignacion_funciones 
