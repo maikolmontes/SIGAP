@@ -5,5 +5,6 @@ const controller = require('../controllers/funcionesController');
 router.get('/', controller.getFunciones);
 router.get('/usuario/:id_usuario', controller.getFuncionesByUsuario);
 router.post('/asignar', controller.asignarFuncion);
+router.get('/catalogo', controller.getCatalogoJerarquico);
 
 module.exports = router;

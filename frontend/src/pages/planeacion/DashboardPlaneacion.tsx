@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
 import * as XLSX from 'xlsx'
 // @ts-ignore
@@ -25,13 +26,12 @@ interface NuevoDocente {
 export default function DashboardPlaneacion() {
     const [docentes, setDocentes] = useState<Docente[]>([])
     const [busqueda, setBusqueda] = useState('')
-    const [filtroEstado, setFiltroEstado] = useState<'Todos'|'Activos'|'Inactivos'>('Todos')
+    const [filtroEstado, setFiltroEstado] = useState<'Todos' | 'Activos' | 'Inactivos'>('Todos')
     const [cargando, setCargando] = useState(true)
     const [error, setError] = useState('')
+    const navigate = useNavigate()
     const [modalAgregar, setModalAgregar] = useState(false)
     const [modalImportar, setModalImportar] = useState(false)
-    const [modalCrearPeriodo, setModalCrearPeriodo] = useState(false)
-    const [modalAsignarDocentes, setModalAsignarDocentes] = useState(false)
     const [archivoImportar, setArchivoImportar] = useState<File | null>(null)
     const [importando, setImportando] = useState(false)
     const [guardando, setGuardando] = useState(false)
@@ -100,7 +100,8 @@ export default function DashboardPlaneacion() {
                 tipo_documento: 'CC',
                 numero_documento: '0000000000',
                 id_contrato: 1,
-                id_programa: 1
+                id_programa: 1,
+                rol: nuevoDocente.rol
             })
             setDocentes(prev => [...prev, {
                 ...res.data,
@@ -134,16 +135,16 @@ export default function DashboardPlaneacion() {
             setError('Por favor selecciona un archivo primero.')
             return
         }
-        
+
         try {
             setImportando(true)
             setError('')
-            
+
             const data = await archivoImportar.arrayBuffer()
             const workbook = XLSX.read(data)
             const worksheet = workbook.Sheets[workbook.SheetNames[0]]
             const jsonData = XLSX.utils.sheet_to_json<any>(worksheet)
-            
+
             const payload = jsonData.map(row => ({
                 nombres: row.Nombres || row.nombres || '',
                 apellidos: row.Apellidos || row.apellidos || '',
@@ -151,7 +152,7 @@ export default function DashboardPlaneacion() {
                 rol: row.Rol || row.rol || 'Docente'
             })).filter(u => u.nombres && u.apellidos && u.correo)
 
-            if(payload.length === 0) {
+            if (payload.length === 0) {
                 setError('El Excel no tiene datos válidos. Revisa las columnas (Nombres, Apellidos, Correo).')
                 return
             }
@@ -161,7 +162,7 @@ export default function DashboardPlaneacion() {
             setArchivoImportar(null)
             await cargarDocentes()
             alert(res.data.mensaje || 'Docentes importados correctamente')
-            
+
         } catch (err: any) {
             setError(err.response?.data?.error || 'Falló la importación del Excel.')
         } finally {
@@ -204,8 +205,8 @@ export default function DashboardPlaneacion() {
 
             {/* ── Métricas (Cards) ── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                 {/* Card 1: Total */}
-                 <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                {/* Card 1: Total */}
+                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -215,10 +216,10 @@ export default function DashboardPlaneacion() {
                             <p className="text-2xl font-black text-gray-800">{docentes.length}</p>
                         </div>
                     </div>
-                 </div>
+                </div>
 
-                 {/* Card 2: Activos */}
-                 <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                {/* Card 2: Activos */}
+                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-green-50 text-green-600 rounded-lg">
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -228,10 +229,10 @@ export default function DashboardPlaneacion() {
                             <p className="text-2xl font-black text-gray-800">{docentes.filter(d => d.activo).length}</p>
                         </div>
                     </div>
-                 </div>
+                </div>
 
-                 {/* Card 3: Inactivos */}
-                 <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                {/* Card 3: Inactivos */}
+                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-red-50 text-red-600 rounded-lg">
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -241,10 +242,10 @@ export default function DashboardPlaneacion() {
                             <p className="text-2xl font-black text-gray-800">{docentes.filter(d => !d.activo).length}</p>
                         </div>
                     </div>
-                 </div>
+                </div>
 
-                 {/* Card 4: Periodo */}
-                 <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                {/* Card 4: Periodo */}
+                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-purple-50 text-purple-600 rounded-lg">
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
@@ -254,14 +255,14 @@ export default function DashboardPlaneacion() {
                             <p className="text-xl font-black text-gray-800 tracking-tight">2025 IIP</p>
                         </div>
                     </div>
-                 </div>
+                </div>
             </div>
 
             {/* ── Acciones Rápidas ── */}
             <div className="mb-6">
                 <h3 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">Acciones Rápidas</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <button 
+                    <button
                         onClick={() => { setModalAgregar(true); setError('') }}
                         className="flex flex-col items-center justify-center py-5 px-4 bg-white border border-gray-200 rounded-xl hover:border-blue-400 hover:shadow-md hover:bg-blue-50/50 transition-all group"
                     >
@@ -272,8 +273,8 @@ export default function DashboardPlaneacion() {
                         <span className="text-xs text-gray-500 mt-1 text-center">Registrar usuario manual</span>
                     </button>
 
-                    <button 
-                        onClick={() => { setModalCrearPeriodo(true) }}
+                    <button
+                        onClick={() => navigate('/planeacion/periodos')}
                         className="flex flex-col items-center justify-center py-5 px-4 bg-white border border-gray-200 rounded-xl hover:border-purple-400 hover:shadow-md hover:bg-purple-50/50 transition-all group"
                     >
                         <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
@@ -283,8 +284,8 @@ export default function DashboardPlaneacion() {
                         <span className="text-xs text-gray-500 mt-1 text-center">Aperturar un nuevo bloque</span>
                     </button>
 
-                    <button 
-                        onClick={() => { setModalAsignarDocentes(true) }}
+                    <button
+                        onClick={() => navigate('/planeacion/periodos')}
                         className="flex flex-col items-center justify-center py-5 px-4 bg-white border border-gray-200 rounded-xl hover:border-orange-400 hover:shadow-md hover:bg-orange-50/50 transition-all group"
                     >
                         <div className="w-12 h-12 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
@@ -323,8 +324,8 @@ export default function DashboardPlaneacion() {
 
                 {/* Filtro de Estado */}
                 <div className="flex-shrink-0">
-                    <select 
-                        value={filtroEstado} 
+                    <select
+                        value={filtroEstado}
                         onChange={e => setFiltroEstado(e.target.value as any)}
                         className="h-full w-full sm:w-auto px-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
                     >
@@ -384,49 +385,49 @@ export default function DashboardPlaneacion() {
                         <table className="w-full text-sm min-w-[700px]">
                             <thead>
                                 <tr className="bg-gray-50 border-b border-gray-200">
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/4">Nombres</th>
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/4">Apellidos</th>
-                                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/3">Correo</th>
-                                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-20">Estado</th>
-                                <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-20">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {docentesFiltrados.map((d, i) => (
-                                <tr
-                                    key={d.id_usuario}
-                                    className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${i % 2 === 0 ? '' : 'bg-gray-50/40'}`}
-                                >
-                                    <td className="px-4 py-3 font-medium text-gray-800">{d.nombres}</td>
-                                    <td className="px-4 py-3 text-gray-700">{d.apellidos}</td>
-                                    <td className="px-4 py-3 text-gray-500 text-xs">{d.correo}</td>
-                                    <td className="px-4 py-3 text-center">
-                                        <button
-                                            onClick={() => handleToggle(d.id_usuario)}
-                                            disabled={editandoId === d.id_usuario}
-                                            title={d.activo ? 'Desactivar docente' : 'Activar docente'}
-                                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none
+                                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/4">Nombres</th>
+                                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/4">Apellidos</th>
+                                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/3">Correo</th>
+                                    <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-20">Estado</th>
+                                    <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-20">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {docentesFiltrados.map((d, i) => (
+                                    <tr
+                                        key={d.id_usuario}
+                                        className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${i % 2 === 0 ? '' : 'bg-gray-50/40'}`}
+                                    >
+                                        <td className="px-4 py-3 font-medium text-gray-800">{d.nombres}</td>
+                                        <td className="px-4 py-3 text-gray-700">{d.apellidos}</td>
+                                        <td className="px-4 py-3 text-gray-500 text-xs">{d.correo}</td>
+                                        <td className="px-4 py-3 text-center">
+                                            <button
+                                                onClick={() => handleToggle(d.id_usuario)}
+                                                disabled={editandoId === d.id_usuario}
+                                                title={d.activo ? 'Desactivar docente' : 'Activar docente'}
+                                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none
                         ${d.activo ? 'bg-green-500' : 'bg-gray-300'}
                         ${editandoId === d.id_usuario ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                                        >
-                                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform
+                                            >
+                                                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform
                         ${d.activo ? 'translate-x-4' : 'translate-x-1'}`}
-                                            />
-                                        </button>
-                                    </td>
-                                    <td className="px-4 py-3 text-center">
-                                        <button
-                                            title="Editar docente"
-                                            className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
-                                        >
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                            </svg>
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
+                                                />
+                                            </button>
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                            <button
+                                                title="Editar docente"
+                                                className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                                            >
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                                </svg>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
                         </table>
                     </div>
                 )}
@@ -573,11 +574,11 @@ export default function DashboardPlaneacion() {
                                     {archivoImportar ? archivoImportar.name : 'Arrastra tu archivo aquí'}
                                 </p>
                                 {!archivoImportar && <p className="text-xs text-gray-400 mb-3">o haz clic para seleccionar</p>}
-                                <input 
-                                    type="file" 
-                                    accept=".xlsx,.csv" 
-                                    className="hidden" 
-                                    id="file-import" 
+                                <input
+                                    type="file"
+                                    accept=".xlsx,.csv"
+                                    className="hidden"
+                                    id="file-import"
                                     onChange={(e) => setArchivoImportar(e.target.files ? e.target.files[0] : null)}
                                 />
                                 <label htmlFor="file-import" className="px-4 py-2 text-xs border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 cursor-pointer transition-colors mt-2 inline-block">
@@ -607,7 +608,7 @@ export default function DashboardPlaneacion() {
                             >
                                 Cancelar
                             </button>
-                            <button 
+                            <button
                                 onClick={handleImportSubmit}
                                 disabled={importando || !archivoImportar}
                                 className="px-5 py-2 text-sm bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -634,59 +635,7 @@ export default function DashboardPlaneacion() {
                 </div>
             )}
 
-            {/* ══════════ MODAL CREAR PERÍODO (MOCK) ══════════ */}
-            {modalCrearPeriodo && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
-                        <div className="bg-purple-700 px-6 py-4 flex items-center justify-between">
-                            <div>
-                                <h3 className="text-white font-medium text-sm">Crear nuevo período</h3>
-                                <p className="text-white/70 text-xs mt-0.5">Aperture un bloque académico</p>
-                            </div>
-                            <button onClick={() => setModalCrearPeriodo(false)} className="text-white/50 hover:text-white transition-colors">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                        </div>
-                        <div className="px-6 py-8 text-center text-gray-500">
-                            <div className="w-16 h-16 bg-purple-50 text-purple-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                            </div>
-                            <p className="font-medium text-gray-800 text-lg">Módulo en construcción</p>
-                            <p className="text-sm mt-2 max-w-[250px] mx-auto text-gray-500">Acá se diseñará la interfaz para generar el período "2025 IIP".</p>
-                        </div>
-                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end">
-                            <button onClick={() => setModalCrearPeriodo(false)} className="px-5 py-2 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 transition-colors shadow-sm focus:outline-none">Aceptar</button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
-            {/* ══════════ MODAL ASIGNAR DOCENTES (MOCK) ══════════ */}
-            {modalAsignarDocentes && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
-                        <div className="bg-orange-600 px-6 py-4 flex items-center justify-between">
-                            <div>
-                                <h3 className="text-white font-medium text-sm">Asignar Docentes a Período</h3>
-                                <p className="text-white/70 text-xs mt-0.5">Vincule maestros de la base de datos al ciclo actual</p>
-                            </div>
-                            <button onClick={() => setModalAsignarDocentes(false)} className="text-white/50 hover:text-white transition-colors">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                        </div>
-                        <div className="px-6 py-8 text-center text-gray-500">
-                            <div className="w-16 h-16 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-                            </div>
-                            <p className="font-medium text-gray-800 text-lg">Módulo en construcción</p>
-                            <p className="text-sm mt-2 mx-auto text-gray-500 max-w-[280px]">Este panel permitirá buscar y seleccionar múltiples docentes para asignarles su carga en el período activo.</p>
-                        </div>
-                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end">
-                            <button onClick={() => setModalAsignarDocentes(false)} className="px-5 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors shadow-sm focus:outline-none">Aceptar</button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
         </Layout>
     )

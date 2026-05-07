@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Stop-Process -Id 25668 -Force)",
+      "Bash(npm run *)"
+    ]
+  }
+}

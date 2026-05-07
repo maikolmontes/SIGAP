@@ -1,0 +1,11 @@
+import api from './api'
+
+export const getPeriodos = () => api.get('/periodos')
+export const getPeriodoById = (id) => api.get(`/periodos/${id}`)
+export const createPeriodo = (data) => api.post('/periodos', data)
+export const cerrarPeriodo = (id) => api.put(`/periodos/${id}/cerrar`)
+export const habilitarPeriodo = (id) => api.put(`/periodos/${id}/habilitar`)
+export const getDocentesPeriodo = (id) => api.get(`/periodos/${id}/docentes`)
+export const asignarDocentesPeriodo = (id, docentes) => api.post(`/periodos/${id}/docentes`, { docentes })
+export const desasignarDocentePeriodo = (idPeriodo, idUsuario) => api.delete(`/periodos/${idPeriodo}/docentes/${idUsuario}`)
+export const getPeriodoActivo = () => api.get('/periodos/activo')
