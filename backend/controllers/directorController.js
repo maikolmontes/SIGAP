@@ -244,9 +244,15 @@ const importarAsignaciones = async (req, res) => {
         const pensulRes = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = true LIMIT 1');
         const idPensulAca = pensulRes.rows.length > 0 ? pensulRes.rows[0].id_pensulaca : 1;
 
+        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        if (periodoRes.rows.length === 0) {
+            return res.status(400).json({ error: 'No hay un periodo académico activo para asignar las funciones.' });
+        }
+        const idPeriodoActivo = periodoRes.rows[0].id_periodo;
+
         // ============================================================
         // PASO 1: Identificar docentes del Excel y SOLO limpiar
-        //         funciones que NO estén "Aceptado"
+        //         funciones que NO estén "Aceptado" EN EL PERIODO ACTIVO
         // ============================================================
         const documentosEnExcel = new Set();
         for (let i = 0; i < records.length; i++) {
@@ -270,8 +276,8 @@ const importarAsignaciones = async (req, res) => {
                 SELECT af.id_funciones, af.funcion_sustantiva, af.estado_agenda 
                 FROM usuario_asignacion ua
                 JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
-                WHERE ua.id_usuario = $1
-            `, [userId]);
+                WHERE ua.id_usuario = $1 AND af.id_periodo = $2
+            `, [userId, idPeriodoActivo]);
 
             for (const fRow of funcRes.rows) {
                 const fid = fRow.id_funciones;
@@ -392,8 +398,8 @@ const importarAsignaciones = async (req, res) => {
                 SELECT af.id_funciones 
                 FROM asignacion_funciones af
                 JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
-                WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2
-            `, [idUsuario, funcionSustantivaStr]);
+                WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2 AND af.id_periodo = $3
+            `, [idUsuario, funcionSustantivaStr, idPeriodoActivo]);
 
             let horasActividad = parseFloat(horasRaw || 0);
 
@@ -402,9 +408,9 @@ const importarAsignaciones = async (req, res) => {
                 // No sumar horas aquí, se recalculan al final
             } else {
                 const newFunc = await client.query(`
-                    INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales) 
-                    VALUES ($1, $2, $3, $4) RETURNING id_funciones
-                `, [funcionSustantivaStr, 0, 'Pendiente', 'Asignado automáticamente vía Excel']);
+                    INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
+                    VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
+                `, [funcionSustantivaStr, 0, 'Pendiente', 'Asignado automáticamente vía Excel', idPeriodoActivo]);
                 idFunciones = newFunc.rows[0].id_funciones;
                 await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
             }
@@ -527,6 +533,12 @@ const actualizarImportacion = async (req, res) => {
         const pensulRes = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = true LIMIT 1');
         const idPensulAca = pensulRes.rows.length > 0 ? pensulRes.rows[0].id_pensulaca : 1;
 
+        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        if (periodoRes.rows.length === 0) {
+            return res.status(400).json({ error: 'No hay un periodo académico activo para actualizar las funciones.' });
+        }
+        const idPeriodoActivo = periodoRes.rows[0].id_periodo;
+
         // NO HAY PASO DE LIMPIEZA - Solo agregar
 
         for (let i = 0; i < records.length; i++) {
@@ -583,8 +595,8 @@ const actualizarImportacion = async (req, res) => {
                 SELECT af.id_funciones 
                 FROM asignacion_funciones af
                 JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
-                WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2
-            `, [idUsuario, funcionSustantivaStr]);
+                WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2 AND af.id_periodo = $3
+            `, [idUsuario, funcionSustantivaStr, idPeriodoActivo]);
 
             let horasActividad = parseFloat(horasRaw || 0);
 
@@ -594,9 +606,9 @@ const actualizarImportacion = async (req, res) => {
             } else {
                 // Crear nueva función
                 const newFunc = await client.query(`
-                    INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales) 
-                    VALUES ($1, $2, $3, $4) RETURNING id_funciones
-                `, [funcionSustantivaStr, 0, 'Pendiente', 'Agregado vía actualización Excel']);
+                    INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
+                    VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
+                `, [funcionSustantivaStr, 0, 'Pendiente', 'Agregado vía actualización Excel', idPeriodoActivo]);
                 idFunciones = newFunc.rows[0].id_funciones;
                 await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
             }
@@ -691,4 +703,95 @@ const actualizarImportacion = async (req, res) => {
     }
 };
 
-module.exports = { importarAsignaciones, actualizarImportacion };
+const getDashboardDirector = async (req, res) => {
+    try {
+        // 1. Periodo activo
+        const periodoRes = await pool.query(`
+            SELECT id_periodo, anio, semestre, fecha_inicio, fecha_fin, activo
+            FROM periodo WHERE activo = true LIMIT 1
+        `);
+        const periodo = periodoRes.rows[0] || null;
+        const idPeriodo = periodo?.id_periodo || null;
+
+        // 2. Docentes del periodo activo con estado de agenda
+        let docentes = [];
+        let metricas = { total: 0, aceptadas: 0, pendientes: 0, total_horas: 0 };
+        let distribucion = [];
+        let importacionRealizada = false;
+
+        if (idPeriodo) {
+            const docentesRes = await pool.query(`
+                SELECT
+                    u.id_usuario,
+                    u.nombres || ' ' || u.apellidos AS nombre,
+                    u.correo,
+                    pa.nombre_programa,
+                    tc.tipo AS tipo_contrato,
+                    tc.horas_contrato,
+                    COUNT(DISTINCT af.id_funciones) AS total_funciones,
+                    COUNT(DISTINCT CASE WHEN af.estado_agenda = 'Aceptado' THEN af.id_funciones END) AS funciones_aceptadas,
+                    COALESCE(SUM(DISTINCT af.horas_funcion), 0) AS horas_asignadas
+                FROM usuarios u
+                JOIN programa_academico pa ON pa.id_programa = u.id_programa
+                JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+                JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
+                JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
+                LEFT JOIN programa_periodo pp ON pp.id_programa = pa.id_programa AND pp.id_periodo = $1
+                LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
+                LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
+                WHERE u.activo = TRUE
+                  AND (pp.id_periodo = $1 OR af.id_periodo = $1)
+                GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
+                         pa.nombre_programa, tc.tipo, tc.horas_contrato
+                ORDER BY u.apellidos, u.nombres
+            `, [idPeriodo]);
+            docentes = docentesRes.rows;
+
+            // Check if import was done for this period
+            const importCheck = await pool.query(
+                'SELECT COUNT(*) as cnt FROM asignacion_funciones WHERE id_periodo = $1',
+                [idPeriodo]
+            );
+            importacionRealizada = parseInt(importCheck.rows[0].cnt) > 0;
+
+            // Metricas
+            metricas.total = docentes.length;
+            metricas.aceptadas = docentes.filter(d =>
+                parseInt(d.total_funciones) > 0 && parseInt(d.funciones_aceptadas) >= parseInt(d.total_funciones)
+            ).length;
+            metricas.pendientes = docentes.filter(d =>
+                parseInt(d.total_funciones) > 0 && parseInt(d.funciones_aceptadas) < parseInt(d.total_funciones)
+            ).length;
+            metricas.total_horas = docentes.reduce((sum, d) =>
+                sum + parseFloat(d.horas_asignadas || 0), 0
+            );
+
+            // Distribución de horas por función sustantiva
+            const distRes = await pool.query(`
+                SELECT
+                    af.funcion_sustantiva,
+                    COALESCE(SUM(af.horas_funcion), 0) AS horas
+                FROM asignacion_funciones af
+                JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+                JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
+                WHERE af.id_periodo = $1
+                GROUP BY af.funcion_sustantiva
+                ORDER BY horas DESC
+            `, [idPeriodo]);
+            distribucion = distRes.rows;
+        }
+
+        res.json({
+            periodo,
+            docentes,
+            metricas,
+            distribucion,
+            importacionRealizada
+        });
+    } catch (error) {
+        console.error('Error en getDashboardDirector:', error);
+        res.status(500).json({ error: 'Error al obtener el dashboard del director.', detalles: error.message });
+    }
+};
+
+module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector };

@@ -3,6 +3,7 @@ const router = express.Router();
 const periodosController = require('../controllers/periodosController');
 
 router.get('/', periodosController.getAll);
+router.get('/activo', periodosController.getPeriodoActivo);
 router.get('/:id', periodosController.getById);
 router.post('/', periodosController.create);
 router.put('/:id/cerrar', periodosController.cerrar);

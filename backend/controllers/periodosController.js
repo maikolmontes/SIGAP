@@ -281,6 +281,21 @@ const desasignarDocente = async (req, res) => {
     }
 };
 
+const getPeriodoActivo = async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT * FROM periodo WHERE activo = TRUE LIMIT 1'
+        );
+        if (result.rows.length === 0) {
+            return res.json(null);
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error al obtener período activo:', error);
+        res.status(500).json({ error: 'Error al obtener el período activo.' });
+    }
+};
+
 module.exports = {
     getAll,
     getById,
@@ -289,5 +304,6 @@ module.exports = {
     habilitar,
     getDocentesAsignados,
     asignarDocentes,
-    desasignarDocente
+    desasignarDocente,
+    getPeriodoActivo
 };

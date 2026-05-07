@@ -25,5 +25,6 @@ const verifyToken = (req, res, next) => {
 };
 
 router.get('/dashboard', verifyToken, docenteController.getDashboard);
+router.get('/agendas-por-periodo', verifyToken, docenteController.getAgendasPorPeriodo);
 
 module.exports = router;

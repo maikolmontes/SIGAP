@@ -38,7 +38,8 @@ const getAgenda = async (req, res) => {
                 af.observaciones_generales
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
-            WHERE ua.id_usuario = $1
+            JOIN periodo p ON p.id_periodo = af.id_periodo
+            WHERE ua.id_usuario = $1 AND p.activo = true
             ORDER BY af.id_funciones
         `, [id_usuario]);
 
@@ -65,7 +66,8 @@ const getAgenda = async (req, res) => {
                 LEFT JOIN espacio_academico ea  ON aa.id_espacio_aca   = ea.id_espacio_aca
                 JOIN descripcion d              ON aa.id_asignacionact = d.id_asignacionact
                 JOIN indicadores i              ON i.id_descripcion    = d.id_descripcion
-                WHERE ua.id_usuario = $1
+                JOIN periodo p                  ON p.id_periodo        = af.id_periodo
+                WHERE ua.id_usuario = $1 AND p.activo = true
             ),
             ejecuciones_s8 AS (
                 SELECT
@@ -169,7 +171,8 @@ const getAgendaBase = async (req, res) => {
                 af.estado_agenda
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
-            WHERE ua.id_usuario = $1
+            JOIN periodo p ON p.id_periodo = af.id_periodo
+            WHERE ua.id_usuario = $1 AND p.activo = true
             ORDER BY af.id_funciones
         `, [id_usuario]);
 
@@ -180,9 +183,10 @@ const getAgendaBase = async (req, res) => {
                 aa.rol_seleccionado,
                 aa.horas_rol,
                 ea.codigo_espacio,
-                ea.nombre_espacio,
+                COALESCE(ea.nombre_espacio, aa.rol_seleccionado) AS nombre_espacio,
                 ea.id_espacio_aca,
                 s.nombre_sem AS semestre_nombre,
+                COALESCE(g.nombre_grupo, '') AS grupo_nombre,
 
                 d.id_descripcion,
                 d.resultado_esperado,
@@ -199,9 +203,12 @@ const getAgendaBase = async (req, res) => {
             JOIN asignacion_actividades aa  ON af.id_funciones     = aa.id_funciones
             LEFT JOIN espacio_academico ea  ON aa.id_espacio_aca   = ea.id_espacio_aca
             LEFT JOIN semestres s           ON ea.id_semestre      = s.id_semestre
+            LEFT JOIN semestres_grupos sg   ON sg.id_semestre      = s.id_semestre
+            LEFT JOIN grupos g              ON g.id_grupos         = sg.id_grupos
             LEFT JOIN descripcion d         ON aa.id_asignacionact = d.id_asignacionact
             LEFT JOIN indicadores i         ON i.id_descripcion    = d.id_descripcion
-            WHERE ua.id_usuario = $1
+            JOIN periodo p                  ON p.id_periodo        = af.id_periodo
+            WHERE ua.id_usuario = $1 AND p.activo = true
             ORDER BY af.id_funciones, aa.id_asignacionact, d.id_descripcion, i.id_indicadores
         `, [id_usuario]);
 

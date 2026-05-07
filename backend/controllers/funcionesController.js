@@ -35,7 +35,8 @@ const getFuncionesByUsuario = async (req, res) => {
                 af.observaciones_generales
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
-            WHERE ua.id_usuario = $1
+            JOIN periodo p ON p.id_periodo = af.id_periodo
+            WHERE ua.id_usuario = $1 AND p.activo = true
             ORDER BY af.id_funciones
         `, [id_usuario]);
 

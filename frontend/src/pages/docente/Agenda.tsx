@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
-import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, Save, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, Save, CheckCircle2, AlertTriangle, Clock, Lock, CalendarX } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
+import { getPeriodoActivo } from '../../services/periodosService';
 
 interface Indicador {
     id: string;
@@ -44,6 +45,7 @@ export default function AgendaDocente() {
     const [activeFunctionIndex, setActiveFunctionIndex] = useState(0);
 
     const [semanaActiva, setSemanaActiva] = useState(false);
+    const [periodoAbierto, setPeriodoAbierto] = useState(true);
     const [tiempoRestanteTexto, setTiempoRestanteTexto] = useState('');
 
     // Mapeo dinámico del catálogo
@@ -68,6 +70,15 @@ export default function AgendaDocente() {
         const cargarData = async () => {
             setCargandoEspacios(true);
             try {
+                // Verificar periodo activo
+                try {
+                    const resPeriodo = await getPeriodoActivo();
+                    setPeriodoAbierto(!!resPeriodo.data);
+                } catch (err) {
+                    console.error("Error al verificar periodo:", err);
+                    setPeriodoAbierto(false);
+                }
+
                 try {
                     const semanasRes = await axios.get('http://localhost:3000/api/semanas');
                     const semanaCero = semanasRes.data.find((s: any) => s.numero_semana === '0');
@@ -115,7 +126,7 @@ export default function AgendaDocente() {
                                 actMap.set(act.id_asignacionact, {
                                     id: act.id_asignacionact,
                                     idEspacioAcademico: act.id_espacio_aca || '',
-                                    actividadLibre: f.funcion_sustantiva === 'Docencia Directa' ? '' : (act.rol_seleccionado || ''),
+                                    actividadLibre: act.rol_seleccionado || '',
                                     horasActividad: parseFloat(act.horas_rol) || '',
                                     resultadoEsperado: act.resultado_esperado || '',
                                     meta: act.meta ? parseInt(act.meta) : '',
@@ -284,17 +295,27 @@ export default function AgendaDocente() {
                 actividades: funcion.actividades.map(a => {
                     const esDirecta = funcion.funcionSustantiva === 'Docencia Directa';
                     if (esDirecta) {
-                        return {
-                            id_asignacionact: a.id,
-                            actividadLibre: a.nombreEspacio || 'Espacio Académico',
-                            descripciones: [
-                                { resultadoEsperado: 'Microcurrículo y ficha temática actualizados', meta: 2, indicadores: [{ nombre_indicador: 'Microcurrículo y ficha aprobados y cargados en el sistema institucional' }] },
-                                { resultadoEsperado: 'Desarrollo de espacio académico', meta: 16, indicadores: [{ nombre_indicador: 'Registros de seguimiento semana a semana en el sistema académico institucional' }] },
-                                { resultadoEsperado: 'Registro de calificaciones', meta: 3, indicadores: [{ nombre_indicador: 'Registros de calificaciones en el sistema académico institucional' }] },
-                                { resultadoEsperado: 'Entrega física de notas finales firmadas por el docente', meta: 1, indicadores: [{ nombre_indicador: 'Evidencia de entrega de notas finales' }] }
-                            ]
-                        };
-                    }
+                            // Obtener las descripciones reales de Docencia Directa desde el catálogo de la BD
+                            const catActs = getActividadesDelCatalogo('Docencia Directa');
+                            const descripciones: any[] = catActs.flatMap((act: any) =>
+                                (act.descripciones || []).map((desc: any) => ({
+                                    resultadoEsperado: desc.resultado_esperado,
+                                    meta: desc.meta,
+                                    indicadores: (desc.indicadores || []).map((ind: any) => ({ nombre_indicador: ind.nombre_indicador }))
+                                }))
+                            );
+                            return {
+                                id_asignacionact: a.id,
+                                actividadLibre: a.nombreEspacio || a.actividadLibre || 'Espacio Académico',
+                                // Si el catálogo de la BD tiene datos, usarlos; si no, usar los valores por defecto
+                                descripciones: descripciones.length > 0 ? descripciones : [
+                                    { resultadoEsperado: 'Microcurrículo y ficha temática actualizados', meta: 2, indicadores: [{ nombre_indicador: 'Microcurrículo y ficha aprobados y cargados en el sistema institucional' }] },
+                                    { resultadoEsperado: 'Desarrollo de espacio académico', meta: 16, indicadores: [{ nombre_indicador: 'Registros de seguimiento semana a semana en el sistema académico institucional' }] },
+                                    { resultadoEsperado: 'Registro de calificaciones', meta: 3, indicadores: [{ nombre_indicador: 'Registros de calificaciones en el sistema académico institucional' }] },
+                                    { resultadoEsperado: 'Entrega física de notas finales firmadas por el docente', meta: 1, indicadores: [{ nombre_indicador: 'Evidencia de entrega de notas finales' }] }
+                                ]
+                            };
+                        }
                     return {
                         id_asignacionact: a.id,
                         actividadLibre: a.actividadLibre,
@@ -345,7 +366,29 @@ export default function AgendaDocente() {
                 </div>
             </div>
 
-            {!semanaActiva && !cargandoEspacios && tiempoRestanteTexto && (
+            {!periodoAbierto && !cargandoEspacios && (
+                <div className="flex flex-col items-center justify-center py-20 px-6">
+                    <div className="bg-white rounded-2xl shadow-lg border border-amber-200 max-w-lg w-full text-center p-10">
+                        <div className="flex items-center justify-center w-20 h-20 rounded-full bg-amber-100 mx-auto mb-6">
+                            <CalendarX className="w-10 h-10 text-amber-500" />
+                        </div>
+                        <h2 className="text-2xl font-black text-gray-800 mb-3">
+                            Periodo Académico Cerrado
+                        </h2>
+                        <p className="text-gray-500 text-sm leading-relaxed mb-6">
+                            El periodo académico actual se encuentra <strong className="text-amber-600">cerrado</strong>. No hay agendas disponibles para creación o modificación en este momento.
+                        </p>
+                        <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+                            <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                            <p className="text-xs text-amber-700 font-medium">
+                                Cuando Planeación habilite un nuevo periodo, tu agenda estará disponible automáticamente.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {periodoAbierto && !semanaActiva && !cargandoEspacios && tiempoRestanteTexto && (
                 <div className="p-4 mb-6 rounded-xl flex items-start gap-3 bg-red-50 border border-red-200 text-red-800">
                     <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
                     <p className="font-medium text-sm">La Semana 0 está cerrada. Ya no es posible modificar la agenda.</p>
@@ -359,16 +402,18 @@ export default function AgendaDocente() {
                 </div>
             )}
 
-            {cargandoEspacios ? (
-                <div className="flex justify-center p-12 text-gray-500">
-                    Cargando la agenda asignada desde la base de datos...
-                </div>
-            ) : funciones.length === 0 ? (
-                 <div className="flex justify-center p-12 text-gray-500 border-2 border-dashed border-gray-300 rounded-xl">
-                    No tienes funciones sustantivas asignadas en este momento.
-                </div>
-            ) : (
-                <div className="space-y-6">
+            {/* Solo renderizar el formulario si el periodo está abierto */}
+            {periodoAbierto ? (
+                cargandoEspacios ? (
+                    <div className="flex justify-center p-12 text-gray-500">
+                        Cargando la agenda asignada desde la base de datos...
+                    </div>
+                ) : funciones.length === 0 ? (
+                    <div className="flex justify-center p-12 text-gray-500 border-2 border-dashed border-gray-300 rounded-xl">
+                        No tienes funciones sustantivas asignadas en este momento.
+                    </div>
+                ) : (
+                    <div className="space-y-6">
                     {/* Selector de Tarjetas (Tabs) */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-2">
                         {funciones.map((f, i) => {
@@ -417,7 +462,7 @@ export default function AgendaDocente() {
                         const fIndex = activeFunctionIndex;
                         const esDocenciaDirecta = funcion.funcionSustantiva === 'Docencia Directa';
                         const esIndirecta = funcion.funcionSustantiva === 'Docencia Indirecta';
-                        const esDeshabilitado = false;
+                        const esDeshabilitado = !periodoAbierto;
 
                         return (
                         <div className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden relative ${esDeshabilitado ? 'border-gray-200 opacity-60' : 'border-blue-100'}`}>
@@ -479,7 +524,13 @@ export default function AgendaDocente() {
                                                                     <input 
                                                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 font-semibold text-blue-900 mb-2"
                                                                         readOnly
-                                                                        value={actividad.nombreEspacio || actividad.actividadLibre || 'Cargando Espacio...'}    
+                                                                        value={
+                                                                            actividad.nombreEspacio && actividad.nombreEspacio.trim() !== ''
+                                                                                ? actividad.nombreEspacio
+                                                                                : actividad.actividadLibre && actividad.actividadLibre.trim() !== ''
+                                                                                    ? actividad.actividadLibre
+                                                                                    : '(Sin espacio académico asignado)'
+                                                                        }
                                                                     />
                                                                     <div className="flex gap-2">
                                                                         <span className="text-xs bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-md font-medium border border-indigo-200">Semestre: {actividad.semestre || 'N/A'}</span>
@@ -503,7 +554,7 @@ export default function AgendaDocente() {
                                                                     className={`w-full border ${!actividad.actividadLibre ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'} rounded-lg px-3 py-2 text-sm focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none disabled:opacity-60 disabled:bg-gray-100`}
                                                                     value={actividad.actividadLibre}
                                                                     onChange={(e) => cambiarActividad(fIndex, aIndex, 'actividadLibre', e.target.value)}
-                                                                    disabled={!semanaActiva}
+                                                                    disabled={!semanaActiva || !periodoAbierto}
                                                                 >
                                                                     <option value="">Seleccionar actividad del catálogo...</option>
                                                                     {catsActs.map((act:any) => (
@@ -518,7 +569,7 @@ export default function AgendaDocente() {
                                                                     type="text"
                                                                     placeholder="Escribe la actividad"
                                                                     className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-2 text-sm focus:border-purple-500 focus:ring-1 outline-none disabled:opacity-60 disabled:bg-gray-100"
-                                                                    disabled={!semanaActiva}
+                                                                    disabled={!semanaActiva || !periodoAbierto}
                                                                 />
                                                             )}
                                                         </div>
@@ -544,22 +595,44 @@ export default function AgendaDocente() {
                                                                     <BookOpen className="w-4 h-4" /> Desglose Fijo de Actividades
                                                                 </h4>
                                                                 <div className="space-y-3">
-                                                                    {[
-                                                                        { d: 'Microcurrículo y ficha temática actualizados', m: 2, i: 'Microcurrículo y ficha aprobados y cargados en el sistema institucional' },
-                                                                        { d: 'Desarrollo de espacio académico', m: 16, i: 'Registros de seguimiento semana a semana en el sistema académico institucional' },
-                                                                        { d: 'Registro de calificaciones', m: 3, i: 'Registros de calificaciones en el sistema académico institucional' },
-                                                                        { d: 'Entrega física de notas finales firmadas por el docente', m: 1, i: 'Evidencia de entrega de notas finales' }
-                                                                    ].map((item, idx) => (
-                                                                        <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200 text-xs">
-                                                                            <div className="flex justify-between items-start mb-2">
-                                                                                <span className="font-bold text-gray-800">{item.d}</span>
-                                                                                <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold whitespace-nowrap ml-2">Meta: {item.m}</span>
+                                                                    {(() => {
+                                                                        // Leer las descripciones del catálogo de la BD para esta actividad
+                                                                        const catDescs = getActividadesDelCatalogo('Docencia Directa');
+                                                                        // Aplanar todas las descripciones del catálogo de Docencia Directa
+                                                                        const allDescs: any[] = catDescs.flatMap((act: any) => act.descripciones || []);
+                                                                        if (allDescs.length > 0) {
+                                                                            return allDescs.map((desc: any, idx: number) => (
+                                                                                <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200 text-xs">
+                                                                                    <div className="flex justify-between items-start mb-2">
+                                                                                        <span className="font-bold text-gray-800">{desc.resultado_esperado}</span>
+                                                                                        <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold whitespace-nowrap ml-2">Meta: {desc.meta ?? 'N/A'}</span>
+                                                                                    </div>
+                                                                                    {(desc.indicadores || []).map((ind: any, iIdx: number) => (
+                                                                                        <div key={iIdx} className="text-gray-600 flex items-center gap-1.5 mt-2 pt-2 border-t border-gray-100">
+                                                                                            <Target className="w-3.5 h-3.5 text-gray-400" /> {ind.nombre_indicador}
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            ));
+                                                                        }
+                                                                        // Fallback si el catálogo aún no cargó
+                                                                        return [
+                                                                            { d: 'Microcurrículo y ficha temática actualizados', m: 2, i: 'Microcurrículo y ficha aprobados y cargados en el sistema institucional' },
+                                                                            { d: 'Desarrollo de espacio académico', m: 16, i: 'Registros de seguimiento semana a semana en el sistema académico institucional' },
+                                                                            { d: 'Registro de calificaciones', m: 3, i: 'Registros de calificaciones en el sistema académico institucional' },
+                                                                            { d: 'Entrega física de notas finales firmadas por el docente', m: 1, i: 'Evidencia de entrega de notas finales' }
+                                                                        ].map((item, idx) => (
+                                                                            <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200 text-xs">
+                                                                                <div className="flex justify-between items-start mb-2">
+                                                                                    <span className="font-bold text-gray-800">{item.d}</span>
+                                                                                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold whitespace-nowrap ml-2">Meta: {item.m}</span>
+                                                                                </div>
+                                                                                <div className="text-gray-600 flex items-center gap-1.5 mt-2 pt-2 border-t border-gray-100">
+                                                                                    <Target className="w-3.5 h-3.5 text-gray-400" /> {item.i}
+                                                                                </div>
                                                                             </div>
-                                                                            <div className="text-gray-600 flex items-center gap-1.5 mt-2 pt-2 border-t border-gray-100">
-                                                                                <Target className="w-3.5 h-3.5 text-gray-400" /> {item.i}
-                                                                            </div>
-                                                                        </div>
-                                                                    ))}
+                                                                        ));
+                                                                    })()}
                                                                 </div>
                                                             </div>
                                                         ) : esIndirecta ? (
@@ -574,7 +647,7 @@ export default function AgendaDocente() {
                                                                         placeholder="Describe qué actividades realizarás en docencia indirecta..."
                                                                         value={actividad.resultadoEsperado}
                                                                         onChange={(e) => cambiarActividad(fIndex, aIndex, 'resultadoEsperado', e.target.value)}
-                                                                        disabled={!semanaActiva}
+                                                                        disabled={!semanaActiva || !periodoAbierto}
                                                                     />
                                                                 </div>
 
@@ -588,7 +661,7 @@ export default function AgendaDocente() {
                                                                         placeholder="Describe las fichas de desarrollo temático..."
                                                                         value={actividad.indicadores[0]?.nombre_indicador || ''}
                                                                         onChange={(e) => cambiarIndicador(fIndex, aIndex, 0, e.target.value)}
-                                                                        disabled={!semanaActiva}
+                                                                        disabled={!semanaActiva || !periodoAbierto}
                                                                     />
                                                                 </div>
                                                             </>
@@ -635,7 +708,7 @@ export default function AgendaDocente() {
                                                                         value={actividad.meta}
                                                                         onChange={(e) => cambiarActividad(fIndex, aIndex, 'meta', parseInt(e.target.value) || '')}
                                                                         placeholder="100"
-                                                                        disabled={!semanaActiva}
+                                                                        disabled={!semanaActiva || !periodoAbierto}
                                                                     />
                                                                 </div>
                                                             )}
@@ -651,7 +724,7 @@ export default function AgendaDocente() {
                                                                         type="button"
                                                                         onClick={() => agregarIndicador(fIndex, aIndex)}
                                                                         className="text-[11px] font-bold text-orange-600 bg-orange-100 hover:bg-orange-200 px-2 py-1 rounded transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                        disabled={!semanaActiva}
+                                                                        disabled={!semanaActiva || !periodoAbierto}
                                                                     >
                                                                         <Plus className="w-3 h-3" /> Añadir 
                                                                     </button>
@@ -683,7 +756,7 @@ export default function AgendaDocente() {
                                                                                     type="button"
                                                                                     onClick={() => eliminarIndicador(fIndex, aIndex, iIndex)}
                                                                                     className="text-gray-400 hover:text-red-500 p-1.5 rounded self-start mt-0.5 disabled:opacity-50 disabled:hover:text-gray-400 disabled:cursor-not-allowed"
-                                                                                    disabled={!semanaActiva}
+                                                                                    disabled={!semanaActiva || !periodoAbierto}
                                                                                 >
                                                                                     <Trash2 className="w-3.5 h-3.5" />
                                                                                 </button>
@@ -713,7 +786,7 @@ export default function AgendaDocente() {
                                             <div className="ml-auto">
                                                 <button
                                                     onClick={() => aceptarFuncion(fIndex)}
-                                                    disabled={guardando || !semanaActiva}
+                                                    disabled={guardando || !semanaActiva || !periodoAbierto}
                                                     className={`px-6 py-2.5 font-bold rounded-lg shadow-md flex items-center gap-2 transition-all transform hover:scale-105 disabled:opacity-50 disabled:transform-none disabled:cursor-not-allowed ${
                                                         funcion.estadoAgenda === 'Aceptado'
                                                             ? 'bg-green-600 hover:bg-green-700 text-white shadow-green-500/20'
@@ -736,7 +809,7 @@ export default function AgendaDocente() {
                         );
                     })()}
                 </div>
-            )}
+            )) : null}
 
             {/* Panel de Resumen - Estado en la Base de Datos */}
             {funciones.length > 0 && (
