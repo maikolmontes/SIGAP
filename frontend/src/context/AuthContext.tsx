@@ -46,8 +46,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem('sigap_token', newToken);
     localStorage.setItem('sigap_user', JSON.stringify(newUser));
 
-    // Dirigir al usuario al gestor de roles para evaluar si tiene uno o múltiples perfiles
-    navigate('/role-selection', { replace: true });
+    // Determinar a qué panel redirigir basado en el rol principal
+    if (newUser.roles && newUser.roles.includes('Director')) {
+        navigate('/director/dashboard', { replace: true });
+    } else {
+        navigate('/planeacion/dashboard', { replace: true });
+    }
   };
 
   const logout = () => {
