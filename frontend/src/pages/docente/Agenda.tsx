@@ -131,8 +131,8 @@ export default function AgendaDocente() {
                                     resultadoEsperado: act.resultado_esperado || '',
                                     meta: act.meta ? parseInt(act.meta) : '',
                                     indicadores: [],
-                                    semestre: f.funcion_sustantiva === 'Docencia Directa' ? act.semestre_nombre : act.semestre_nombre,
-                                    grupo: f.funcion_sustantiva === 'Docencia Directa' ? (act.rol_seleccionado ? act.rol_seleccionado.replace(act.semestre_nombre, '') : 'N/A') : act.grupo_nombre,
+                                    semestre: act.semestre_nombre,
+                                    grupo: act.grupo_nombre,
                                     nombreEspacio: act.nombre_espacio
                                 });
                             }

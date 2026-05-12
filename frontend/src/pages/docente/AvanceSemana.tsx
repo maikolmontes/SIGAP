@@ -18,6 +18,11 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   const [mensaje, setMensaje] = useState<{ tipo: string, texto: string } | null>(null);
 
   const [selectedFunctionIndex, setSelectedFunctionIndex] = useState(0);
+  const [selectedActivityIndex, setSelectedActivityIndex] = useState(0);
+
+  useEffect(() => {
+    setSelectedActivityIndex(0);
+  }, [selectedFunctionIndex]);
 
   useEffect(() => {
     if (user) {
@@ -57,7 +62,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                          nombre_indicador: curr.nombre_indicador,
                          ejecucion_8: curr.ejecucion_8,
                          ejecucion_16: curr.ejecucion_16,
-                         observaciones: curr.observaciones
+                         observaciones: curr.observaciones,
+                         meta: curr.meta
                      });
                  }
                  return acc;
@@ -167,7 +173,10 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                 {data.map((f, idx) => (
                     <button
                         key={idx}
-                        onClick={() => setSelectedFunctionIndex(idx)}
+                        onClick={() => {
+                            setSelectedFunctionIndex(idx);
+                            setSelectedActivityIndex(0);
+                        }}
                         className={`px-4 py-2 rounded-lg text-sm font-bold transition-all border ${
                             selectedFunctionIndex === idx 
                             ? 'bg-[#063759] text-white border-[#063759] shadow-md' 
@@ -197,22 +206,74 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                     </div>
                  </div>
                  
-                 <div className="divide-y divide-gray-100">
-                 {data[selectedFunctionIndex].actividades?.map((actividad: any, aIndex: number) => (
-                    <div key={aIndex} className="p-6">
-                        {/* Identificación de Actividad */}
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5 pb-4 border-b border-gray-50">
-                            <div className="flex-1">
-                                <div className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">Actividad Asignada</div>
-                                <h3 className="font-bold text-gray-800 text-base">{actividad.rol_seleccionado || 'Actividad no especificada'}</h3>
-                            </div>
-                            <div className="flex-1">
-                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Resultado Esperado</div>
-                                <p className="text-sm text-gray-600 line-clamp-2">{actividad.resultado_esperado || 'Sin descripción'}</p>
-                            </div>
+                 <div className="bg-[#f8fafc] px-6 py-4 border-b border-gray-100">
+                    {data[selectedFunctionIndex].actividades?.length > 1 && (
+                        <div className="flex overflow-x-auto pb-2 gap-2 custom-scrollbar">
+                            {data[selectedFunctionIndex].actividades.map((act: any, idx: number) => {
+                                const active = selectedActivityIndex === idx;
+                                return (
+                                    <button
+                                        key={idx}
+                                        onClick={() => setSelectedActivityIndex(idx)}
+                                        className={`flex-shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+                                            active
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                            : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="truncate max-w-[200px]">{act.rol_seleccionado || 'Actividad'}</span>
+                                            {act.grupo_nombre && (
+                                                <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${active ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                                                    G: {act.grupo_nombre}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </button>
+                                );
+                            })}
                         </div>
-                        
-                        <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    )}
+                 </div>
+
+                 <div className="divide-y divide-gray-100">
+                 {data[selectedFunctionIndex].actividades && data[selectedFunctionIndex].actividades.length > 0 ? (
+                    <div className="p-6">
+                        {(() => {
+                            const actividad = data[selectedFunctionIndex].actividades[selectedActivityIndex];
+                            const aIndex = selectedActivityIndex;
+                            return (
+                                <>
+                                    {/* Identificación de Actividad */}
+                                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5 pb-4 border-b border-gray-50 bg-blue-50/30 p-4 rounded-xl border border-blue-100">
+                                        <div className="flex-1">
+                                            <div className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">Espacio Académico / Actividad</div>
+                                            <h3 className="font-bold text-gray-800 text-lg mb-2">{actividad.rol_seleccionado || 'Actividad no especificada'}</h3>
+                                            <div className="flex flex-wrap gap-2">
+                                                {actividad.semestre_nombre && (
+                                                    <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                                                        Semestre: {actividad.semestre_nombre}
+                                                    </span>
+                                                )}
+                                                {actividad.grupo_nombre && (
+                                                    <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-semibold">
+                                                        Grupo: {actividad.grupo_nombre}
+                                                    </span>
+                                                )}
+                                                {actividad.horas_rol && (
+                                                    <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-semibold border border-gray-200">
+                                                        {actividad.horas_rol} Horas
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Resultado Esperado</div>
+                                            <p className="text-sm text-gray-600 line-clamp-2">{actividad.resultado_esperado || 'Sin descripción'}</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-gray-50 text-gray-600 font-semibold border-b border-gray-200">
                                     <tr>
@@ -222,7 +283,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                         </th>
                                         <th className="px-4 py-3 text-center">Meta</th>
                                         <th className="px-4 py-3 text-center">Ejecución Sem 8</th>
-                                        <th className="px-4 py-3 text-center">Ejecución Sem 16</th>
+                                        {semana === '16' && <th className="px-4 py-3 text-center">Ejecución Sem 16</th>}
                                         <th className="px-4 py-3 text-center">% Avance</th>
                                         <th className="px-4 py-3 text-center min-w-[120px]">Estado</th>
                                         <th className="px-4 py-3 min-w-[200px]">
@@ -236,7 +297,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {actividad.indicadores?.map((ind: any, iIndex: number) => {
-                                        const meta = actividad.meta || 0;
+                                        const meta = Number(ind.meta) || Number(actividad.meta) || 0;
                                         const ejec8 = Number(ind.ejecucion_8) || 0;
                                         const ejec16 = Number(ind.ejecucion_16) || 0;
                                         const totalEjecucion = ejec8 + (semana === '16' ? ejec16 : 0);
@@ -259,17 +320,18 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                         className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${semana !== '8' ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : 'bg-white border-gray-300'}`}
                                                     />
                                                 </td>
+                                                {semana === '16' && (
                                                 <td className="px-4 py-3">
                                                     <input 
                                                         type="number" 
                                                         min="0"
-                                                        max={semana === '16' ? Math.max(0, meta - ejec8) : undefined}
+                                                        max={Math.max(0, meta - ejec8)}
                                                         value={ind.ejecucion_16 || ''}
                                                         onChange={(e) => handleIndicadorChange(selectedFunctionIndex, aIndex, iIndex, 'ejecucion_16', e.target.value)}
-                                                        disabled={semana !== '16'}
-                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${semana !== '16' ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : 'bg-white border-gray-300'}`}
+                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors bg-white border-gray-300`}
                                                     />
                                                 </td>
+                                                )}
                                                 <td className="px-4 py-3 text-center">
                                                     <div className={`font-bold text-lg ${superaMeta ? 'text-red-600' : 'text-blue-600'}`}>
                                                         {porcentaje}%
@@ -308,16 +370,20 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                 <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-800">
                                     <tr>
                                         <td className="px-4 py-3 text-right">TOTALES:</td>
-                                        <td className="px-4 py-3 text-center">{actividad.meta || 0}</td>
+                                        <td className="px-4 py-3 text-center">
+                                            {actividad.indicadores?.reduce((acc: number, curr: any) => acc + (Number(curr.meta) || Number(actividad.meta) || 0), 0)}
+                                        </td>
                                         <td className="px-4 py-3 text-center">
                                             {actividad.indicadores?.reduce((acc: number, curr: any) => acc + (Number(curr.ejecucion_8) || 0), 0)}
                                         </td>
+                                        {semana === '16' && (
                                         <td className="px-4 py-3 text-center">
                                             {actividad.indicadores?.reduce((acc: number, curr: any) => acc + (Number(curr.ejecucion_16) || 0), 0)}
                                         </td>
+                                        )}
                                         <td className="px-4 py-3 text-center text-blue-700">
                                             {calcularAvance(
-                                                actividad.meta || 0,
+                                                actividad.indicadores?.reduce((acc: number, curr: any) => acc + (Number(curr.meta) || Number(actividad.meta) || 0), 0) || 0,
                                                 actividad.indicadores?.reduce((acc: number, curr: any) => acc + (Number(curr.ejecucion_8) || 0), 0),
                                                 actividad.indicadores?.reduce((acc: number, curr: any) => acc + (Number(curr.ejecucion_16) || 0), 0)
                                             )}%
@@ -327,8 +393,15 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                 </tfoot>
                             </table>
                         </div>
+                        </>
+                            );
+                        })()}
                     </div>
-                 ))}
+                 ) : (
+                    <div className="p-12 text-center text-gray-500">
+                        No hay actividades registradas en esta función.
+                    </div>
+                 )}
                  </div>
 
                  <div className="bg-gray-50 px-6 py-4 flex justify-end border-t border-gray-200">
