@@ -203,8 +203,7 @@ const getAgendaBase = async (req, res) => {
             JOIN asignacion_actividades aa  ON af.id_funciones     = aa.id_funciones
             LEFT JOIN espacio_academico ea  ON aa.id_espacio_aca   = ea.id_espacio_aca
             LEFT JOIN semestres s           ON ea.id_semestre      = s.id_semestre
-            LEFT JOIN semestres_grupos sg   ON sg.id_semestre      = s.id_semestre
-            LEFT JOIN grupos g              ON g.id_grupos         = sg.id_grupos
+            LEFT JOIN grupos g              ON g.id_grupos         = aa.id_grupos
             LEFT JOIN descripcion d         ON aa.id_asignacionact = d.id_asignacionact
             LEFT JOIN indicadores i         ON i.id_descripcion    = d.id_descripcion
             JOIN periodo p                  ON p.id_periodo        = af.id_periodo

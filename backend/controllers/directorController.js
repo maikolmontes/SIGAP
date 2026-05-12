@@ -440,8 +440,6 @@ const importarAsignaciones = async (req, res) => {
             console.log(`[IMPORT] Fila ${i+2}: Función="${funcionSustantivaStr}" | Asignatura="${asignaturas}" → Match=${matchResult ? matchResult.rolSeleccionado : 'NINGUNO'}`);
             if (matchResult) {
                 rolToInsert = matchResult.rolSeleccionado;
-            } else if (funcionSustantivaStr === 'Docencia Directa') {
-                rolToInsert = semestreRaw || ''; // Guardamos "6E-N" aquí para mostrarlo en el frontend
             } else {
                 // Si tiene catálogo pero no se encontró match, dejar vacío para que el docente elija
                 const esFuncionCatalogo = await client.query(`
@@ -455,9 +453,9 @@ const importarAsignaciones = async (req, res) => {
             }
 
             await client.query(`
-                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, rol_seleccionado, horas_rol, orden)
-                VALUES ($1, $2, $3, $4, $5)
-            `, [idFunciones, idEspacioAca, rolToInsert, horasActividad, procesados + 1]);
+                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [idFunciones, idEspacioAca, idGrupo, rolToInsert, horasActividad, procesados + 1]);
 
             procesados++;
         }
@@ -636,8 +634,6 @@ const actualizarImportacion = async (req, res) => {
             console.log(`[ACTUALIZAR] Fila ${i+2}: Función="${funcionSustantivaStr}" | Asignatura="${asignaturas}" → Match=${matchResult ? matchResult.rolSeleccionado : 'NINGUNO'}`);
             if (matchResult) {
                 rolToInsert = matchResult.rolSeleccionado;
-            } else if (funcionSustantivaStr === 'Docencia Directa') {
-                rolToInsert = semestreRaw || ''; // Guardamos "6E-N" aquí para mostrarlo en el frontend
             } else {
                 const esFuncionCatalogo = await client.query(`
                     SELECT COUNT(*) as cnt FROM asignacion_funciones 
@@ -649,22 +645,28 @@ const actualizarImportacion = async (req, res) => {
                 }
             }
 
-            // Verificar si esta actividad exacta ya existe para no duplicar
+            // Verificar si esta actividad ya existe (por nombre de materia)
             const actExiste = await client.query(`
                 SELECT id_asignacionact FROM asignacion_actividades 
-                WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2) AND horas_rol = $3
-            `, [idFunciones, rolToInsert, horasActividad]);
+                WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
+            `, [idFunciones, rolToInsert]);
 
             if (actExiste.rows.length > 0) {
-                omitidos++;
-                continue; // Ya existe, no duplicar
+                // Actualizar el grupo y las horas de la materia existente
+                await client.query(`
+                    UPDATE asignacion_actividades 
+                    SET id_grupos = $1, horas_rol = $2 
+                    WHERE id_asignacionact = $3
+                `, [idGrupo, horasActividad, actExiste.rows[0].id_asignacionact]);
+                procesados++;
+                continue;
             }
 
-            // Insertar actividad nueva
+            // Insertar actividad nueva si no existía
             await client.query(`
-                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, rol_seleccionado, horas_rol, orden)
-                VALUES ($1, $2, $3, $4, $5)
-            `, [idFunciones, idEspacioAca, rolToInsert, horasActividad, procesados + 1]);
+                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [idFunciones, idEspacioAca, idGrupo, rolToInsert, horasActividad, procesados + 1]);
 
             procesados++;
         }
