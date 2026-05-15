@@ -10,6 +10,7 @@ import DashboardDirector from './pages/director/DashboardDirector'
 import DashboardDocente from './pages/docente/Dashboard'
 import AgendaDocente from './pages/docente/Agenda'
 import AvanceSemana from './pages/docente/AvanceSemana'
+import Evidencias from './pages/docente/Evidencias'
 import Perfil from './pages/common/Perfil'
 import Configuracion from './pages/common/Configuracion'
 
@@ -39,6 +40,7 @@ function App() {
         <Route path="/docente/agenda" element={<AgendaDocente />} />
         <Route path="/docente/avance-semana-8" element={<AvanceSemana semana="8" />} />
         <Route path="/docente/avance-semana-16" element={<AvanceSemana semana="16" />} />
+        <Route path="/docente/evidencias" element={<Evidencias />} />
       </Route>
 
       {/* Comunes */}
