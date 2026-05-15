@@ -25,6 +25,7 @@ interface DocenteData {
   cierre: string;
   totalHorasContrato: number;
   periodoActivo: boolean;
+  perfilDocente: string;
 }
 
 interface Metricas {
@@ -191,9 +192,14 @@ export default function DashboardDocente() {
             <h1 className="text-xl font-bold text-white mb-1">
               Bienvenido, {docente.nombre.split(' ')[0]}
             </h1>
-            <p className="text-blue-200 text-xs">
+            <p className="text-blue-200 text-xs mb-3">
               {docente.programa} · {docente.tipoContrato}
             </p>
+            <div className="flex items-center gap-2">
+              <span className={`px-2.5 py-1 text-[11px] font-bold rounded uppercase tracking-wider ${docente.perfilDocente === 'INCONSISTENCIAS EN AGENDA AC 30' ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-blue-500/30 text-blue-100 border border-blue-500/50'}`}>
+                {docente.perfilDocente || 'Calculando perfil...'}
+              </span>
+            </div>
           </div>
           <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
             {tiempoRestanteTexto && (

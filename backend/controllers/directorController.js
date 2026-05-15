@@ -730,9 +730,11 @@ const getDashboardDirector = async (req, res) => {
                     pa.nombre_programa,
                     tc.tipo AS tipo_contrato,
                     tc.horas_contrato,
-                    COUNT(DISTINCT af.id_funciones) AS total_funciones,
-                    COUNT(DISTINCT CASE WHEN af.estado_agenda = 'Aceptado' THEN af.id_funciones END) AS funciones_aceptadas,
-                    COALESCE(SUM(DISTINCT af.horas_funcion), 0) AS horas_asignadas
+                    COUNT(af.id_funciones) AS total_funciones,
+                    COUNT(CASE WHEN af.estado_agenda = 'Aceptado' THEN af.id_funciones END) AS funciones_aceptadas,
+                    COALESCE(SUM(af.horas_funcion), 0) AS horas_asignadas,
+                    COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
+                    COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Investigación' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
                 FROM usuarios u
                 JOIN programa_academico pa ON pa.id_programa = u.id_programa
                 JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
@@ -747,7 +749,30 @@ const getDashboardDirector = async (req, res) => {
                          pa.nombre_programa, tc.tipo, tc.horas_contrato
                 ORDER BY u.apellidos, u.nombres
             `, [idPeriodo]);
-            docentes = docentesRes.rows;
+            docentes = docentesRes.rows.map(d => {
+                const hDirectas = parseFloat(d.horas_directas) || 0;
+                const hInvestigacion = parseFloat(d.horas_investigacion) || 0;
+                const docenciaIndirecta = Math.round(hDirectas * 0.3);
+                
+                const tipoContrato = (d.tipo_contrato || '').toUpperCase();
+                let perfilDocente = "INCONSISTENCIAS EN AGENDA AC 30";
+
+                if (tipoContrato === "TIEMPO COMPLETO" && hInvestigacion >= 14 && hInvestigacion <= 20) {
+                    perfilDocente = "DOCENTE INVESTIGADOR";
+                } else if (tipoContrato === "TIEMPO COMPLETO" && hDirectas >= 21 && hDirectas <= 30) {
+                    perfilDocente = "TC CON DEDICACIÓN A LA DOCENCIA";
+                } else if (tipoContrato === "MEDIO TIEMPO" && hDirectas <= 15) {
+                    perfilDocente = "MT CON DEDICACIÓN A LA DOCENCIA";
+                } else if (tipoContrato === "HORA CATEDRA" && hDirectas <= 6) {
+                    perfilDocente = "DOCENTE HORA CATEDRA";
+                }
+
+                return {
+                    ...d,
+                    docencia_indirecta: docenciaIndirecta,
+                    perfil_docente: perfilDocente
+                };
+            });
 
             // Check if import was done for this period
             const importCheck = await pool.query(

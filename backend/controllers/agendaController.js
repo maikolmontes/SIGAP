@@ -324,6 +324,24 @@ const guardarAvanceDocente = async (req, res) => {
         await client.query('BEGIN');
 
         for (const ind of indicadores) {
+            // Validar que la ejecución no supere la meta (logro > 1.0 -> 100%)
+            const resultMeta = await client.query(`
+                SELECT d.meta 
+                FROM indicadores i
+                JOIN descripcion d ON d.id_descripcion = i.id_descripcion
+                WHERE i.id_indicadores = $1
+            `, [ind.id_indicador]);
+
+            if (resultMeta.rows.length > 0) {
+                const meta = parseFloat(resultMeta.rows[0].meta) || 0;
+                const ejec8 = parseFloat(ind.ejecucion_8) || 0;
+                const ejec16 = parseFloat(ind.ejecucion_16) || 0;
+                
+                if (meta > 0 && (ejec8 + ejec16) > meta) {
+                    throw new Error('SUPERA EL 100%');
+                }
+            }
+
             await client.query(`
                 UPDATE indicadores 
                 SET ejecucion_8 = $1, 
@@ -344,6 +362,9 @@ const guardarAvanceDocente = async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error en guardarAvanceDocente:', error.message);
+        if (error.message === 'SUPERA EL 100%') {
+            return res.status(400).json({ error: 'El avance registrado SUPERA EL 100% de la meta establecida.' });
+        }
         res.status(500).json({ error: 'Error al guardar el avance.', detalles: error.message });
     } finally {
         client.release();

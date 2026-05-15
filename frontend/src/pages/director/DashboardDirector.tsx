@@ -275,6 +275,11 @@ export default function DashboardDirector() {
                           </td>
                           <td className="px-5 py-3.5">
                             <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-100">{d.tipo_contrato}</span>
+                            <div className="mt-1.5">
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${d.perfil_docente === 'INCONSISTENCIAS EN AGENDA AC 30' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
+                                    {d.perfil_docente || 'Calculando...'}
+                                </span>
+                            </div>
                           </td>
                           <td className="px-5 py-3.5 text-center font-bold text-gray-700">
                             {parseFloat(d.horas_asignadas).toFixed(0)}

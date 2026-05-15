@@ -98,9 +98,10 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
         
         // Refetch to ensure data is in sync
         cargarData();
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error guardando avance:", error);
-        setMensaje({ tipo: 'error', texto: 'Ocurrió un error al intentar guardar el avance.' });
+        const errorMsg = error.response?.data?.error || 'Ocurrió un error al intentar guardar el avance.';
+        setMensaje({ tipo: 'error', texto: errorMsg });
     } finally {
         setGuardando(false);
     }

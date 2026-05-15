@@ -119,12 +119,43 @@ const getDashboard = async (req, res) => {
 
 
         // Procesar datos - distribución de horas
-        const distribucionHoras = distribucionQuery.rows.map(row => ({
-            funcion: row.funcion,
-            horas: parseFloat(row.horas_asignadas) || 0
-        }));
+        let horasDirectas = 0;
+        let horasInvestigacion = 0;
+
+        const distribucionHoras = distribucionQuery.rows.map(row => {
+            const horas = parseFloat(row.horas_asignadas) || 0;
+            if (row.funcion === 'Docencia Directa') horasDirectas = horas;
+            if (row.funcion === 'Investigación') horasInvestigacion = horas;
+            return {
+                funcion: row.funcion,
+                horas: horas
+            };
+        });
+
+        // 1. Docencia Indirecta (automática)
+        const docenciaIndirecta = Math.round(horasDirectas * 0.3);
+        const indexIndirecta = distribucionHoras.findIndex(d => d.funcion === 'Docencia Indirecta');
+        if (indexIndirecta !== -1) {
+            distribucionHoras[indexIndirecta].horas = docenciaIndirecta;
+        } else if (horasDirectas > 0) {
+            distribucionHoras.push({ funcion: 'Docencia Indirecta', horas: docenciaIndirecta });
+        }
 
         const totalHoras = distribucionHoras.reduce((sum, item) => sum + item.horas, 0);
+
+        // 2. Validación de consistencia
+        const tipoContrato = (docenteRow.tipo_contrato || '').toUpperCase();
+        let perfilDocente = "INCONSISTENCIAS EN AGENDA AC 30";
+
+        if (tipoContrato === "TIEMPO COMPLETO" && horasInvestigacion >= 14 && horasInvestigacion <= 20) {
+            perfilDocente = "DOCENTE INVESTIGADOR";
+        } else if (tipoContrato === "TIEMPO COMPLETO" && horasDirectas >= 21 && horasDirectas <= 30) {
+            perfilDocente = "TC CON DEDICACIÓN A LA DOCENCIA";
+        } else if (tipoContrato === "MEDIO TIEMPO" && horasDirectas <= 15) {
+            perfilDocente = "MT CON DEDICACIÓN A LA DOCENCIA";
+        } else if (tipoContrato === "HORA CATEDRA" && horasDirectas <= 6) {
+            perfilDocente = "DOCENTE HORA CATEDRA";
+        }
 
         // Avance por función sustantiva basado en indicadores reales
         const avanceSemana8 = avanceQuery.rows.map(row => {
@@ -176,7 +207,8 @@ const getDashboard = async (req, res) => {
                 periodo: periodoLabel,
                 cierre: periodoRow?.fecha_fin || null,
                 periodoActivo: !!periodoRow?.activo,
-                totalHorasContrato: parseFloat(docenteRow.total_horas_contrato) || 40
+                totalHorasContrato: parseFloat(docenteRow.total_horas_contrato) || 40,
+                perfilDocente: perfilDocente
             },
             metricas: {
                 totalHoras,
