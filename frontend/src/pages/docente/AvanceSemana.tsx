@@ -3,6 +3,7 @@ import Layout from '../../components/common/Layout';
 import { FileText, CheckCircle, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList } from 'lucide-react';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
 
 interface AvanceSemanaProps {
   semana: '8' | '16';
@@ -19,6 +20,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
   const [selectedFunctionIndex, setSelectedFunctionIndex] = useState(0);
   const [selectedActivityIndex, setSelectedActivityIndex] = useState(0);
+  const [modalEvidencia, setModalEvidencia] = useState({ isOpen: false, idIndicador: 0, nombreIndicador: '' });
 
   useEffect(() => {
     setSelectedActivityIndex(0);
@@ -358,7 +360,10 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                     />
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
-                                                    <button className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-200 text-xs font-medium transition-colors w-full">
+                                                    <button 
+                                                        onClick={() => setModalEvidencia({ isOpen: true, idIndicador: ind.id_indicador, nombreIndicador: ind.nombre_indicador })}
+                                                        className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-200 text-xs font-medium transition-colors w-full"
+                                                    >
                                                         <UploadCloud className="w-3.5 h-3.5" />
                                                         Subir
                                                     </button>
@@ -427,6 +432,15 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
              <p className="text-sm text-gray-500 mt-2 max-w-md">Aún no se ha configurado tu agenda docente o no tienes actividades asignadas para reportar avance.</p>
           </div>
       )}
+      <SubirEvidenciaModal
+        isOpen={modalEvidencia.isOpen}
+        onClose={() => setModalEvidencia({ ...modalEvidencia, isOpen: false })}
+        idIndicador={modalEvidencia.idIndicador}
+        nombreIndicador={modalEvidencia.nombreIndicador}
+        onUploadSuccess={() => {
+            // Success logic if any needed
+        }}
+      />
     </Layout>
   );
 }

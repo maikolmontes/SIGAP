@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 require('./db/connection');
 
@@ -26,6 +27,10 @@ app.use('/api/docente', docenteRouter);
 app.use('/api/user', userRouter);
 app.use('/api/director', require('./routes/director'));
 app.use('/api/semanas', require('./routes/semanas'));
+app.use('/api/evidencias', require('./routes/evidencias'));
+
+// Servir archivos estáticos de evidencias
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/api', (req, res) => {
     res.json({

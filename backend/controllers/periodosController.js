@@ -11,11 +11,9 @@ const getAll = async (req, res) => {
                 p.fecha_fin,
                 p.activo,
                 p.creado_en,
-                COUNT(DISTINCT u.id_usuario) AS total_docentes
+                COUNT(DISTINCT dp.id_usuario) AS total_docentes
             FROM periodo p
-            LEFT JOIN programa_periodo pp ON p.id_periodo  = pp.id_periodo
-            LEFT JOIN programa_academico pa ON pp.id_programa = pa.id_programa
-            LEFT JOIN usuarios u ON pa.id_programa = u.id_programa AND u.activo = TRUE
+            LEFT JOIN docente_periodo dp ON p.id_periodo = dp.id_periodo
             GROUP BY p.id_periodo, p.anio, p.semestre,
                      p.fecha_inicio, p.fecha_fin, p.activo, p.creado_en
             ORDER BY p.anio DESC, p.semestre DESC
@@ -167,17 +165,17 @@ const getDocentesAsignados = async (req, res) => {
                 u.apellidos,
                 u.correo,
                 u.activo,
-                pa.nombre_programa,
-                STRING_AGG(r.nombre_rol, ', ') AS roles
-            FROM usuarios u
-            JOIN programa_academico pa  ON u.id_programa  = pa.id_programa
-            JOIN programa_periodo pp    ON pa.id_programa = pp.id_programa
-            JOIN usuario_rol ur         ON u.id_usuario   = ur.id_usuario
-            JOIN roles r                ON ur.id_rol      = r.id_rol
-            WHERE pp.id_periodo = $1
-              AND u.activo = TRUE
+                COALESCE(pa.nombre_programa, '') AS nombre_programa,
+                COALESCE(STRING_AGG(DISTINCT r.nombre_rol, ', '), '') AS roles,
+                dp.fecha_asignacion
+            FROM docente_periodo dp
+            JOIN usuarios u ON dp.id_usuario = u.id_usuario
+            LEFT JOIN programa_academico pa ON u.id_programa = pa.id_programa
+            LEFT JOIN usuario_rol ur ON u.id_usuario = ur.id_usuario
+            LEFT JOIN roles r ON ur.id_rol = r.id_rol
+            WHERE dp.id_periodo = $1
             GROUP BY u.id_usuario, u.nombres, u.apellidos,
-                     u.correo, u.activo, pa.nombre_programa
+                     u.correo, u.activo, pa.nombre_programa, dp.fecha_asignacion
             ORDER BY u.apellidos, u.nombres
         `, [id]);
 
@@ -210,32 +208,46 @@ const asignarDocentes = async (req, res) => {
         let duplicados = 0;
 
         for (const idUsuario of docentes) {
+            // Verificar que el usuario exista
             const usuario = await pool.query(
-                'SELECT id_programa FROM usuarios WHERE id_usuario = $1', [idUsuario]
+                'SELECT id_usuario FROM usuarios WHERE id_usuario = $1', [idUsuario]
             );
             if (usuario.rows.length === 0) continue;
 
+            // Insertar en docente_periodo (la restricción UNIQUE evita duplicados)
+            try {
+                await pool.query(`
+                    INSERT INTO docente_periodo (id_usuario, id_periodo)
+                    VALUES ($1, $2)
+                `, [idUsuario, id]);
+                insertados++;
+            } catch (e) {
+                // UNIQUE violation = ya estaba asignado
+                duplicados++;
+            }
+        }
+
+        // Mantener también programa_periodo para compatibilidad con el resto del sistema
+        for (const idUsuario of docentes) {
+            const usuario = await pool.query(
+                'SELECT id_programa FROM usuarios WHERE id_usuario = $1', [idUsuario]
+            );
+            if (usuario.rows.length === 0 || !usuario.rows[0].id_programa) continue;
             const id_programa = usuario.rows[0].id_programa;
 
             const existe = await pool.query(
                 'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
                 [id_programa, id]
             );
-
             if (existe.rows.length === 0) {
                 const pensul = await pool.query(
                     'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
                 );
                 const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-
                 await pool.query(`
                     INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
                     VALUES ($1, $2, $3)
                 `, [id, id_programa, id_pensulaca]);
-
-                insertados++;
-            } else {
-                duplicados++;
             }
         }
 
@@ -253,20 +265,12 @@ const asignarDocentes = async (req, res) => {
 const desasignarDocente = async (req, res) => {
     const { id, idUsuario } = req.params;
     try {
-        const usuario = await pool.query(
-            'SELECT id_programa FROM usuarios WHERE id_usuario = $1', [idUsuario]
-        );
-        if (usuario.rows.length === 0) {
-            return res.status(404).json({ error: 'Usuario no encontrado.' });
-        }
-
-        const id_programa = usuario.rows[0].id_programa;
-
+        // Borrar solo la relación individual docente-periodo
         const result = await pool.query(`
-            DELETE FROM programa_periodo
-            WHERE id_periodo = $1 AND id_programa = $2
+            DELETE FROM docente_periodo
+            WHERE id_periodo = $1 AND id_usuario = $2
             RETURNING *
-        `, [id, id_programa]);
+        `, [id, idUsuario]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({
