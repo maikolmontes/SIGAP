@@ -196,7 +196,20 @@ const getAgendaBase = async (req, res) => {
                 i.nombre_indicador,
                 i.ejecucion_8,
                 i.ejecucion_16,
-                i.observaciones
+                i.observaciones,
+
+                (
+                    SELECT COALESCE(json_agg(json_build_object(
+                        'id_evidencias', ev.id_evidencias,
+                        'nombre_archivo', ev.nombre_archivo,
+                        'ruta_archivo', ev.ruta_archivo,
+                        'tipo_archivo', ev.tipo_archivo,
+                        'tamanio_archivo_kb', ev.tamanio_archivo_kb,
+                        'fecha_carga', ev.fecha_carga
+                    ) ORDER BY ev.fecha_carga DESC), '[]'::json)
+                    FROM evidencias ev
+                    WHERE ev.id_indicadores = i.id_indicadores
+                ) AS evidencias
                 
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af    ON ua.id_funciones     = af.id_funciones

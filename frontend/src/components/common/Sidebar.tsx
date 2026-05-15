@@ -23,8 +23,11 @@ const menuDirector: MenuItem[] = [
     { label: 'Principal', isHeader: true },
     { label: 'Dashboard', path: '/director/dashboard' },
     { label: 'Supervisión', isHeader: true },
-    { label: 'Agendas', path: '/director/agendas' },
+    { label: 'Agendas por revisar', path: '/director/agendas' },
+    { label: 'Historial de agendas', path: '/director/historial' },
     { label: 'Observaciones', path: '/director/observaciones' },
+    { label: 'Reportes', isHeader: true },
+    { label: 'Reportes', path: '/director/reportes' },
 ]
 
 const menuDocente: MenuItem[] = [

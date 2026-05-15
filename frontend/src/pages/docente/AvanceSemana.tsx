@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
-import { FileText, CheckCircle, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList } from 'lucide-react';
+import { FileText, CheckCircle, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye } from 'lucide-react';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
@@ -65,7 +65,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                          ejecucion_8: curr.ejecucion_8,
                          ejecucion_16: curr.ejecucion_16,
                          observaciones: curr.observaciones,
-                         meta: curr.meta
+                         meta: curr.meta,
+                         evidencias: curr.evidencias || []
                      });
                  }
                  return acc;
@@ -360,14 +361,34 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                         className={`w-full text-xs border rounded px-2 py-1.5 resize-none h-12 transition-colors ${rolActual === 'director' ? 'bg-white border-blue-300 focus:ring-2 focus:ring-blue-200 focus:outline-none' : 'bg-gray-50 border-gray-200 text-gray-600 cursor-not-allowed'}`}
                                                     />
                                                 </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    <button 
-                                                        onClick={() => setModalEvidencia({ isOpen: true, idIndicador: ind.id_indicador, nombreIndicador: ind.nombre_indicador })}
-                                                        className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-200 text-xs font-medium transition-colors w-full"
-                                                    >
-                                                        <UploadCloud className="w-3.5 h-3.5" />
-                                                        Subir
-                                                    </button>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex flex-col gap-2">
+                                                        <button 
+                                                            onClick={() => setModalEvidencia({ isOpen: true, idIndicador: ind.id_indicador, nombreIndicador: ind.nombre_indicador })}
+                                                            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-200 text-xs font-medium transition-colors w-full"
+                                                        >
+                                                            <UploadCloud className="w-3.5 h-3.5" />
+                                                            Subir
+                                                        </button>
+                                                        {ind.evidencias?.length > 0 && (
+                                                            <div className="flex flex-col gap-1.5 mt-2">
+                                                                <span className="text-[10px] font-bold text-gray-400 uppercase">Cargadas:</span>
+                                                                {ind.evidencias.map((ev: any) => (
+                                                                    <a 
+                                                                        key={ev.id_evidencias}
+                                                                        href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : `http://localhost:3000${ev.ruta_archivo.startsWith('/') ? ev.ruta_archivo : '/' + ev.ruta_archivo}`}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline bg-white p-1.5 rounded border border-gray-100 shadow-sm"
+                                                                        title={ev.nombre_archivo}
+                                                                    >
+                                                                        {ev.tipo_archivo === 'enlace' ? <ExternalLink className="w-3.5 h-3.5 shrink-0" /> : <Eye className="w-3.5 h-3.5 shrink-0" />}
+                                                                        <span className="truncate max-w-[100px]">{ev.nombre_archivo}</span>
+                                                                    </a>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         );

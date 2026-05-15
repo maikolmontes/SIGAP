@@ -7,6 +7,11 @@ import Docentes from './pages/planeacion/Docentes'
 import Periodos from './pages/planeacion/Periodos'
 import Semanas from './pages/planeacion/Semanas'
 import DashboardDirector from './pages/director/DashboardDirector'
+import AgendasPorRevisar from './pages/director/AgendasPorRevisar'
+import DetalleAgenda from './pages/director/DetalleAgenda'
+import HistorialAgendas from './pages/director/HistorialAgendas'
+import ReportesDirector from './pages/director/ReportesDirector'
+import ObservacionesDirector from './pages/director/ObservacionesDirector'
 import DashboardDocente from './pages/docente/Dashboard'
 import AgendaDocente from './pages/docente/Agenda'
 import AvanceSemana from './pages/docente/AvanceSemana'
@@ -32,6 +37,11 @@ function App() {
       {/* Director */}
       <Route element={<ProtectedRoute allowedRoles={['Director']} />}>
         <Route path="/director/dashboard" element={<DashboardDirector />} />
+        <Route path="/director/agendas" element={<AgendasPorRevisar />} />
+        <Route path="/director/agendas/:id" element={<DetalleAgenda />} />
+        <Route path="/director/historial" element={<HistorialAgendas />} />
+        <Route path="/director/reportes" element={<ReportesDirector />} />
+        <Route path="/director/observaciones" element={<ObservacionesDirector />} />
       </Route>
 
       {/* Docente */}
