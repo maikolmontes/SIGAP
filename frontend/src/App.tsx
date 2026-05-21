@@ -20,6 +20,11 @@ import Perfil from './pages/common/Perfil'
 import Configuracion from './pages/common/Configuracion'
 import Analitica from './pages/common/Analitica'
 
+// Consultor Pages
+import DashboardConsultor from './pages/consultor/DashboardConsultor'
+import DetalleAgendaConsultor from './pages/consultor/DetalleAgendaConsultor'
+import ObservacionesConsultor from './pages/consultor/ObservacionesConsultor'
+
 function App() {
   return (
     <Routes>
@@ -54,6 +59,14 @@ function App() {
         <Route path="/docente/avance-semana-8" element={<AvanceSemana semana="8" />} />
         <Route path="/docente/avance-semana-16" element={<AvanceSemana semana="16" />} />
         <Route path="/docente/evidencias" element={<Evidencias />} />
+      </Route>
+
+      {/* Consultor */}
+      <Route element={<ProtectedRoute allowedRoles={['Consultor']} />}>
+        <Route path="/consultor/dashboard" element={<DashboardConsultor />} />
+        <Route path="/consultor/agendas/:id" element={<DetalleAgendaConsultor />} />
+        <Route path="/consultor/observaciones" element={<ObservacionesConsultor />} />
+        <Route path="/consultor/analitica" element={<Analitica rol="consultor" />} />
       </Route>
 
       {/* Comunes */}

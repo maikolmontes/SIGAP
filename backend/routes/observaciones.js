@@ -5,7 +5,7 @@ const verifyToken = require('../middleware/verifyToken');
 const verifyRole = require('../middleware/verifyRole');
 
 // GET /api/observaciones/todas — Obtener todas las observaciones del director
-router.get('/todas', verifyToken, verifyRole('Director'), getTodasObservaciones);
+router.get('/todas', verifyToken, verifyRole('Director', 'Consultor'), getTodasObservaciones);
 
 // PUT /api/observaciones/:actividad_id — Guardar observación
 router.put('/:actividad_id', verifyToken, verifyRole('Director'), guardarObservacion);

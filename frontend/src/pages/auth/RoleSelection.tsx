@@ -56,6 +56,7 @@ const RoleSelection = () => {
     if (rolLower.includes('docente')) return <BookOpen className="w-6 h-6" />;
     if (rolLower.includes('director')) return <Users className="w-6 h-6" />;
     if (rolLower.includes('planeacion') || rolLower.includes('admin')) return <Settings className="w-6 h-6" />;
+    if (rolLower.includes('consultor') || rolLower.includes('auditor')) return <Eye className="w-6 h-6" />;
     return <Eye className="w-6 h-6" />;
   };
 
@@ -97,6 +98,18 @@ const RoleSelection = () => {
         defaultDesc: 'Administra los períodos académicos, gestiona la plantilla de docentes, configura semanas y analiza estadísticas.',
       };
     }
+    if (rolLower.includes('consultor') || rolLower.includes('auditor')) {
+      return {
+        iconBg: 'bg-teal-50',
+        iconColor: 'text-teal-600',
+        borderActive: 'border-teal-500',
+        badgeBg: 'bg-teal-100',
+        badgeText: 'text-teal-700',
+        buttonBg: 'bg-teal-600 hover:bg-teal-700',
+        moduleName: 'Módulo Consultoría',
+        defaultDesc: 'Visualiza agendas académicas, registros de actividades, evidencias y estadísticas generales en modo de solo lectura.',
+      };
+    }
     return {
       iconBg: 'bg-gray-50',
       iconColor: 'text-gray-600',
@@ -119,6 +132,7 @@ const RoleSelection = () => {
     if (nombreNormalizado.includes('docente')) navigate('/docente/dashboard');
     else if (nombreNormalizado.includes('director')) navigate('/director/dashboard');
     else if (nombreNormalizado.includes('planeacion') || nombreNormalizado.includes('admin')) navigate('/planeacion/dashboard');
+    else if (nombreNormalizado.includes('consultor') || nombreNormalizado.includes('auditor')) navigate('/consultor/dashboard');
     else navigate('/');
   };
 

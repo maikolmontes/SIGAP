@@ -5,6 +5,16 @@ import * as XLSX from 'xlsx'
 import api from '../../services/api'
 // @ts-ignore
 import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios } from '../../services/usuariosService'
+import { getPeriodos } from '../../services/periodosService'
+
+interface Periodo {
+    id_periodo: number
+    anio: number
+    semestre: number
+    activo: boolean
+    fecha_inicio: string
+    fecha_fin: string
+}
 
 interface Docente {
     id_usuario: number
@@ -46,6 +56,8 @@ export default function DashboardPlaneacion() {
     const [error, setError] = useState('')
     const navigate = useNavigate()
     const [modalAgregar, setModalAgregar] = useState(false)
+    // New state for active period
+    const [periodoActivo, setPeriodoActivo] = useState<Periodo | null>(null)
     const [modalImportar, setModalImportar] = useState(false)
     const [archivoImportar, setArchivoImportar] = useState<File | null>(null)
     const [importando, setImportando] = useState(false)
@@ -83,11 +95,23 @@ export default function DashboardPlaneacion() {
     useEffect(() => {
         cargarDocentes()
         cargarAgendas()
+        cargarPeriodoActivo()
         const interval = setInterval(() => {
             cargarAgendas()
+            cargarPeriodoActivo()
         }, 30000)
         return () => clearInterval(interval)
     }, [cargarDocentes, cargarAgendas])
+
+    const cargarPeriodoActivo = async () => {
+        try {
+            const res = await getPeriodos()
+            const activo = res.data.find((p: any) => p.activo)
+            setPeriodoActivo(activo || null)
+        } catch (e) {
+            console.error('Error loading active period', e)
+        }
+    }
 
     const docentesFiltrados = docentes.filter(d => {
         const matchBusqueda = `${d.nombres} ${d.apellidos}`.toLowerCase().includes(busqueda.toLowerCase())
@@ -227,7 +251,7 @@ export default function DashboardPlaneacion() {
                 <div>
                     <h2 className="text-white text-lg font-medium">Bienvenido, Planeación</h2>
                     <p className="text-white/50 text-xs mt-0.5">
-                        Período 2025 IIP · Facultad de Ingeniería
+                        {periodoActivo ? `Período ${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : 'Cargando período...'} · Facultad de Ingeniería
                     </p>
                 </div>
             </div>
@@ -277,7 +301,7 @@ export default function DashboardPlaneacion() {
                         </div>
                         <div>
                             <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Período Activo</p>
-                            <p className="text-xl font-black text-gray-800 tracking-tight">2025 IIP</p>
+                            <p className="text-xl font-black text-gray-800 tracking-tight">{periodoActivo ? `${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : 'Cargando...'}</p>
                         </div>
                     </div>
                 </div>

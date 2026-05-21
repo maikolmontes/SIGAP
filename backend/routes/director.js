@@ -10,17 +10,17 @@ const verifyRole = require('../middleware/verifyRole');
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Rutas existentes — ahora protegidas con auth
-router.get('/dashboard', verifyToken, verifyRole('Director', 'Planeacion'), getDashboardDirector);
+router.get('/dashboard', verifyToken, verifyRole('Director', 'Planeacion', 'Consultor'), getDashboardDirector);
 router.post('/importar', verifyToken, verifyRole('Director'), upload.single('archivo'), importarAsignaciones);
 router.post('/actualizar', verifyToken, verifyRole('Director'), upload.single('archivo'), actualizarImportacion);
 
 // Rutas de revisión de agendas — módulo Director
-router.get('/agendas', verifyToken, verifyRole('Director'), getAgendas);
-router.get('/agendas/:id', verifyToken, verifyRole('Director'), getAgendaDetalle);
+router.get('/agendas', verifyToken, verifyRole('Director', 'Consultor'), getAgendas);
+router.get('/agendas/:id', verifyToken, verifyRole('Director', 'Consultor'), getAgendaDetalle);
 router.put('/agendas/:id/aprobar', verifyToken, verifyRole('Director'), aprobarAgenda);
 router.put('/agendas/:id/devolver', verifyToken, verifyRole('Director'), devolverAgenda);
 
 // Reportes
-router.get('/reportes/resumen', verifyToken, verifyRole('Director', 'Planeacion'), getReportesResumen);
+router.get('/reportes/resumen', verifyToken, verifyRole('Director', 'Planeacion', 'Consultor'), getReportesResumen);
 
 module.exports = router;

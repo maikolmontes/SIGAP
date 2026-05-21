@@ -42,16 +42,37 @@ const menuDocente: MenuItem[] = [
     { label: 'Evidencias', path: '/docente/evidencias' },
 ]
 
+const menuConsultor: MenuItem[] = [
+    { label: 'Principal', isHeader: true },
+    { label: 'Dashboard', path: '/consultor/dashboard' },
+    { label: 'Auditoría', isHeader: true },
+    { label: 'Observaciones', path: '/consultor/observaciones' },
+    { label: 'Reportes', isHeader: true },
+    { label: 'Analítica', path: '/consultor/analitica' },
+]
+
 interface SidebarProps {
-    rol: 'planeacion' | 'director' | 'docente'
+    rol: 'planeacion' | 'director' | 'docente' | 'consultor'
     onClose?: () => void
 }
 
 export default function Sidebar({ rol, onClose }: SidebarProps) {
     const [periodoEtiqueta, setPeriodoEtiqueta] = useState<string>('Cargando...')
     const [tienePeriodo, setTienePeriodo] = useState<boolean>(false)
-    const menu = rol === 'planeacion' ? menuPlaneacion : rol === 'director' ? menuDirector : menuDocente
-    const rolLabel = rol === 'planeacion' ? 'Planeación' : rol === 'director' ? 'Director' : 'Docente'
+    const menu = rol === 'planeacion' 
+        ? menuPlaneacion 
+        : rol === 'director' 
+            ? menuDirector 
+            : rol === 'consultor' 
+                ? menuConsultor 
+                : menuDocente
+    const rolLabel = rol === 'planeacion' 
+        ? 'Planeación' 
+        : rol === 'director' 
+            ? 'Director' 
+            : rol === 'consultor' 
+                ? 'Consultor' 
+                : 'Docente'
 
     useEffect(() => {
         const fetchPeriodoActivo = async () => {
