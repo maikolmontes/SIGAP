@@ -182,17 +182,8 @@ const getDashboard = async (req, res) => {
 
         // 2. Validación de consistencia
         const tipoContrato = (docenteRow.tipo_contrato || '').toUpperCase();
-        let perfilDocente = "INCONSISTENCIAS EN AGENDA AC 30";
-
-        if (tipoContrato === "TIEMPO COMPLETO" && horasInvestigacion >= 14 && horasInvestigacion <= 20) {
-            perfilDocente = "DOCENTE INVESTIGADOR";
-        } else if (tipoContrato === "TIEMPO COMPLETO" && horasDirectas >= 21 && horasDirectas <= 30) {
-            perfilDocente = "TC CON DEDICACIÓN A LA DOCENCIA";
-        } else if (tipoContrato === "MEDIO TIEMPO" && horasDirectas <= 15) {
-            perfilDocente = "MT CON DEDICACIÓN A LA DOCENCIA";
-        } else if (tipoContrato === "HORA CATEDRA" && horasDirectas <= 6) {
-            perfilDocente = "DOCENTE HORA CATEDRA";
-        }
+        const horasContrato = parseFloat(docenteRow.total_horas_contrato) || 40;
+        let perfilDocente = (totalHoras === horasContrato) ? "AGENDA CORRECTA" : "INCONSISTENCIAS EN AGENDA AC 30";
 
         // Avance por función sustantiva basado en indicadores reales
         const avanceSemana8 = avanceQuery.rows.map(row => {

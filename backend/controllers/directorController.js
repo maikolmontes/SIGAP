@@ -755,17 +755,9 @@ const getDashboardDirector = async (req, res) => {
                 const docenciaIndirecta = Math.round(hDirectas * 0.3);
                 
                 const tipoContrato = (d.tipo_contrato || '').toUpperCase();
-                let perfilDocente = "INCONSISTENCIAS EN AGENDA AC 30";
-
-                if (tipoContrato === "TIEMPO COMPLETO" && hInvestigacion >= 14 && hInvestigacion <= 20) {
-                    perfilDocente = "DOCENTE INVESTIGADOR";
-                } else if (tipoContrato === "TIEMPO COMPLETO" && hDirectas >= 21 && hDirectas <= 30) {
-                    perfilDocente = "TC CON DEDICACIÓN A LA DOCENCIA";
-                } else if (tipoContrato === "MEDIO TIEMPO" && hDirectas <= 15) {
-                    perfilDocente = "MT CON DEDICACIÓN A LA DOCENCIA";
-                } else if (tipoContrato === "HORA CATEDRA" && hDirectas <= 6) {
-                    perfilDocente = "DOCENTE HORA CATEDRA";
-                }
+                const totalHoras = parseFloat(d.horas_asignadas) || 0;
+                const horasContrato = parseFloat(d.horas_contrato) || 40;
+                let perfilDocente = (totalHoras === horasContrato) ? "AGENDA CORRECTA" : "INCONSISTENCIAS EN AGENDA AC 30";
 
                 return {
                     ...d,

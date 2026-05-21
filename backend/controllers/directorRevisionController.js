@@ -7,16 +7,15 @@ const pool = require('../db/connection');
 // ================================================================
 // Helper: Calcular perfil docente según Acuerdo 030/2024
 // ================================================================
-const calcularPerfilDocente = (tipoContrato, horasDirectas, horasInvestigacion) => {
-    const tc = (tipoContrato || '').toUpperCase();
-    const hd = parseFloat(horasDirectas) || 0;
-    const hi = parseFloat(horasInvestigacion) || 0;
+const calcularPerfilDocente = (tipoContrato, horasDirectas, horasInvestigacion, totalHoras = 0, horasContrato = 40) => {
+    const th = parseFloat(totalHoras) || 0;
+    const hc = parseFloat(horasContrato) || 40;
 
-    if (tc === 'TIEMPO COMPLETO' && hi >= 14 && hi <= 20) return 'DOCENTE INVESTIGADOR';
-    if (tc === 'TIEMPO COMPLETO' && hd >= 21 && hd <= 30) return 'TC CON DEDICACIÓN A LA DOCENCIA';
-    if (tc === 'MEDIO TIEMPO' && hd <= 15) return 'MT CON DEDICACIÓN A LA DOCENCIA';
-    if (tc === 'HORA CATEDRA' && hd <= 6) return 'DOCENTE HORA CATEDRA';
-    return 'INCONSISTENCIAS EN AGENDA AC 30';
+    if (th === hc) {
+        return 'AGENDA CORRECTA';
+    } else {
+        return 'INCONSISTENCIAS EN AGENDA AC 30';
+    }
 };
 
 // ================================================================
@@ -130,7 +129,7 @@ const getAgendas = async (req, res) => {
 
         // Calcular perfil y estado general por docente
         const agendas = Array.from(docentesMap.values()).map(d => {
-            d.perfil_docente = calcularPerfilDocente(d.tipo_contrato, d.horas_directas, d.horas_investigacion);
+            d.perfil_docente = calcularPerfilDocente(d.tipo_contrato, d.horas_directas, d.horas_investigacion, d.total_horas, d.horas_contrato);
 
             // Estado general: si alguna función fue devuelta → Devuelta,
             // si todas aprobadas → Aprobada, si alguna aceptada → Aceptado, sino Pendiente
@@ -201,11 +200,13 @@ const getAgendaDetalle = async (req, res) => {
 
         let horasDirectas = 0;
         let horasInvestigacion = 0;
+        let totalHoras = 0;
 
         // Para cada función, traer actividades con descripciones, indicadores, evidencias
         const funciones = [];
         for (const func of funcionesRes.rows) {
             const hf = parseFloat(func.horas_funcion) || 0;
+            totalHoras += hf;
             if (func.funcion_sustantiva === 'Docencia Directa') horasDirectas += hf;
             if (func.funcion_sustantiva && func.funcion_sustantiva.toLowerCase().includes('investigación')) horasInvestigacion += hf;
 
@@ -281,7 +282,7 @@ const getAgendaDetalle = async (req, res) => {
         }
 
         // Calcular perfil docente
-        const perfilDocente = calcularPerfilDocente(docente.tipo_contrato, horasDirectas, horasInvestigacion);
+        const perfilDocente = calcularPerfilDocente(docente.tipo_contrato, horasDirectas, horasInvestigacion, totalHoras, docente.horas_contrato);
 
         // Docencia indirecta calculada
         const decimal = horasDirectas * 0.3;
@@ -534,6 +535,8 @@ const getReportesResumen = async (req, res) => {
             SELECT
                 u.id_usuario,
                 tc.tipo AS tipo_contrato,
+                tc.horas_contrato AS horas_contrato,
+                COALESCE(SUM(af.horas_funcion), 0) AS total_horas,
                 COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
                 COALESCE(SUM(CASE WHEN af.funcion_sustantiva ILIKE '%investigación%' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
             FROM usuarios u
@@ -543,13 +546,13 @@ const getReportesResumen = async (req, res) => {
             LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
             LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
             WHERE u.activo = TRUE
-            GROUP BY u.id_usuario, tc.tipo
+            GROUP BY u.id_usuario, tc.tipo, tc.horas_contrato
         `, [idPeriodo]);
 
         // Contar perfiles
         const perfilCount = {};
         for (const row of perfilesRes.rows) {
-            const perfil = calcularPerfilDocente(row.tipo_contrato, row.horas_directas, row.horas_investigacion);
+            const perfil = calcularPerfilDocente(row.tipo_contrato, row.horas_directas, row.horas_investigacion, row.total_horas, row.horas_contrato);
             perfilCount[perfil] = (perfilCount[perfil] || 0) + 1;
         }
         const distribucionPerfiles = Object.entries(perfilCount).map(([perfil, cantidad]) => ({ perfil, cantidad }));
