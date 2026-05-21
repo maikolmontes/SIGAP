@@ -166,7 +166,7 @@ export default function ReportesDirector() {
                                         paddingAngle={4}
                                         dataKey="value"
                                         stroke="none"
-                                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                        label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
                                     >
                                         {datosEstados.map((_, i) => (
                                             <Cell key={i} fill={coloresEstados[i % coloresEstados.length]} />

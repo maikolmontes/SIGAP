@@ -11,6 +11,23 @@ interface Evidencia {
     tipo_archivo: string;
     tamanio_archivo_kb: number;
     fecha_carga: string;
+    semana?: string;
+    id_periodo?: number;
+}
+
+interface Periodo {
+    id_periodo: number;
+    anio: number;
+    semestre: number;
+    activo: boolean;
+}
+
+interface Semana {
+    id_semana: number;
+    numero_semana: string;
+    etiqueta: string;
+    habilitada: boolean;
+    id_periodo: number;
 }
 
 interface Indicador {
@@ -40,6 +57,12 @@ const Evidencias: React.FC = () => {
     const [eliminandoId, setEliminandoId] = useState<number | null>(null);
     const [preview, setPreview] = useState<Evidencia | null>(null);
 
+    const [periodos, setPeriodos] = useState<Periodo[]>([]);
+    const [semanas, setSemanas] = useState<Semana[]>([]);
+    const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null);
+    const [selectedWeek, setSelectedWeek] = useState<string>('8');
+    const [activePeriodId, setActivePeriodId] = useState<number | null>(null);
+
     useEffect(() => {
         if (user) {
             cargarEvidencias();
@@ -52,6 +75,28 @@ const Evidencias: React.FC = () => {
             const userId = (user as any)?.id_usuario || user?.id;
             if (!userId) return;
 
+            // 1. Cargar periodos
+            const periodosRes = await api.get('/periodos');
+            setPeriodos(periodosRes.data);
+
+            const activoRes = await api.get('/periodos/activo');
+            const activePeriod = activoRes.data;
+            if (activePeriod) {
+                setActivePeriodId(activePeriod.id_periodo);
+                setSelectedPeriod((prev) => prev !== null ? prev : activePeriod.id_periodo);
+            }
+
+            // 2. Cargar semanas habilitadas del periodo activo
+            const semanasRes = await api.get('/semanas');
+            setSemanas(semanasRes.data);
+
+            // Pre-seleccionar la semana habilitada (si hay una habilitada)
+            const semanaHabilitada = semanasRes.data.find((s: Semana) => s.habilitada && s.numero_semana !== '0');
+            if (semanaHabilitada) {
+                setSelectedWeek(semanaHabilitada.numero_semana);
+            }
+
+            // 3. Cargar evidencias
             const response = await api.get(`/evidencias/${userId}`);
             setData(response.data);
             
@@ -138,6 +183,38 @@ const Evidencias: React.FC = () => {
 
     const activeFunctionData = data.find(f => f.funcionSustantiva === selectedFunction);
 
+    const isWeekHabilitada = React.useMemo(() => {
+        if (selectedPeriod !== activePeriodId) return false;
+        const sem = semanas.find((s) => s.numero_semana === selectedWeek);
+        return sem ? sem.habilitada : false;
+    }, [selectedPeriod, activePeriodId, selectedWeek, semanas]);
+
+    const filteredFunctionData = React.useMemo(() => {
+        if (!activeFunctionData || selectedPeriod === null) return null;
+
+        const filteredActividades = activeFunctionData.actividades.map((act) => {
+            const filteredIndicadores = act.indicadores.map((ind) => {
+                const filteredEvidencias = ind.evidencias.filter(
+                    (ev) => Number(ev.id_periodo) === selectedPeriod && String(ev.semana) === selectedWeek
+                );
+                return {
+                    ...ind,
+                    evidencias: filteredEvidencias
+                };
+            }).filter((ind) => ind.evidencias.length > 0);
+
+            return {
+                ...act,
+                indicadores: filteredIndicadores
+            };
+        }).filter((act) => act.indicadores.length > 0);
+
+        return {
+            ...activeFunctionData,
+            actividades: filteredActividades
+        };
+    }, [activeFunctionData, selectedPeriod, selectedWeek]);
+
     if (loading) {
         return (
             <Layout rol="docente" path="Registro de Actividades / Evidencias">
@@ -177,6 +254,70 @@ const Evidencias: React.FC = () => {
                 </div>
             ) : (
                 <div className="space-y-6">
+                    {/* Controles de Filtrado */}
+                    <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm mb-6 flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+                        <div className="flex flex-wrap gap-6 items-center w-full md:w-auto">
+                            {/* Periodo Dropdown */}
+                            <div className="w-full sm:w-60">
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Periodo Académico</label>
+                                <select
+                                    value={selectedPeriod || ''}
+                                    onChange={(e) => setSelectedPeriod(Number(e.target.value))}
+                                    className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-gray-700 font-bold"
+                                >
+                                    {periodos.map((p) => (
+                                        <option key={p.id_periodo} value={p.id_periodo}>
+                                            Periodo {p.anio} - {p.semestre === 1 ? 'I' : 'II'} {p.activo ? '(Activo)' : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Semana Selector */}
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Semana de Reporte</label>
+                                <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
+                                    {[
+                                        { key: '8', label: 'Semana 8' },
+                                        { key: '16', label: 'Semana 16' },
+                                    ].map((w) => (
+                                        <button
+                                            key={w.key}
+                                            type="button"
+                                            onClick={() => setSelectedWeek(w.key)}
+                                            className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${
+                                                selectedWeek === w.key
+                                                    ? 'bg-[#1a2744] text-white shadow-sm'
+                                                    : 'text-gray-600 hover:text-[#1a2744]'
+                                            }`}
+                                        >
+                                            {w.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Estado del filtro (Habilitado / Solo Lectura) */}
+                        <div className="w-full md:w-auto self-stretch md:self-auto flex items-center">
+                            {isWeekHabilitada ? (
+                                <div className="w-full bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3.5 flex items-center gap-3">
+                                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                                    <div className="text-xs">
+                                        <span className="font-bold">Periodo y semana habilitados.</span> Puedes administrar tus evidencias libremente.
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3.5 flex items-center gap-3">
+                                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                                    <div className="text-xs">
+                                        <span className="font-bold">Modo de solo lectura.</span> La semana seleccionada no está habilitada o pertenece a un periodo cerrado.
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
                     {/* Tabs de Funciones */}
                     <div className="flex flex-wrap gap-2 mb-4 bg-white p-2 rounded-xl border border-gray-100 shadow-sm">
                         {data.map((f, idx) => (
@@ -195,9 +336,9 @@ const Evidencias: React.FC = () => {
                     </div>
 
                     {/* Contenido de la Función Seleccionada */}
-                    {activeFunctionData ? (
+                    {filteredFunctionData && filteredFunctionData.actividades.length > 0 ? (
                         <div className="space-y-6">
-                            {activeFunctionData.actividades.map((act) => (
+                            {filteredFunctionData.actividades.map((act) => (
                                 <div key={act.id_asignacionact} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                                     {/* Header de la Actividad */}
                                     <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex flex-wrap gap-4 items-center justify-between">
@@ -300,14 +441,16 @@ const Evidencias: React.FC = () => {
                                                                                 >
                                                                                     {isLink(ev.tipo_archivo) ? <ExternalLink className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
                                                                                 </a>
-                                                                                <button 
-                                                                                    onClick={() => handleDelete(ev.id_evidencias)}
-                                                                                    disabled={eliminandoId === ev.id_evidencias}
-                                                                                    className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                                                                    title="Eliminar"
-                                                                                >
-                                                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                                                </button>
+                                                                                {isWeekHabilitada && (
+                                                                                    <button 
+                                                                                        onClick={() => handleDelete(ev.id_evidencias)}
+                                                                                        disabled={eliminandoId === ev.id_evidencias}
+                                                                                        className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                                                        title="Eliminar"
+                                                                                    >
+                                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                                    </button>
+                                                                                )}
                                                                             </div>
                                                                         </div>
                                                                     </div>
@@ -323,8 +466,10 @@ const Evidencias: React.FC = () => {
                             ))}
                         </div>
                     ) : (
-                        <div className="text-center py-12 bg-white rounded-xl border border-gray-100">
-                            <p className="text-gray-500">No hay actividades registradas en esta función.</p>
+                        <div className="text-center py-12 bg-white rounded-2xl border-2 border-dashed border-gray-200">
+                            <FileIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                            <h3 className="text-lg font-bold text-gray-800">No hay evidencias en este filtro</h3>
+                            <p className="text-gray-500 text-sm mt-1">No se encontraron evidencias para el período y semana seleccionados en esta función.</p>
                         </div>
                     )}
                 </div>

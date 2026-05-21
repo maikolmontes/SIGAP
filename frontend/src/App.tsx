@@ -18,6 +18,7 @@ import AvanceSemana from './pages/docente/AvanceSemana'
 import Evidencias from './pages/docente/Evidencias'
 import Perfil from './pages/common/Perfil'
 import Configuracion from './pages/common/Configuracion'
+import Analitica from './pages/common/Analitica'
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
         <Route path="/planeacion/docentes" element={<Docentes />} />
         <Route path="/planeacion/periodos" element={<Periodos />} /> {/* 👈 TU APORTE */}
         <Route path="/planeacion/semanas" element={<Semanas />} />
+        <Route path="/planeacion/analitica" element={<Analitica rol="planeacion" />} />
       </Route>
 
       {/* Director */}
@@ -42,6 +44,7 @@ function App() {
         <Route path="/director/historial" element={<HistorialAgendas />} />
         <Route path="/director/reportes" element={<ReportesDirector />} />
         <Route path="/director/observaciones" element={<ObservacionesDirector />} />
+        <Route path="/director/analitica" element={<Analitica rol="director" />} />
       </Route>
 
       {/* Docente */}

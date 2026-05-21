@@ -10,7 +10,7 @@ const verifyRole = require('../middleware/verifyRole');
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Rutas existentes — ahora protegidas con auth
-router.get('/dashboard', verifyToken, verifyRole('Director'), getDashboardDirector);
+router.get('/dashboard', verifyToken, verifyRole('Director', 'Planeacion'), getDashboardDirector);
 router.post('/importar', verifyToken, verifyRole('Director'), upload.single('archivo'), importarAsignaciones);
 router.post('/actualizar', verifyToken, verifyRole('Director'), upload.single('archivo'), actualizarImportacion);
 
@@ -21,6 +21,6 @@ router.put('/agendas/:id/aprobar', verifyToken, verifyRole('Director'), aprobarA
 router.put('/agendas/:id/devolver', verifyToken, verifyRole('Director'), devolverAgenda);
 
 // Reportes
-router.get('/reportes/resumen', verifyToken, verifyRole('Director'), getReportesResumen);
+router.get('/reportes/resumen', verifyToken, verifyRole('Director', 'Planeacion'), getReportesResumen);
 
 module.exports = router;

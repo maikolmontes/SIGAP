@@ -370,10 +370,10 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                             <UploadCloud className="w-3.5 h-3.5" />
                                                             Subir
                                                         </button>
-                                                        {ind.evidencias?.length > 0 && (
+                                                        {ind.evidencias?.filter((ev: any) => String(ev.semana) === semana).length > 0 && (
                                                             <div className="flex flex-col gap-1.5 mt-2">
                                                                 <span className="text-[10px] font-bold text-gray-400 uppercase">Cargadas:</span>
-                                                                {ind.evidencias.map((ev: any) => (
+                                                                {ind.evidencias.filter((ev: any) => String(ev.semana) === semana).map((ev: any) => (
                                                                     <a 
                                                                         key={ev.id_evidencias}
                                                                         href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : `http://localhost:3000${ev.ruta_archivo.startsWith('/') ? ev.ruta_archivo : '/' + ev.ruta_archivo}`}
@@ -459,8 +459,10 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
         onClose={() => setModalEvidencia({ ...modalEvidencia, isOpen: false })}
         idIndicador={modalEvidencia.idIndicador}
         nombreIndicador={modalEvidencia.nombreIndicador}
+        semana={semana}
         onUploadSuccess={() => {
             // Success logic if any needed
+            cargarData();
         }}
       />
     </Layout>

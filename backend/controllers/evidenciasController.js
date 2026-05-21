@@ -48,7 +48,9 @@ const obtenerEvidenciasDocente = async (req, res) => {
                 e.ruta_archivo,
                 e.tipo_archivo,
                 e.tamanio_archivo_kb,
-                e.fecha_carga
+                e.fecha_carga,
+                e.semana,
+                af.id_periodo
             FROM evidencias e
             JOIN indicadores i ON e.id_indicadores = i.id_indicadores
             JOIN descripcion d ON i.id_descripcion = d.id_descripcion
@@ -99,7 +101,9 @@ const obtenerEvidenciasDocente = async (req, res) => {
                 ruta_archivo: row.ruta_archivo,
                 tipo_archivo: row.tipo_archivo,
                 tamanio_archivo_kb: row.tamanio_archivo_kb,
-                fecha_carga: row.fecha_carga
+                fecha_carga: row.fecha_carga,
+                semana: row.semana,
+                id_periodo: row.id_periodo
             });
         });
 
@@ -112,7 +116,7 @@ const obtenerEvidenciasDocente = async (req, res) => {
 
 // Subir una evidencia (archivo o link)
 const subirEvidencia = async (req, res) => {
-    const { id_indicador, tipo_evidencia, enlace_texto } = req.body;
+    const { id_indicador, tipo_evidencia, enlace_texto, semana } = req.body;
 
     if (!id_indicador) {
         return res.status(400).json({ error: 'Se requiere el id del indicador' });
@@ -145,11 +149,11 @@ const subirEvidencia = async (req, res) => {
         }
 
         const query = `
-            INSERT INTO evidencias (id_indicadores, nombre_archivo, ruta_archivo, tipo_archivo, tamanio_archivo_kb)
-            VALUES ($1, $2, $3, $4, $5) RETURNING id_evidencias
+            INSERT INTO evidencias (id_indicadores, nombre_archivo, ruta_archivo, tipo_archivo, tamanio_archivo_kb, semana)
+            VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_evidencias
         `;
 
-        const values = [id_indicador, nombreArchivo, rutaArchivo, tipoArchivo, tamanioKb];
+        const values = [id_indicador, nombreArchivo, rutaArchivo, tipoArchivo, tamanioKb, semana || '8'];
         const result = await pool.query(query, values);
 
         res.json({ success: true, id_evidencias: result.rows[0].id_evidencias, mensaje: 'Evidencia subida correctamente' });

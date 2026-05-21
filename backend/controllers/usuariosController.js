@@ -93,27 +93,29 @@ const create = async (req, res) => {
         numero_documento,
         correo,
         id_contrato,
-        id_programa,
         rol // Nuevo campo esperado (ej: 'Docente')
     } = req.body;
 
     try {
         await pool.query('BEGIN'); // Iniciar transacción
 
+        // Buscar periodo activo
+        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
+
         const result = await pool.query(`
             INSERT INTO usuarios
                 (nombres, apellidos, tipo_documento,
                  numero_documento, correo,
                  id_contrato, id_programa, activo)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+            VALUES ($1, $2, $3, $4, $5, $6, 1, TRUE)
             RETURNING id_usuario, nombres, apellidos, correo
         `, [
             nombres, apellidos, 
             tipo_documento || 'CC', 
             numero_documento || '0000000000', 
             correo, 
-            id_contrato || 1, 
-            id_programa || 1
+            id_contrato || 1
         ]);
 
         const nuevoUsuario = result.rows[0];
@@ -124,6 +126,31 @@ const create = async (req, res) => {
             if (roleResult.rows.length > 0) {
                 const idRol = roleResult.rows[0].id_rol;
                 await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2)', [nuevoUsuario.id_usuario, idRol]);
+            }
+        }
+
+        // Asignar al periodo activo si existe
+        if (idPeriodoActivo) {
+            await pool.query(`
+                INSERT INTO docente_periodo (id_usuario, id_periodo)
+                VALUES ($1, $2)
+                ON CONFLICT DO NOTHING
+            `, [nuevoUsuario.id_usuario, idPeriodoActivo]);
+
+            // Asegurar programa_periodo para programa 1 (Sistemas)
+            const existeProgPer = await pool.query(
+                'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = 1 AND id_periodo = $1',
+                [idPeriodoActivo]
+            );
+            if (existeProgPer.rows.length === 0) {
+                const pensul = await pool.query(
+                    'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
+                );
+                const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
+                await pool.query(`
+                    INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
+                    VALUES ($1, 1, $2)
+                `, [idPeriodoActivo, id_pensulaca]);
             }
         }
 
@@ -149,6 +176,10 @@ const createBulk = async (req, res) => {
         let insertados = 0;
         let errores = [];
 
+        // Buscar periodo activo
+        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
+
         // Obtener todos los roles para no consultar en cada iteración
         const rolesResult = await pool.query('SELECT id_rol, nombre_rol FROM roles');
         const rolesMap = {};
@@ -171,10 +202,37 @@ const createBulk = async (req, res) => {
                     await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2)', [idUsuario, idRol]);
                 }
 
+                // Asignar al periodo activo si existe
+                if (idPeriodoActivo) {
+                    await pool.query(`
+                        INSERT INTO docente_periodo (id_usuario, id_periodo)
+                        VALUES ($1, $2)
+                        ON CONFLICT DO NOTHING
+                    `, [idUsuario, idPeriodoActivo]);
+                }
+
                 insertados++;
             } catch (err) {
                 // Capturar el error pero seguir con los demás
                 errores.push({ correo: u.correo, motivo: err.message });
+            }
+        }
+
+        // Asegurar programa_periodo para programa 1 si hay periodo activo e inserciones exitosas
+        if (idPeriodoActivo && insertados > 0) {
+            const existeProgPer = await pool.query(
+                'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = 1 AND id_periodo = $1',
+                [idPeriodoActivo]
+            );
+            if (existeProgPer.rows.length === 0) {
+                const pensul = await pool.query(
+                    'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
+                );
+                const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
+                await pool.query(`
+                    INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
+                    VALUES ($1, 1, $2)
+                `, [idPeriodoActivo, id_pensulaca]);
             }
         }
 

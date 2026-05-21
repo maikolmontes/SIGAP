@@ -28,6 +28,7 @@ const menuDirector: MenuItem[] = [
     { label: 'Observaciones', path: '/director/observaciones' },
     { label: 'Reportes', isHeader: true },
     { label: 'Reportes', path: '/director/reportes' },
+    { label: 'Analítica', path: '/director/analitica' },
 ]
 
 const menuDocente: MenuItem[] = [
@@ -35,14 +36,10 @@ const menuDocente: MenuItem[] = [
     { label: 'Dashboard', path: '/docente/dashboard' },
     { label: 'Agenda Académica', isHeader: true },
     { label: 'Crear o Editar agenda', path: '/docente/agenda' },
-    { label: 'Distribución de horas', path: '/docente/distribucion-horas' },
     { label: 'Registro de Actividades', isHeader: true },
     { label: 'Reporte Semana 8', path: '/docente/avance-semana-8' },
     { label: 'Reporte Semana 16', path: '/docente/avance-semana-16' },
     { label: 'Evidencias', path: '/docente/evidencias' },
-    { label: 'Consultar', isHeader: true },
-    { label: 'Estado de agenda', path: '/docente/estado-agenda' },
-    { label: 'Historial', path: '/docente/historial' },
 ]
 
 interface SidebarProps {

@@ -205,7 +205,8 @@ const getAgendaBase = async (req, res) => {
                         'ruta_archivo', ev.ruta_archivo,
                         'tipo_archivo', ev.tipo_archivo,
                         'tamanio_archivo_kb', ev.tamanio_archivo_kb,
-                        'fecha_carga', ev.fecha_carga
+                        'fecha_carga', ev.fecha_carga,
+                        'semana', ev.semana
                     ) ORDER BY ev.fecha_carga DESC), '[]'::json)
                     FROM evidencias ev
                     WHERE ev.id_indicadores = i.id_indicadores

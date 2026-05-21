@@ -42,7 +42,7 @@ const getAgendas = async (req, res) => {
 
         const periodoInfo = await pool.query('SELECT * FROM periodo WHERE id_periodo = $1', [idPeriodo]);
 
-        // Traer docentes con sus funciones agrupadas
+        // Traer docentes con sus funciones agrupadas (filtrado por programa Ingeniería de Sistemas)
         let query = `
             SELECT
                 u.id_usuario,
@@ -68,6 +68,7 @@ const getAgendas = async (req, res) => {
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
             LEFT JOIN usuarios rev ON rev.id_usuario = af.revisado_por
             WHERE u.activo = TRUE
+              AND u.id_programa = 1
         `;
         const params = [idPeriodo];
         let paramIdx = 2;
@@ -613,17 +614,30 @@ const getReportesResumen = async (req, res) => {
 
 // ================================================================
 // GET /api/observaciones/todas
-// Obtiene todas las observaciones realizadas por el director
+// Obtiene todas las observaciones del periodo activo (programa Ingeniería de Sistemas)
+// Query params: ?semana=8|16
 // ================================================================
 const getTodasObservaciones = async (req, res) => {
     try {
-        const directorId = req.user.id;
+        const { semana } = req.query;
 
-        const result = await pool.query(`
+        // Obtener periodo activo
+        const periodoRes = await pool.query('SELECT * FROM periodo WHERE activo = true LIMIT 1');
+        const periodo = periodoRes.rows[0] || null;
+        const idPeriodo = periodo ? periodo.id_periodo : null;
+
+        if (!idPeriodo) {
+            return res.json({ observaciones: [], periodo: null, total: 0 });
+        }
+
+        let queryText = `
             SELECT 
                 od.id, od.semana, od.texto, od.fecha, od.ultima_edicion,
+                od.director_id,
+                dir.nombres || ' ' || dir.apellidos AS director_nombre,
                 aa.id_asignacionact, aa.rol_seleccionado, aa.horas_rol,
                 af.funcion_sustantiva,
+                af.id_periodo,
                 u.nombres || ' ' || u.apellidos AS docente_nombre,
                 pa.nombre_programa,
                 u.id_usuario
@@ -633,11 +647,28 @@ const getTodasObservaciones = async (req, res) => {
             JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
             JOIN usuarios u ON u.id_usuario = ua.id_usuario
             LEFT JOIN programa_academico pa ON pa.id_programa = u.id_programa
-            WHERE od.director_id = $1
-            ORDER BY od.ultima_edicion DESC
-        `, [directorId]);
+            LEFT JOIN usuarios dir ON dir.id_usuario = od.director_id
+            WHERE af.id_periodo = $1
+              AND u.id_programa = 1
+        `;
+        const params = [idPeriodo];
+        let paramIdx = 2;
 
-        res.json({ observaciones: result.rows });
+        if (semana && [8, 16].includes(parseInt(semana))) {
+            queryText += ` AND od.semana = $${paramIdx}`;
+            params.push(parseInt(semana));
+            paramIdx++;
+        }
+
+        queryText += ` ORDER BY od.ultima_edicion DESC`;
+
+        const result = await pool.query(queryText, params);
+
+        res.json({
+            observaciones: result.rows,
+            periodo,
+            total: result.rowCount
+        });
 
     } catch (error) {
         console.error('Error en getTodasObservaciones:', error);

@@ -7,10 +7,11 @@ interface SubirEvidenciaModalProps {
     onClose: () => void;
     idIndicador: number;
     nombreIndicador: string;
+    semana: string;
     onUploadSuccess: () => void;
 }
 
-const SubirEvidenciaModal: React.FC<SubirEvidenciaModalProps> = ({ isOpen, onClose, idIndicador, nombreIndicador, onUploadSuccess }) => {
+const SubirEvidenciaModal: React.FC<SubirEvidenciaModalProps> = ({ isOpen, onClose, idIndicador, nombreIndicador, semana, onUploadSuccess }) => {
     const [tipoCarga, setTipoCarga] = useState<'archivo' | 'link'>('archivo');
     const [archivo, setArchivo] = useState<File | null>(null);
     const [linkTexto, setLinkTexto] = useState('');
@@ -104,6 +105,7 @@ const SubirEvidenciaModal: React.FC<SubirEvidenciaModalProps> = ({ isOpen, onClo
             const formData = new FormData();
             formData.append('id_indicador', String(idIndicador));
             formData.append('tipo_evidencia', tipoCarga);
+            formData.append('semana', semana);
 
             if (tipoCarga === 'archivo' && archivo) {
                 formData.append('archivo', archivo);
