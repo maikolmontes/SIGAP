@@ -512,6 +512,7 @@ const getReportesResumen = async (req, res) => {
                 COUNT(DISTINCT CASE WHEN sub.alguna_devuelta THEN u.id_usuario END) AS agendas_devueltas,
                 COUNT(DISTINCT CASE WHEN sub.todas_pendiente THEN u.id_usuario END) AS agendas_pendientes
             FROM usuarios u
+            JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
             JOIN programa_academico pa ON pa.id_programa = u.id_programa
             JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
             JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
@@ -540,6 +541,7 @@ const getReportesResumen = async (req, res) => {
                 COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
                 COALESCE(SUM(CASE WHEN af.funcion_sustantiva ILIKE '%investigación%' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
             FROM usuarios u
+            JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
             JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
             JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
             JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
@@ -566,6 +568,8 @@ const getReportesResumen = async (req, res) => {
                 COALESCE(SUM(i.ejecucion_16), 0) AS avance_sem16
             FROM asignacion_funciones af
             JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
+            JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
             JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones
             JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo = TRUE
             LEFT JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo = TRUE
@@ -599,6 +603,8 @@ const getReportesResumen = async (req, res) => {
                 COUNT(DISTINCT CASE WHEN af.estado_agenda = 'Pendiente' OR af.estado_agenda = 'Aceptado' THEN ua.id_usuario END) AS docentes_pendientes
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
+            JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
+            JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
         `, [idPeriodo]);
 
         res.json({

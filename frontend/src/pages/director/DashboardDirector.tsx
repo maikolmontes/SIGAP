@@ -4,7 +4,7 @@ import api from '../../services/api';
 import {
   Users, CheckCircle, Clock, TrendingUp, AlertCircle,
   Upload, UploadCloud, X, BookOpen, Calendar, Lock,
-  FileBarChart2, ChevronRight, RefreshCw
+  FileBarChart2, ChevronRight, RefreshCw, Trash2
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 
@@ -66,6 +66,23 @@ export default function DashboardDirector() {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (fileUpdateRef.current) fileUpdateRef.current.value = '';
+    }
+  };
+
+  const handleEliminarAgendas = async () => {
+    if (!window.confirm("¿Está seguro de que desea eliminar TODAS las agendas de este periodo activo? Esta acción borrará todas las funciones, actividades, metas, indicadores y evidencias asociadas y no se podrá deshacer.")) {
+      return;
+    }
+    setUploading(true);
+    setUploadResult(null);
+    try {
+      await api.delete('/director/eliminar-agendas');
+      setUploadResult({ success: true, data: null, tipo: 'Eliminación de agendas' });
+      cargarDashboard();
+    } catch (err: any) {
+      setUploadResult({ success: false, error: err.response?.data?.error || 'Error de conexión al eliminar las agendas.' });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -162,6 +179,17 @@ export default function DashboardDirector() {
                 <button onClick={cargarDashboard} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-white text-sm font-bold transition-all">
                   <RefreshCw className="w-4 h-4" /> Actualizar
                 </button>
+                {importacionRealizada && (
+                  <button
+                    disabled={uploading}
+                    onClick={handleEliminarAgendas}
+                    className={`flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-400 text-white rounded-xl text-sm font-bold transition-all shadow-md`}
+                    title="Eliminar todas las asignaciones de este periodo para volver a importar"
+                  >
+                    {uploading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    Eliminar Agendas
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -176,7 +204,10 @@ export default function DashboardDirector() {
             <div className="flex items-center gap-3">
               <CheckCircle className="w-6 h-6 text-green-600 shrink-0" />
               <div>
-                <p className="font-bold text-green-900">{uploadResult.tipo} exitosa — {uploadResult.data?.resultados?.procesados || 0} registros procesados</p>
+                <p className="font-bold text-green-900">
+                  {uploadResult.tipo} exitosa
+                  {uploadResult.data?.resultados?.procesados !== undefined ? ` — ${uploadResult.data.resultados.procesados} registros procesados` : ''}
+                </p>
                 {uploadResult.data?.resultados?.erroresEncontrados > 0 && (
                   <p className="text-sm text-red-600 mt-1">{uploadResult.data.resultados.erroresEncontrados} filas con errores</p>
                 )}

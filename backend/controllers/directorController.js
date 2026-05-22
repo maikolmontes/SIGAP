@@ -736,15 +736,14 @@ const getDashboardDirector = async (req, res) => {
                     COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
                     COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Investigación' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
                 FROM usuarios u
+                JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
                 JOIN programa_academico pa ON pa.id_programa = u.id_programa
                 JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
                 JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
                 JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
-                LEFT JOIN programa_periodo pp ON pp.id_programa = pa.id_programa AND pp.id_periodo = $1
                 LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
                 LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
                 WHERE u.activo = TRUE
-                  AND (pp.id_periodo = $1 OR af.id_periodo = $1)
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
                          pa.nombre_programa, tc.tipo, tc.horas_contrato
                 ORDER BY u.apellidos, u.nombres
@@ -793,6 +792,7 @@ const getDashboardDirector = async (req, res) => {
                 FROM asignacion_funciones af
                 JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
                 JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
+                JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
                 WHERE af.id_periodo = $1
                 GROUP BY af.funcion_sustantiva
                 ORDER BY horas DESC
@@ -813,4 +813,72 @@ const getDashboardDirector = async (req, res) => {
     }
 };
 
-module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector };
+const eliminarAgendas = async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Obtener el periodo activo
+        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        if (periodoRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'No hay un periodo académico activo.' });
+        }
+        const idPeriodoActivo = periodoRes.rows[0].id_periodo;
+
+        // 2. Obtener todas las funciones asociadas a este periodo
+        const funcRes = await client.query('SELECT id_funciones FROM asignacion_funciones WHERE id_periodo = $1', [idPeriodoActivo]);
+        const funcIds = funcRes.rows.map(r => r.id_funciones);
+
+        if (funcIds.length > 0) {
+            // Obtener todas las actividades asociadas a estas funciones
+            const actIdsRes = await client.query('SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = ANY($1)', [funcIds]);
+            const actIds = actIdsRes.rows.map(r => r.id_asignacionact);
+
+            if (actIds.length > 0) {
+                // Eliminar evidencias
+                await client.query(`
+                    DELETE FROM evidencias WHERE id_indicadores IN (
+                        SELECT i.id_indicadores FROM indicadores i
+                        JOIN descripcion d ON i.id_descripcion = d.id_descripcion
+                        WHERE d.id_asignacionact = ANY($1)
+                    )
+                `, [actIds]);
+
+                // Eliminar indicadores
+                await client.query(`
+                    DELETE FROM indicadores WHERE id_descripcion IN (
+                        SELECT id_descripcion FROM descripcion WHERE id_asignacionact = ANY($1)
+                    )
+                `, [actIds]);
+
+                // Eliminar descripciones
+                await client.query('DELETE FROM descripcion WHERE id_asignacionact = ANY($1)', [actIds]);
+
+                // Eliminar actividades_semana
+                await client.query('DELETE FROM actividad_semana WHERE id_asignacionact = ANY($1)', [actIds]);
+
+                // Eliminar asignacion_actividades
+                await client.query('DELETE FROM asignacion_actividades WHERE id_funciones = ANY($1)', [funcIds]);
+            }
+
+            // Eliminar usuario_asignacion
+            await client.query('DELETE FROM usuario_asignacion WHERE id_funciones = ANY($1)', [funcIds]);
+
+            // Eliminar asignacion_funciones
+            await client.query('DELETE FROM asignacion_funciones WHERE id_periodo = $1', [idPeriodoActivo]);
+        }
+
+        await client.query('COMMIT');
+        res.status(200).json({ mensaje: 'Todas las agendas del periodo activo fueron eliminadas correctamente.' });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error eliminando agendas:", error);
+        res.status(500).json({ error: 'Ocurrió un error al intentar eliminar las agendas.', detalles: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector, eliminarAgendas };
