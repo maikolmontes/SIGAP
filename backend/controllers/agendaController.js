@@ -272,36 +272,107 @@ const guardarFuncionDocente = async (req, res) => {
 
             // Si hay resultado esperado o descripciones fijas, gestionar descripción e indicadores
             if (idAct && (resultadoEsperado || (act.descripciones && act.descripciones.length > 0))) {
-                // Borrar indicadores y descripciones anteriores de esta actividad
-                await client.query(`
-                    DELETE FROM indicadores WHERE id_descripcion IN (
-                        SELECT id_descripcion FROM descripcion WHERE id_asignacionact = $1
-                    )
-                `, [idAct]);
-                await client.query('DELETE FROM descripcion WHERE id_asignacionact = $1', [idAct]);
-
                 const descsToInsert = act.descripciones && act.descripciones.length > 0
                     ? act.descripciones
                     : [{ resultadoEsperado, meta, indicadores }];
 
-                for (const descData of descsToInsert) {
-                    // Insertar nueva descripción
-                    const descRes = await client.query(`
-                        INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta)
-                        VALUES ($1, $2, $3) RETURNING id_descripcion
-                    `, [idAct, descData.resultadoEsperado, descData.meta || null]);
+                // Obtener descripciones existentes para esta actividad
+                const existingDescsRes = await client.query(
+                    'SELECT id_descripcion, resultado_esperado, meta FROM descripcion WHERE id_asignacionact = $1 ORDER BY id_descripcion',
+                    [idAct]
+                );
+                const existingDescs = existingDescsRes.rows;
 
-                    const idDescripcion = descRes.rows[0].id_descripcion;
+                for (let idx = 0; idx < descsToInsert.length; idx++) {
+                    const descData = descsToInsert[idx];
+                    const existingDesc = existingDescs[idx];
 
-                    // Insertar indicadores
-                    for (const ind of descData.indicadores) {
-                        if (ind.nombre_indicador) {
-                            await client.query(`
-                                INSERT INTO indicadores (id_descripcion, nombre_indicador)
-                                VALUES ($1, $2)
-                            `, [idDescripcion, ind.nombre_indicador]);
+                    let idDescripcion;
+                    if (existingDesc) {
+                        // Actualizar descripción existente
+                        idDescripcion = existingDesc.id_descripcion;
+                        await client.query(
+                            'UPDATE descripcion SET resultado_esperado = $1, meta = $2 WHERE id_descripcion = $3',
+                            [descData.resultadoEsperado, descData.meta || null, idDescripcion]
+                        );
+                    } else {
+                        // Insertar nueva descripción
+                        const descRes = await client.query(
+                            'INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta) VALUES ($1, $2, $3) RETURNING id_descripcion',
+                            [idAct, descData.resultadoEsperado, descData.meta || null]
+                        );
+                        idDescripcion = descRes.rows[0].id_descripcion;
+                    }
+
+                    // Gestionar indicadores para esta descripción
+                    const existingIndsRes = await client.query(
+                        'SELECT id_indicadores, nombre_indicador FROM indicadores WHERE id_descripcion = $1 ORDER BY id_indicadores',
+                        [idDescripcion]
+                    );
+                    const existingInds = existingIndsRes.rows;
+
+                    const incomingInds = descData.indicadores || [];
+                    const updatedOrInsertedIds = [];
+
+                    for (let i = 0; i < incomingInds.length; i++) {
+                        const indData = incomingInds[i];
+                        if (!indData.nombre_indicador || !indData.nombre_indicador.trim()) continue;
+
+                        const numericId = parseInt(indData.id, 10);
+                        let matchedInd = null;
+
+                        if (!isNaN(numericId)) {
+                            matchedInd = existingInds.find(e => e.id_indicadores === numericId);
+                        }
+
+                        if (!matchedInd && existingInds[i]) {
+                            matchedInd = existingInds[i];
+                        }
+
+                        if (matchedInd) {
+                            // Actualizar indicador existente sin alterar ejecuciones o evidencias
+                            await client.query(
+                                'UPDATE indicadores SET nombre_indicador = $1 WHERE id_indicadores = $2',
+                                [indData.nombre_indicador.trim(), matchedInd.id_indicadores]
+                            );
+                            updatedOrInsertedIds.push(matchedInd.id_indicadores);
+                        } else {
+                            // Insertar nuevo indicador
+                            const indRes = await client.query(
+                                'INSERT INTO indicadores (id_descripcion, nombre_indicador) VALUES ($1, $2) RETURNING id_indicadores',
+                                [idDescripcion, indData.nombre_indicador.trim()]
+                            );
+                            updatedOrInsertedIds.push(indRes.rows[0].id_indicadores);
                         }
                     }
+
+                    // Eliminar indicadores que ya no estén presentes
+                    const idsToDelete = existingInds
+                        .map(e => e.id_indicadores)
+                        .filter(id => !updatedOrInsertedIds.includes(id));
+
+                    if (idsToDelete.length > 0) {
+                        await client.query('DELETE FROM evidencias WHERE id_indicadores = ANY($1)', [idsToDelete]);
+                        await client.query('DELETE FROM indicadores WHERE id_indicadores = ANY($1)', [idsToDelete]);
+                    }
+                }
+
+                // Eliminar descripciones extras si existen
+                if (existingDescs.length > descsToInsert.length) {
+                    const extraDescs = existingDescs.slice(descsToInsert.length);
+                    const extraDescIds = extraDescs.map(d => d.id_descripcion);
+
+                    const extraIndsRes = await client.query(
+                        'SELECT id_indicadores FROM indicadores WHERE id_descripcion = ANY($1)',
+                        [extraDescIds]
+                    );
+                    const extraIndIds = extraIndsRes.rows.map(e => e.id_indicadores);
+
+                    if (extraIndIds.length > 0) {
+                        await client.query('DELETE FROM evidencias WHERE id_indicadores = ANY($1)', [extraIndIds]);
+                        await client.query('DELETE FROM indicadores WHERE id_indicadores = ANY($1)', [extraIndIds]);
+                    }
+                    await client.query('DELETE FROM descripcion WHERE id_descripcion = ANY($1)', [extraDescIds]);
                 }
             }
         }
