@@ -4,8 +4,10 @@ import Login from './pages/auth/Login'
 import RoleSelection from './pages/auth/RoleSelection'
 import DashboardPlaneacion from './pages/planeacion/DashboardPlaneacion'
 import Docentes from './pages/planeacion/Docentes'
-import Periodos from './pages/planeacion/Periodos'
+import Periodos from './pages/planeacion/Periodos' 
 import Semanas from './pages/planeacion/Semanas'
+import Facultades from './pages/planeacion/Facultades'
+import Programas from './pages/planeacion/Programas'
 import DashboardDirector from './pages/director/DashboardDirector'
 import AgendasPorRevisar from './pages/director/AgendasPorRevisar'
 import DetalleAgenda from './pages/director/DetalleAgenda'
@@ -38,6 +40,8 @@ function App() {
         <Route path="/planeacion/docentes" element={<Docentes />} />
         <Route path="/planeacion/periodos" element={<Periodos />} /> {/* 👈 TU APORTE */}
         <Route path="/planeacion/semanas" element={<Semanas />} />
+        <Route path="/planeacion/facultades" element={<Facultades />} />
+        <Route path="/planeacion/programas" element={<Programas />} />
         <Route path="/planeacion/analitica" element={<Analitica rol="planeacion" />} />
       </Route>
 

@@ -12,6 +12,8 @@ const authRouter = require('./routes/auth');
 const periodosRouter = require('./routes/periodos');
 const docenteRouter = require('./routes/docente');
 const userRouter = require('./routes/user');
+const facultadesRouter = require('./routes/facultades');
+const programasRouter = require('./routes/programas');
 
 const app = express();
 
@@ -25,6 +27,8 @@ app.use('/api/auth', authRouter);
 app.use('/api/periodos', periodosRouter);
 app.use('/api/docente', docenteRouter);
 app.use('/api/user', userRouter);
+app.use('/api/facultades', facultadesRouter);
+app.use('/api/programas', programasRouter);
 app.use('/api/director', require('./routes/director'));
 app.use('/api/semanas', require('./routes/semanas'));
 app.use('/api/evidencias', require('./routes/evidencias'));

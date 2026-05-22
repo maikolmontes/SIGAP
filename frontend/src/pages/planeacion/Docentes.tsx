@@ -559,7 +559,7 @@ export default function Docentes() {
                             checked={user.activo}
                             onChange={() => handleToggleActivo(user.id_usuario, user.nombre_completo || `${user.nombres} ${user.apellidos}`)}
                           />
-                          <div className="w-10 h-5.5 bg-gray-250 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                          <div className="w-10 h-5.5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
                         </label>
                         <span className={`text-[11px] font-bold uppercase w-16 text-left ${user.activo ? 'text-emerald-600' : 'text-gray-400'}`}>
                           {user.activo ? 'Habilitado' : 'Bloqueado'}

@@ -6,6 +6,7 @@ import api from '../../services/api'
 // @ts-ignore
 import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios, updateUsuario, deleteUsuario } from '../../services/usuariosService'
 import { getPeriodos } from '../../services/periodosService'
+import { Library, GraduationCap } from 'lucide-react'
 
 interface Periodo {
     id_periodo: number
@@ -397,7 +398,7 @@ export default function DashboardPlaneacion() {
                     {/* ── Acciones Rápidas ── */}
                     <div className="mb-6">
                         <h3 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">Acciones Rápidas</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
                             <button
                                 onClick={() => navigate('/planeacion/docentes', { state: { openAddModal: true } })}
                                 className="flex flex-col items-center justify-center py-5 px-4 bg-white border border-gray-200 rounded-xl hover:border-blue-400 hover:shadow-md hover:bg-blue-50/50 transition-all group"
@@ -407,6 +408,28 @@ export default function DashboardPlaneacion() {
                                 </div>
                                 <span className="text-sm font-bold text-gray-800">Crear docente</span>
                                 <span className="text-xs text-gray-500 mt-1 text-center">Registrar usuario manual</span>
+                            </button>
+
+                            <button
+                                onClick={() => navigate('/planeacion/facultades', { state: { openAddModal: true } })}
+                                className="flex flex-col items-center justify-center py-5 px-4 bg-white border border-gray-200 rounded-xl hover:border-[#00a896] hover:shadow-md hover:bg-emerald-50/30 transition-all group"
+                            >
+                                <div className="w-12 h-12 rounded-full bg-emerald-50 text-[#00a896] flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                                    <Library className="w-6 h-6" />
+                                </div>
+                                <span className="text-sm font-bold text-gray-800">Agregar Facultad</span>
+                                <span className="text-xs text-gray-500 mt-1 text-center">Registrar facultad nueva</span>
+                            </button>
+
+                            <button
+                                onClick={() => navigate('/planeacion/programas', { state: { openAddModal: true } })}
+                                className="flex flex-col items-center justify-center py-5 px-4 bg-white border border-gray-200 rounded-xl hover:border-sky-400 hover:shadow-md hover:bg-sky-50/30 transition-all group"
+                            >
+                                <div className="w-12 h-12 rounded-full bg-sky-50 text-sky-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                                    <GraduationCap className="w-6 h-6" />
+                                </div>
+                                <span className="text-sm font-bold text-gray-800">Agregar Programa</span>
+                                <span className="text-xs text-gray-500 mt-1 text-center">Vincular programa académico</span>
                             </button>
 
                             <button
