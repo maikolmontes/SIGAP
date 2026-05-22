@@ -4,7 +4,7 @@ import Layout from '../../components/common/Layout'
 import * as XLSX from 'xlsx'
 import api from '../../services/api'
 // @ts-ignore
-import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios } from '../../services/usuariosService'
+import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios, updateUsuario, deleteUsuario } from '../../services/usuariosService'
 import { getPeriodos } from '../../services/periodosService'
 
 interface Periodo {
@@ -21,9 +21,12 @@ interface Docente {
     nombres: string
     apellidos: string
     correo: string
+    tipo_documento?: string
+    numero_documento?: string
     activo: boolean
     tipo_contrato: string
     programa: string
+    facultad?: string
     roles: string
 }
 
@@ -39,12 +42,7 @@ interface AgendaStat {
     docencia_indirecta: number
 }
 
-interface NuevoDocente {
-    nombres: string
-    apellidos: string
-    correo: string
-    rol: string
-}
+
 
 export default function DashboardPlaneacion() {
     const [docentes, setDocentes] = useState<Docente[]>([])
@@ -55,22 +53,118 @@ export default function DashboardPlaneacion() {
     const [cargando, setCargando] = useState(true)
     const [error, setError] = useState('')
     const navigate = useNavigate()
-    const [modalAgregar, setModalAgregar] = useState(false)
     // New state for active period
     const [periodoActivo, setPeriodoActivo] = useState<Periodo | null>(null)
     const [modalImportar, setModalImportar] = useState(false)
     const [archivoImportar, setArchivoImportar] = useState<File | null>(null)
     const [importando, setImportando] = useState(false)
-    const [guardando, setGuardando] = useState(false)
     const [editandoId, setEditandoId] = useState<number | null>(null)
     const [tabActiva, setTabActiva] = useState<'usuarios' | 'agendas'>('usuarios')
 
-    const [nuevoDocente, setNuevoDocente] = useState<NuevoDocente>({
-        nombres: '',
-        apellidos: '',
-        correo: '',
-        rol: 'Docente'
-    })
+    // Modales de Edición y Eliminación
+    const [modalEditarOpen, setModalEditarOpen] = useState(false)
+    const [docenteAEditar, setDocenteAEditar] = useState<Docente | null>(null)
+    const [modalEliminarOpen, setModalEliminarOpen] = useState(false)
+    const [docenteAEliminar, setDocenteAEliminar] = useState<Docente | null>(null)
+
+    // Formulario de Edición
+    const [editNombres, setEditNombres] = useState('')
+    const [editApellidos, setEditApellidos] = useState('')
+    const [editTipoDocumento, setEditTipoDocumento] = useState('CC')
+    const [editNumeroDocumento, setEditNumeroDocumento] = useState('')
+    const [editCorreo, setEditCorreo] = useState('')
+    const [editIdPrograma, setEditIdPrograma] = useState(1)
+    const [editRol, setEditRol] = useState('Docente')
+    const [editError, setEditError] = useState<string | null>(null)
+    const [guardando, setGuardando] = useState(false)
+    const [eliminando, setEliminando] = useState(false)
+
+    const mapRolesToValue = (rolesStr?: string) => {
+        if (!rolesStr) return 'Docente';
+        const lower = rolesStr.toLowerCase();
+        if (lower.includes('plane')) return 'Planeacion';
+        if (lower.includes('dire')) return 'Director';
+        return 'Docente';
+    }
+
+    const mapProgramaToId = (progName?: string) => {
+        if (!progName) return 1;
+        const name = progName.toLowerCase();
+        if (name.includes('electrónica') || name.includes('electronica')) return 2;
+        if (name.includes('industrial')) return 3;
+        if (name.includes('financiera')) return 4;
+        return 1;
+    }
+
+    const handleOpenEditModal = (d: Docente) => {
+        setDocenteAEditar(d)
+        setEditNombres(d.nombres)
+        setEditApellidos(d.apellidos)
+        setEditTipoDocumento(d.tipo_documento || 'CC')
+        setEditNumeroDocumento(d.numero_documento || '')
+        setEditCorreo(d.correo)
+        setEditRol(mapRolesToValue(d.roles))
+        setEditIdPrograma(mapProgramaToId(d.programa))
+        setEditError(null)
+        setModalEditarOpen(true)
+    }
+
+    const handleEditSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setEditError(null)
+
+        if (!docenteAEditar) return
+
+        if (!editNombres.trim() || !editApellidos.trim() || !editCorreo.trim() || !editNumeroDocumento.trim()) {
+            setEditError('Por favor diligencie todos los campos obligatorios.')
+            return
+        }
+
+        try {
+            setGuardando(true)
+            await updateUsuario(docenteAEditar.id_usuario, {
+                nombres: editNombres.trim(),
+                apellidos: editApellidos.trim(),
+                tipo_documento: editTipoDocumento,
+                numero_documento: editNumeroDocumento.trim(),
+                correo: editCorreo.trim().toLowerCase(),
+                id_programa: editRol === 'Planeacion' ? null : editIdPrograma,
+                rol: editRol
+            })
+            setModalEditarOpen(false)
+            await cargarDocentes()
+            alert('Usuario actualizado correctamente')
+        } catch (err: any) {
+            console.error('Error al editar usuario:', err)
+            const errMsg = err.response?.data?.error || 'No se pudo actualizar el usuario. Verifique los datos o si el correo ya existe.'
+            setEditError(errMsg)
+        } finally {
+            setGuardando(false)
+        }
+    }
+
+    const handleOpenDeleteModal = (d: Docente) => {
+        setDocenteAEliminar(d)
+        setModalEliminarOpen(true)
+    }
+
+    const handleDeleteConfirm = async () => {
+        if (!docenteAEliminar) return
+        try {
+            setEliminando(true)
+            await deleteUsuario(docenteAEliminar.id_usuario)
+            setModalEliminarOpen(false)
+            setDocenteAEliminar(null)
+            await cargarDocentes()
+            alert('Usuario eliminado correctamente')
+        } catch (err: any) {
+            console.error('Error al eliminar usuario:', err)
+            const errMsg = err.response?.data?.error || 'Ocurrió un error al eliminar el usuario.'
+            alert(errMsg)
+        } finally {
+            setEliminando(false)
+        }
+    }
 
     const cargarDocentes = useCallback(async () => {
         try {
@@ -134,53 +228,13 @@ export default function DashboardPlaneacion() {
         }
     }
 
-    const handleCrear = async () => {
-        if (!nuevoDocente.nombres.trim() || !nuevoDocente.apellidos.trim() || !nuevoDocente.correo.trim()) {
-            setError('Completa todos los campos')
-            return
-        }
-        if (!nuevoDocente.correo.includes('@')) {
-            setError('Ingresa un correo válido')
-            return
-        }
-        try {
-            setGuardando(true)
-            setError('')
-            const res = await createUsuario({
-                nombres: nuevoDocente.nombres,
-                apellidos: nuevoDocente.apellidos,
-                correo: nuevoDocente.correo,
-                tipo_documento: 'CC',
-                numero_documento: '0000000000',
-                id_contrato: 1,
-                id_programa: 1,
-                rol: nuevoDocente.rol
-            })
-            setDocentes(prev => [...prev, {
-                ...res.data,
-                activo: true,
-                tipo_contrato: 'Tiempo Completo',
-                programa: 'Ingeniería de Sistemas',
-                roles: nuevoDocente.rol
-            }])
-            setNuevoDocente({ nombres: '', apellidos: '', correo: '', rol: 'Docente' })
-            setModalAgregar(false)
-        } catch {
-            setError('Error al crear el docente. Verifica que el correo no esté registrado.')
-        } finally {
-            setGuardando(false)
-        }
-    }
+
 
     const handleDownloadTemplate = () => {
-        const ws = XLSX.utils.aoa_to_sheet([
-            ['Nombres', 'Apellidos', 'Correo', 'Rol'],
-            ['Diego', 'Villarreal', 'diego@correo.com', 'Docente'],
-            ['Maria', 'Gomez', 'maria@correo.com', 'Planeacion']
-        ])
-        const wb = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(wb, ws, "Plantilla Docentes")
-        XLSX.writeFile(wb, "plantilla_docentes_SIGAP.xlsx")
+        const link = document.createElement('a');
+        link.href = '/plantilla_docentes_SIGAP.xlsx';
+        link.download = 'plantilla_docentes_SIGAP.xlsx';
+        link.click();
     }
 
     const handleImportSubmit = async () => {
@@ -198,15 +252,23 @@ export default function DashboardPlaneacion() {
             const worksheet = workbook.Sheets[workbook.SheetNames[0]]
             const jsonData = XLSX.utils.sheet_to_json<any>(worksheet)
 
-            const payload = jsonData.map(row => ({
-                nombres: row.Nombres || row.nombres || '',
-                apellidos: row.Apellidos || row.apellidos || '',
-                correo: row.Correo || row.correo || '',
-                rol: row.Rol || row.rol || 'Docente'
-            })).filter(u => u.nombres && u.apellidos && u.correo)
+            const payload = jsonData.map(row => {
+                const userRol = row.Rol || row.rol || 'Docente';
+                const isPl = userRol.toLowerCase().includes('plane');
+                return {
+                    nombres: row.Nombres || row.nombres || '',
+                    apellidos: row.Apellidos || row.apellidos || '',
+                    correo: row.Correo || row.correo || '',
+                    tipo_documento: row['Tipo Documento'] || row.tipo_documento || row.tipoDocumento || 'CC',
+                    numero_documento: row['Número Documento'] || row.numero_documento || row.numeroDocumento || '0000000000',
+                    programa: isPl ? null : (row['Programa Académico'] || row['Programa Academico'] || row.programa || row.Programa || 'Ingeniería de Sistemas'),
+                    facultad: isPl ? null : 'Ingeniería',
+                    rol: userRol
+                };
+            }).filter(u => u.nombres && u.apellidos && u.correo)
 
             if (payload.length === 0) {
-                setError('El Excel no tiene datos válidos. Revisa las columnas (Nombres, Apellidos, Correo).')
+                setError('El Excel no tiene datos válidos. Revisa las columnas (Nombres, Apellidos, Correo, Tipo Documento, Número Documento, Programa Académico, Rol).')
                 return
             }
 
@@ -224,23 +286,26 @@ export default function DashboardPlaneacion() {
     }
 
     const handleExportar = () => {
-        const encabezado = ['Nombres', 'Apellidos', 'Correo', 'Activo']
-        const filas = docentes.map(d => [
-            d.nombres,
-            d.apellidos,
-            d.correo,
-            d.activo ? 'Sí' : 'No'
-        ])
-        const contenido = [encabezado, ...filas]
-            .map(f => f.join(','))
-            .join('\n')
-        const blob = new Blob([contenido], { type: 'text/csv;charset=utf-8;' })
-        const url = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = 'docentes_SIGAP.csv'
-        link.click()
-        URL.revokeObjectURL(url)
+        const encabezado = [['Nombres', 'Apellidos', 'Correo', 'Tipo Documento', 'Número Documento', 'Programa Académico', 'Facultad', 'Tipo Contrato', 'Roles', 'Estado']]
+        const filas = docentes.map(d => {
+            const isPl = d.roles && d.roles.toLowerCase().includes('plane');
+            return [
+                d.nombres,
+                d.apellidos,
+                d.correo,
+                d.tipo_documento || 'CC',
+                d.numero_documento || '0000000000',
+                isPl ? 'No aplica' : (d.programa || 'Sin Asignar'),
+                isPl ? 'No aplica' : (d.facultad || 'Ingeniería'),
+                d.tipo_contrato || 'Hora Cátedra',
+                d.roles || 'Docente',
+                d.activo ? 'Habilitado' : 'Bloqueado'
+            ];
+        });
+        const ws = XLSX.utils.aoa_to_sheet([...encabezado, ...filas])
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, "Docentes")
+        XLSX.writeFile(wb, "docentes_SIGAP.xlsx")
     }
 
     return (
@@ -334,7 +399,7 @@ export default function DashboardPlaneacion() {
                         <h3 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">Acciones Rápidas</h3>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <button
-                                onClick={() => { setModalAgregar(true); setError('') }}
+                                onClick={() => navigate('/planeacion/docentes', { state: { openAddModal: true } })}
                                 className="flex flex-col items-center justify-center py-5 px-4 bg-white border border-gray-200 rounded-xl hover:border-blue-400 hover:shadow-md hover:bg-blue-50/50 transition-all group"
                             >
                                 <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
@@ -464,9 +529,22 @@ export default function DashboardPlaneacion() {
                                                     </button>
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
-                                                    <button className="p-1.5 text-gray-400 hover:text-blue-600 transition-colors">
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                    </button>
+                                                    <div className="flex items-center justify-center gap-1.5">
+                                                        <button 
+                                                            onClick={() => handleOpenEditModal(d)}
+                                                            title="Editar Usuario"
+                                                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleOpenDeleteModal(d)}
+                                                            title="Eliminar de Raíz"
+                                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -548,73 +626,7 @@ export default function DashboardPlaneacion() {
                 </div>
             )}
 
-            {/* ══════════ MODAL AGREGAR DOCENTE ══════════ */}
-            {modalAgregar && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden animate-in fade-in zoom-in duration-200">
-                        <div className="bg-[#1a2744] px-6 py-4 flex items-center justify-between">
-                            <div>
-                                <h3 className="text-white font-medium">Registrar nuevo docente</h3>
-                                <p className="text-white/50 text-xs">Acceso inmediato al sistema</p>
-                            </div>
-                            <button onClick={() => setModalAgregar(false)} className="text-white/50 hover:text-white transition-colors">✕</button>
-                        </div>
-                        <div className="px-6 py-5 space-y-4">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nombres</label>
-                                    <input
-                                        type="text"
-                                        value={nuevoDocente.nombres}
-                                        onChange={e => setNuevoDocente(p => ({ ...p, nombres: e.target.value }))}
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Apellidos</label>
-                                    <input
-                                        type="text"
-                                        value={nuevoDocente.apellidos}
-                                        onChange={e => setNuevoDocente(p => ({ ...p, apellidos: e.target.value }))}
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Correo institucional</label>
-                                <input
-                                    type="email"
-                                    value={nuevoDocente.correo}
-                                    onChange={e => setNuevoDocente(p => ({ ...p, correo: e.target.value }))}
-                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Rol</label>
-                                <select
-                                    value={nuevoDocente.rol}
-                                    onChange={e => setNuevoDocente(p => ({ ...p, rol: e.target.value }))}
-                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
-                                >
-                                    <option value="Docente">Docente</option>
-                                    <option value="Director">Director</option>
-                                    <option value="Planeacion">Planeación</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
-                            <button onClick={() => setModalAgregar(false)} className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800">Cancelar</button>
-                            <button
-                                onClick={handleCrear}
-                                disabled={guardando}
-                                className="px-5 py-2 text-sm bg-[#1a2744] text-white rounded-lg hover:bg-[#243460] transition-colors disabled:opacity-50"
-                            >
-                                {guardando ? 'Guardando...' : 'Registrar Docente'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+
 
             {/* ══════════ MODAL IMPORTAR EXCEL ══════════ */}
             {modalImportar && (
@@ -631,6 +643,12 @@ export default function DashboardPlaneacion() {
                                 <input type="file" id="file-import" className="hidden" accept=".xlsx" onChange={e => setArchivoImportar(e.target.files ? e.target.files[0] : null)} />
                             </div>
                             <button onClick={handleDownloadTemplate} className="text-xs text-blue-600 font-bold hover:underline">Descargar plantilla oficial ↓</button>
+                            <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs px-4 py-3 rounded-lg text-left mt-2">
+                                <p className="font-semibold mb-1">💡 Información Importante:</p>
+                                <p className="text-[11px] leading-relaxed text-gray-700">
+                                    El archivo debe contener las columnas: <strong>Nombres</strong>, <strong>Apellidos</strong>, <strong>Correo</strong>, <strong>Tipo Documento</strong>, <strong>Número Documento</strong>, <strong>Programa Académico</strong> y <strong>Rol</strong>. Las contraseñas se gestionan al primer ingreso/Google OAuth y el tipo de contrato se asigna automáticamente.
+                                </p>
+                            </div>
                         </div>
                         <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
                             <button onClick={() => setModalImportar(false)} className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800">Cancelar</button>
@@ -640,6 +658,233 @@ export default function DashboardPlaneacion() {
                                 className="px-5 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
                             >
                                 {importando ? 'Importando...' : 'Comenzar Importación'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ══════════ MODAL EDITAR USUARIO ══════════ */}
+            {modalEditarOpen && docenteAEditar && (
+                <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-4 animate-fadeIn">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
+                        
+                        {/* Encabezado */}
+                        <div className="bg-[#1a2744] text-white px-6 py-4 flex justify-between items-center">
+                            <h3 className="font-bold text-lg flex items-center gap-2">
+                                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                Editar Docente / Usuario
+                            </h3>
+                            <button 
+                                type="button"
+                                onClick={() => setModalEditarOpen(false)} 
+                                className="p-1.5 bg-white/10 hover:bg-white/15 rounded-lg transition-colors text-white"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Formulario */}
+                        <form onSubmit={handleEditSubmit} className="p-6 flex flex-col gap-4">
+                            {editError && (
+                                <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
+                                    <svg className="w-4 h-4 shrink-0 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                    <div>{editError}</div>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                        placeholder="Ej. Juan Carlos"
+                                        value={editNombres}
+                                        onChange={(e) => setEditNombres(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                        placeholder="Ej. Perez Gomez"
+                                        value={editApellidos}
+                                        onChange={(e) => setEditApellidos(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
+                                <input
+                                    type="email"
+                                    required
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                    placeholder="ejemplo@cesmag.edu.co"
+                                    value={editCorreo}
+                                    onChange={(e) => setEditCorreo(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
+                                    <select
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                                        value={editTipoDocumento}
+                                        onChange={(e) => setEditTipoDocumento(e.target.value)}
+                                    >
+                                        <option value="CC">C.C.</option>
+                                        <option value="CE">C.E.</option>
+                                        <option value="PA">Pasaporte</option>
+                                    </select>
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número Documento *</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                        placeholder="Número de identificación"
+                                        value={editNumeroDocumento}
+                                        onChange={(e) => setEditNumeroDocumento(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Programa Académico *</label>
+                                    <select
+                                        disabled={editRol === 'Planeacion'}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400"
+                                        value={editRol === 'Planeacion' ? '' : editIdPrograma}
+                                        onChange={(e) => setEditIdPrograma(Number(e.target.value))}
+                                    >
+                                        {editRol === 'Planeacion' ? (
+                                            <option value="">No aplica (Administrativo)</option>
+                                        ) : (
+                                            <>
+                                                <option value={1}>Ingeniería de Sistemas</option>
+                                                <option value={2}>Ingeniería Electrónica</option>
+                                                <option value={3}>Ingeniería Industrial</option>
+                                                <option value={4}>Ingeniería Financiera</option>
+                                            </>
+                                        )}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Rol de Acceso Principal</label>
+                                    <select
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold"
+                                        value={editRol}
+                                        onChange={(e) => setEditRol(e.target.value)}
+                                    >
+                                        <option value="Docente">Docente</option>
+                                        <option value="Director">Director</option>
+                                        <option value="Planeacion">Planeación</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* Botones */}
+                            <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setModalEditarOpen(false)}
+                                    className="bg-gray-100 hover:bg-gray-150 text-gray-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={guardando}
+                                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-md transition-colors"
+                                >
+                                    {guardando ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                            Guardando...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                            Guardar Cambios
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ══════════ MODAL ELIMINAR USUARIO ══════════ */}
+            {modalEliminarOpen && docenteAEliminar && (
+                <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-4 animate-fadeIn">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
+                        
+                        {/* Encabezado */}
+                        <div className="bg-red-700 text-white px-6 py-4 flex justify-between items-center">
+                            <h3 className="font-bold text-lg flex items-center gap-2 text-white">
+                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                ¿Eliminar Usuario?
+                            </h3>
+                            <button 
+                                type="button"
+                                onClick={() => setModalEliminarOpen(false)} 
+                                className="p-1.5 bg-white/10 hover:bg-white/15 rounded-lg transition-colors text-white"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Contenido */}
+                        <div className="p-6 flex flex-col gap-4 text-center">
+                            <div className="p-4 bg-red-50 text-red-800 rounded-full w-16 h-16 flex items-center justify-center mx-auto">
+                                <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </div>
+                            <div>
+                                <h4 className="text-base font-bold text-gray-800 mb-1">Confirmación de Eliminación Física</h4>
+                                <p className="text-sm text-gray-500 leading-relaxed">
+                                    ¿Está completamente seguro de eliminar a <strong className="text-gray-900 font-extrabold">{docenteAEliminar.nombres} {docenteAEliminar.apellidos}</strong>?
+                                </p>
+                                <p className="text-xs text-red-700 bg-red-50 p-2.5 rounded-lg border border-red-200 text-left mt-3 leading-relaxed">
+                                    ⚠️ <strong>¡Atención!</strong> Esta acción es irreversible. Se eliminarán sus vinculaciones a períodos académicos, roles, y asignaciones de agendas de manera definitiva para mantener la integridad de la base de datos.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Botones */}
+                        <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
+                            <button 
+                                type="button"
+                                onClick={() => setModalEliminarOpen(false)} 
+                                className="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleDeleteConfirm}
+                                disabled={eliminando}
+                                className="px-5 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-bold disabled:opacity-50 flex items-center gap-1.5"
+                            >
+                                {eliminando ? (
+                                    <>
+                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                        Eliminando...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        Eliminar de Raíz
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>

@@ -165,22 +165,26 @@ const getDocentesAsignados = async (req, res) => {
                 u.apellidos,
                 u.nombres || ' ' || u.apellidos AS nombre_completo,
                 u.correo,
+                u.tipo_documento,
+                u.numero_documento,
                 u.activo,
                 tc.tipo            AS tipo_contrato,
                 tc.horas_contrato,
                 COALESCE(pa.nombre_programa, '') AS programa,
+                COALESCE(f.nombre_facultad, '') AS facultad,
                 COALESCE(STRING_AGG(DISTINCT r.nombre_rol, ', '), '') AS roles,
                 dp.fecha_asignacion
             FROM docente_periodo dp
             JOIN usuarios u ON dp.id_usuario = u.id_usuario
             LEFT JOIN tipo_contrato tc ON u.id_contrato = tc.id_contrato
             LEFT JOIN programa_academico pa ON u.id_programa = pa.id_programa
+            LEFT JOIN facultad f ON pa.id_facultad = f.id_facultad
             LEFT JOIN usuario_rol ur ON u.id_usuario = ur.id_usuario
             LEFT JOIN roles r ON ur.id_rol = r.id_rol
             WHERE dp.id_periodo = $1
             GROUP BY u.id_usuario, u.nombres, u.apellidos,
-                     u.correo, u.activo, tc.tipo, tc.horas_contrato,
-                     pa.nombre_programa, dp.fecha_asignacion
+                     u.correo, u.tipo_documento, u.numero_documento, u.activo, tc.tipo, tc.horas_contrato,
+                     pa.nombre_programa, f.nombre_facultad, dp.fecha_asignacion
             ORDER BY u.apellidos, u.nombres
         `, [id]);
 

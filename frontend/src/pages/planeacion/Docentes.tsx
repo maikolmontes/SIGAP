@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import Layout from '../../components/common/Layout';
+import * as XLSX from 'xlsx';
+
 import { 
   Users, 
   UserPlus, 
@@ -38,14 +41,18 @@ interface Usuario {
   apellidos: string;
   nombre_completo: string;
   correo: string;
+  tipo_documento?: string;
+  numero_documento?: string;
   activo: boolean;
   tipo_contrato: string;
   horas_contrato: number;
   programa: string;
+  facultad?: string;
   roles: string;
 }
 
 export default function Docentes() {
+  const location = useLocation();
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(true);
   const [mensaje, setMensaje] = useState<{ tipo: 'exito' | 'error', texto: string } | null>(null);
@@ -68,22 +75,29 @@ export default function Docentes() {
   const [tipoDocumento, setTipoDocumento] = useState('CC');
   const [numeroDocumento, setNumeroDocumento] = useState('');
   const [correo, setCorreo] = useState('');
-  const [idContrato, setIdContrato] = useState(1);
   const [idPrograma, setIdPrograma] = useState(1);
   const [rol, setRol] = useState('Docente');
   const [formError, setFormError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [selectedPrograma, setSelectedPrograma] = useState('todos');
 
-  // Carga Masiva
-  const [bulkInput, setBulkInput] = useState('');
-  const [bulkFormat, setBulkFormat] = useState<'json' | 'csv'>('csv');
+  // Carga Masiva (Excel)
+  const [archivoImportar, setArchivoImportar] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ insertados: number; errores: any[] } | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
 
+
   useEffect(() => {
     cargarUsuarios();
   }, []);
+
+  useEffect(() => {
+    if (location.state?.openAddModal) {
+      setShowAddModal(true);
+      window.history.replaceState({}, document.title);
+    }
+  }, [location]);
 
   const cargarUsuarios = async () => {
     try {
@@ -96,11 +110,8 @@ export default function Docentes() {
       if (pActivo) {
         // 2. Obtener docentes asignados al período activo
         const res = await getDocentesPeriodo(pActivo.id_periodo);
-        // Filtrar localmente por Ingeniería de Sistemas (programa = 'Ingeniería de Sistemas') para asegurar
-        const listaSistemas = res.data.filter((u: Usuario) => 
-          !u.programa || u.programa === 'Ingeniería de Sistemas'
-        );
-        setUsuarios(listaSistemas);
+        // Guardar la nómina completa del período para filtrar dinámicamente
+        setUsuarios(res.data);
       } else {
         setUsuarios([]);
       }
@@ -133,7 +144,6 @@ export default function Docentes() {
     setTipoDocumento('CC');
     setNumeroDocumento('');
     setCorreo('');
-    setIdContrato(1);
     setIdPrograma(1);
     setRol('Docente');
     setFormError(null);
@@ -156,8 +166,8 @@ export default function Docentes() {
         tipo_documento: tipoDocumento,
         numero_documento: numeroDocumento.trim(),
         correo: correo.trim().toLowerCase(),
-        id_contrato: idContrato,
-        id_programa: idPrograma,
+        id_contrato: 1,
+        id_programa: rol === 'Planeacion' ? null : idPrograma,
         rol
       });
 
@@ -178,62 +188,43 @@ export default function Docentes() {
     }
   };
 
-  const handleImportMasivo = async () => {
+  const handleImportSubmit = async () => {
     setBulkError(null);
     setImportResult(null);
 
-    if (!bulkInput.trim()) {
-      setBulkError('El contenido de importación no puede estar vacío.');
+    if (!archivoImportar) {
+      setBulkError('Por favor selecciona un archivo Excel primero.');
       return;
     }
 
-    let datosAEnviar: any[] = [];
-
     try {
       setImporting(true);
-      if (bulkFormat === 'json') {
-        try {
-          const parsed = JSON.parse(bulkInput);
-          if (!Array.isArray(parsed)) {
-            throw new Error('El JSON debe ser un arreglo de objetos.');
-          }
-          datosAEnviar = parsed;
-        } catch (e: any) {
-          throw new Error(`Error en el formato JSON: ${e.message}`);
-        }
-      } else {
-        // Parsear CSV
-        const lineas = bulkInput.trim().split('\n');
-        if (lineas.length < 2) {
-          throw new Error('El CSV debe incluir al menos una cabecera y una línea de datos.');
-        }
+      const data = await archivoImportar.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json<any>(worksheet);
 
-        const cabeceras = lineas[0].toLowerCase().split(',').map(h => h.trim());
-        
-        // Validar columnas indispensables
-        if (!cabeceras.includes('nombres') || !cabeceras.includes('apellidos') || !cabeceras.includes('correo')) {
-          throw new Error('El CSV debe contener al menos las columnas: "nombres", "apellidos" y "correo".');
-        }
+      const payload = jsonData.map(row => {
+        const userRol = row.Rol || row.rol || 'Docente';
+        const isPl = userRol.toLowerCase().includes('plane');
+        return {
+          nombres: row.Nombres || row.nombres || '',
+          apellidos: row.Apellidos || row.apellidos || '',
+          correo: row.Correo || row.correo || '',
+          tipo_documento: row['Tipo Documento'] || row.tipo_documento || row.tipoDocumento || 'CC',
+          numero_documento: row['Número Documento'] || row.numero_documento || row.numeroDocumento || '0000000000',
+          programa: isPl ? null : (row['Programa Académico'] || row['Programa Academico'] || row.programa || row.Programa || 'Ingeniería de Sistemas'),
+          facultad: isPl ? null : 'Ingeniería',
+          rol: userRol
+        };
+      }).filter(u => u.nombres && u.apellidos && u.correo);
 
-        for (let i = 1; i < lineas.length; i++) {
-          const cols = lineas[i].split(',').map(c => c.trim());
-          if (cols.length === cabeceras.length) {
-            const filaObj: any = {};
-            cabeceras.forEach((header, index) => {
-              filaObj[header] = cols[index];
-            });
-            datosAEnviar.push(filaObj);
-          }
-        }
+      if (payload.length === 0) {
+        setBulkError('El Excel no tiene datos válidos. Revisa las columnas (Nombres, Apellidos, Correo, Tipo Documento, Número Documento, Programa Académico, Rol).');
+        return;
       }
 
-      // Validar mínimos campos de los datos parseados
-      const datosValidados = datosAEnviar.filter(u => u.nombres && u.apellidos && u.correo);
-      if (datosValidados.length === 0) {
-        throw new Error('No se encontraron registros válidos con nombres, apellidos y correo.');
-      }
-
-      const res = await createBulkUsuarios(datosValidados);
+      const res = await createBulkUsuarios(payload);
       
       setImportResult({
         insertados: res.data.insertados || 0,
@@ -244,14 +235,16 @@ export default function Docentes() {
         cargarUsuarios();
       }
 
-      setBulkInput('');
+      setArchivoImportar(null);
     } catch (error: any) {
       console.error('Error al realizar importación:', error);
-      setBulkError(error.message || 'Error crítico en el procesamiento de los datos.');
+      const errMsg = error.response?.data?.error || error.message || 'Falló la importación del Excel.';
+      setBulkError(errMsg);
     } finally {
       setImporting(false);
     }
   };
+
 
   // Filtrar los usuarios en el cliente
   const usuariosFiltrados = usuarios.filter(user => {
@@ -266,7 +259,11 @@ export default function Docentes() {
                            (selectedEstado === 'activos' && user.activo) ||
                            (selectedEstado === 'inactivos' && !user.activo);
 
-    return coincideBusqueda && coincideRol && coincideEstado;
+    const coincidePrograma = selectedPrograma === 'todos' ||
+                              (selectedPrograma === 'Ninguno' && (!user.programa || user.programa === '')) ||
+                              (user.programa && user.programa.toLowerCase() === selectedPrograma.toLowerCase());
+
+    return coincideBusqueda && coincideRol && coincideEstado && coincidePrograma;
   });
 
   // Métricas para tarjetas KPI
@@ -275,17 +272,38 @@ export default function Docentes() {
   const directoresCount = usuarios.filter(u => u.roles?.toLowerCase().includes('director')).length;
   const activePeriodName = periodoActivo ? `${periodoActivo.anio}-${periodoActivo.semestre === 1 ? 'I' : 'II'}` : 'Sin Período';
 
-  // Descargar plantilla CSV de ejemplo
+  // Descargar plantilla Excel de ejemplo con listas desplegables y sin columna Facultad
   const handleDescargarPlantilla = () => {
-    const csvContent = "data:text/csv;charset=utf-8,nombres,apellidos,correo,rol\nJuan Carlos,Perez,juan.perez@cesmag.edu.co,Docente\nMaria Elena,Gomez,maria.gomez@cesmag.edu.co,Director";
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "plantilla_importacion_docentes.csv");
-    document.body.appendChild(link);
+    const link = document.createElement('a');
+    link.href = '/plantilla_docentes_SIGAP.xlsx';
+    link.download = 'plantilla_docentes_SIGAP.xlsx';
     link.click();
-    document.body.removeChild(link);
   };
+
+  // Exportar la lista de docentes actual a Excel (.xlsx)
+  const handleExportarExcel = () => {
+    const encabezados = [['Nombres', 'Apellidos', 'Correo', 'Tipo Documento', 'Número Documento', 'Programa Académico', 'Facultad', 'Tipo Contrato', 'Roles', 'Estado']];
+    const filas = usuarios.map(u => {
+      const isPl = u.roles && u.roles.toLowerCase().includes('plane');
+      return [
+        u.nombres,
+        u.apellidos,
+        u.correo,
+        u.tipo_documento || 'CC',
+        u.numero_documento || '0000000000',
+        isPl ? 'No aplica' : (u.programa || 'Sin Asignar'),
+        isPl ? 'No aplica' : (u.facultad || 'Ingeniería'),
+        u.tipo_contrato || 'Hora Cátedra',
+        u.roles || 'Docente',
+        u.activo ? 'Habilitado' : 'Bloqueado'
+      ];
+    });
+    const ws = XLSX.utils.aoa_to_sheet([...encabezados, ...filas]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Docentes");
+    XLSX.writeFile(wb, "docentes_SIGAP.xlsx");
+  };
+
 
   return (
     <Layout rol="planeacion" path="Gestión Institucional / Docentes">
@@ -296,10 +314,10 @@ export default function Docentes() {
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
               <Users className="w-7 h-7 text-blue-400" />
-              Gestión de Docentes por Período
+              Gestión de Docentes y Usuarios
             </h1>
             <p className="text-blue-100/80 text-sm mt-1 max-w-xl">
-              Administra el personal académico del programa **Ingeniería de Sistemas** para el período activo. Agrega docentes, realiza cargas masivas e inhabilita accesos en tiempo real.
+              Administra el personal de los programas de la **Facultad de Ingeniería** para el período activo. Agrega docentes, realiza cargas masivas e inhabilita accesos en tiempo real.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
@@ -315,11 +333,19 @@ export default function Docentes() {
                 setShowBulkModal(true);
                 setImportResult(null);
                 setBulkError(null);
+                setArchivoImportar(null);
               }}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white px-4 py-2.5 rounded-lg font-bold border border-white/10 transition-all duration-200 text-sm backdrop-blur-sm"
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg font-bold shadow-md hover:shadow-lg transition-all duration-200 text-sm"
             >
               <Upload className="w-4 h-4" />
-              Carga Masiva (Lote)
+              Importar Excel
+            </button>
+            <button
+              onClick={handleExportarExcel}
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white px-4 py-2.5 rounded-lg font-bold border border-white/10 transition-all duration-200 text-sm backdrop-blur-sm"
+            >
+              <Download className="w-4 h-4" />
+              Exportar Excel
             </button>
           </div>
         </div>
@@ -402,10 +428,20 @@ export default function Docentes() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 shrink-0">
-            {/* Indicador Estático de Programa */}
-            <div className="bg-gray-100 border border-gray-200 text-gray-600 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-1.5 justify-center">
-              <BookOpen className="w-4 h-4 text-gray-400" />
-              Ing. de Sistemas
+            {/* Filtro Programa */}
+            <div>
+              <select
+                className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-gray-700 font-semibold"
+                value={selectedPrograma}
+                onChange={(e) => setSelectedPrograma(e.target.value)}
+              >
+                <option value="todos">Todos los Programas</option>
+                <option value="Ingeniería de Sistemas">Ing. de Sistemas</option>
+                <option value="Ingeniería Electrónica">Ing. Electrónica</option>
+                <option value="Ingeniería Industrial">Ing. Industrial</option>
+                <option value="Ingeniería Financiera">Ing. Financiera</option>
+                <option value="Ninguno">Sin Programa (Administrativo)</option>
+              </select>
             </div>
 
             {/* Filtro Rol */}
@@ -643,37 +679,37 @@ export default function Docentes() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Programa Académico</label>
-                  <input
-                    type="text"
-                    disabled
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500 font-semibold cursor-not-allowed"
-                    value="Ingeniería de Sistemas"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo de Contrato</label>
+                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Programa Académico *</label>
                   <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                    value={idContrato}
-                    onChange={(e) => setIdContrato(Number(e.target.value))}
+                    disabled={rol === 'Planeacion'}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400"
+                    value={rol === 'Planeacion' ? '' : idPrograma}
+                    onChange={(e) => setIdPrograma(Number(e.target.value))}
                   >
-                    <option value={1}>Tiempo Completo (40h)</option>
+                    {rol === 'Planeacion' ? (
+                      <option value="">No aplica (Administrativo)</option>
+                    ) : (
+                      <>
+                        <option value={1}>Ingeniería de Sistemas</option>
+                        <option value={2}>Ingeniería Electrónica</option>
+                        <option value={3}>Ingeniería Industrial</option>
+                        <option value={4}>Ingeniería Financiera</option>
+                      </>
+                    )}
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Rol de Acceso Principal</label>
-                <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                  value={rol}
-                  onChange={(e) => setRol(e.target.value)}
-                >
-                  <option value="Docente">Docente (Registra agendas y avances)</option>
-                  <option value="Director">Director (Supervisa y califica indicadores)</option>
-                  <option value="Planeacion">Planeación (Configura calendarios y nómina)</option>
-                </select>
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Rol de Acceso Principal</label>
+                  <select
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold"
+                    value={rol}
+                    onChange={(e) => setRol(e.target.value)}
+                  >
+                    <option value="Docente">Docente</option>
+                    <option value="Director">Director</option>
+                    <option value="Planeacion">Planeación</option>
+                  </select>
+                </div>
               </div>
 
               {/* Botones */}
@@ -688,7 +724,7 @@ export default function Docentes() {
                 <button
                   type="submit"
                   disabled={creating}
-                  className="bg-blue-650 hover:bg-blue-750 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-md transition-colors"
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-md transition-colors"
                 >
                   {creating ? (
                     <>
@@ -717,7 +753,7 @@ export default function Docentes() {
             <div className="bg-[#1a2744] text-white px-6 py-4 flex justify-between items-center">
               <h3 className="font-bold text-lg flex items-center gap-2">
                 <Upload className="w-5 h-5 text-blue-400" />
-                Carga Masiva de Docentes en Lote
+                Importar Docentes desde Excel
               </h3>
               <button 
                 onClick={() => setShowBulkModal(false)} 
@@ -734,11 +770,16 @@ export default function Docentes() {
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 text-xs text-blue-800 leading-relaxed font-semibold">
                 <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
                 <div>
-                  Importa múltiples docentes a la vez. Puedes pegar datos estructurados en formato <strong>CSV</strong> (separado por comas) o un arreglo <strong>JSON</strong>. 
-                  El sistema creará las cuentas automáticamente, asignando a todos el programa <strong>Ingeniería de Sistemas</strong> y vinculándolos al <strong>período académico activo</strong> en la base de datos.
-                  <div className="flex gap-4 mt-2 font-bold">
-                    <button onClick={handleDescargarPlantilla} className="text-blue-650 hover:text-blue-850 flex items-center gap-1">
-                      <Download className="w-3.5 h-3.5" /> Descargar Plantilla CSV
+                  <p>
+                    Importa múltiples docentes y usuarios a la vez desde un archivo Excel (<code>.xlsx</code>). 
+                    El sistema creará las cuentas automáticamente, asignándolas a sus respectivos programas y vinculándolas al <strong>período académico activo</strong>.
+                  </p>
+                  <p className="mt-2 text-blue-900 bg-blue-100/50 p-2.5 rounded-lg border border-blue-200/50 text-[11px] leading-relaxed">
+                    💡 <strong>Campos de Creación Requeridos:</strong> El archivo debe contener las columnas: <strong>Nombres</strong>, <strong>Apellidos</strong>, <strong>Correo</strong>, <strong>Tipo Documento</strong>, <strong>Número Documento</strong>, <strong>Programa Académico</strong> y <strong>Rol</strong>.
+                  </p>
+                  <div className="flex gap-4 mt-3 font-bold">
+                    <button type="button" onClick={handleDescargarPlantilla} className="text-blue-600 hover:text-blue-750 flex items-center gap-1">
+                      <Download className="w-3.5 h-3.5" /> Descargar Plantilla Excel Oficial (.xlsx)
                     </button>
                   </div>
                 </div>
@@ -775,44 +816,31 @@ export default function Docentes() {
                 </div>
               )}
 
-              {/* Selector de Formato */}
-              <div className="flex gap-2 border-b border-gray-100 pb-2">
-                <button
-                  onClick={() => setBulkFormat('csv')}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all ${
-                    bulkFormat === 'csv'
-                      ? 'bg-blue-50 text-blue-700 border-blue-200'
-                      : 'text-gray-500 hover:bg-gray-50 border-transparent'
-                  }`}
-                >
-                  Formato CSV
-                </button>
-                <button
-                  onClick={() => setBulkFormat('json')}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all ${
-                    bulkFormat === 'json'
-                      ? 'bg-blue-50 text-blue-700 border-blue-200'
-                      : 'text-gray-500 hover:bg-gray-50 border-transparent'
-                  }`}
-                >
-                  Formato JSON
-                </button>
-              </div>
-
-              {/* Cuadro de texto */}
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                  {bulkFormat === 'csv' ? 'Pegar filas CSV (Cabecera requerida: nombres,apellidos,correo,rol)' : 'Pegar Arreglo JSON'}
-                </label>
-                <textarea
-                  className="w-full h-44 font-mono text-xs border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  placeholder={
-                    bulkFormat === 'csv'
-                      ? "nombres,apellidos,correo,rol\nJuan Gabriel,Munoz,juan.munoz@cesmag.edu.co,Docente\nAlba Ines,Luna,alba.luna@cesmag.edu.co,Director"
-                      : "[\n  {\n    \"nombres\": \"Juan Gabriel\",\n    \"apellidos\": \"Munoz\",\n    \"correo\": \"juan.munoz@cesmag.edu.co\",\n    \"rol\": \"Docente\"\n  }\n]"
-                  }
-                  value={bulkInput}
-                  onChange={(e) => setBulkInput(e.target.value)}
+              {/* Selector de Archivo Excel con Zona Drag-and-Drop */}
+              <div 
+                className="border-2 border-dashed border-gray-200 rounded-xl p-8 hover:border-blue-500 transition-colors cursor-pointer group text-center bg-gray-50/30" 
+                onClick={() => document.getElementById('file-import')?.click()}
+              >
+                <Upload className="w-12 h-12 text-gray-300 group-hover:text-blue-500 mx-auto mb-3" />
+                <p className="text-sm font-bold text-gray-700">
+                  {archivoImportar ? archivoImportar.name : 'Arrastra aquí tu archivo Excel o haz clic para seleccionar'}
+                </p>
+                {archivoImportar && (
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {(archivoImportar.size / 1024).toFixed(1)} KB · Listo para procesar
+                  </p>
+                )}
+                {!archivoImportar && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Formatos soportados: .xlsx (Excel)
+                  </p>
+                )}
+                <input 
+                  type="file" 
+                  id="file-import" 
+                  className="hidden" 
+                  accept=".xlsx" 
+                  onChange={e => setArchivoImportar(e.target.files ? e.target.files[0] : null)} 
                 />
               </div>
 
@@ -827,19 +855,19 @@ export default function Docentes() {
                 </button>
                 <button
                   type="button"
-                  disabled={importing || !bulkInput.trim()}
-                  onClick={handleImportMasivo}
-                  className="bg-blue-650 hover:bg-blue-750 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-md transition-colors"
+                  disabled={importing || !archivoImportar}
+                  onClick={handleImportSubmit}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-md transition-colors"
                 >
                   {importing ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Importando lote...
+                      Importando...
                     </>
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      Procesar e Importar
+                      Comenzar Importación
                     </>
                   )}
                 </button>

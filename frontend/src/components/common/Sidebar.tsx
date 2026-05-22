@@ -6,6 +6,8 @@ type MenuItem = {
     label: string;
     path?: string;
     isHeader?: boolean;
+    state?: any;
+    isSubItem?: boolean;
 };
 
 const menuPlaneacion: MenuItem[] = [
@@ -13,6 +15,7 @@ const menuPlaneacion: MenuItem[] = [
     { label: 'Dashboard', path: '/planeacion/dashboard' },
     { label: 'Gestión Institucional', isHeader: true },
     { label: 'Docentes', path: '/planeacion/docentes' },
+    { label: 'Agregar Usuario', path: '/planeacion/docentes', state: { openAddModal: true }, isSubItem: true },
     { label: 'Períodos', path: '/planeacion/periodos' },
     { label: 'Semanas', path: '/planeacion/semanas' },
     { label: 'Reportes', isHeader: true },
@@ -130,14 +133,18 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                         <NavLink
                             key={`link-${idx}`}
                             to={item.path!}
+                            state={item.state}
                             className={({ isActive }) =>
                                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-1 transition-all group
-                                ${isActive
+                                ${isActive && !item.isSubItem
                                     ? 'bg-white/10 text-white border-l-[3px] border-[#4A9BE8] font-medium'
-                                    : 'text-white/60 hover:bg-white/5 hover:text-white border-l-[3px] border-transparent'
+                                    : item.isSubItem
+                                        ? 'text-white/60 hover:bg-white/5 hover:text-white pl-8 py-1.5 text-xs'
+                                        : 'text-white/60 hover:bg-white/5 hover:text-white border-l-[3px] border-transparent'
                                 }`
                             }
                         >
+                            {item.isSubItem && <span className="text-[10px] opacity-70">➕</span>}
                             {item.label}
                         </NavLink>
                     )

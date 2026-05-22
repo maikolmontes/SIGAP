@@ -19,3 +19,11 @@ export const createBulkUsuarios = (data) => {
 export const toggleActivo = (id) => {
     return api.patch(`/usuarios/${id}/activo`)
 }
+
+export const updateUsuario = (id, data) => {
+    return api.put(`/usuarios/${id}`, data)
+}
+
+export const deleteUsuario = (id) => {
+    return api.delete(`/usuarios/${id}`)
+}
