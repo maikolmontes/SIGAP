@@ -404,12 +404,23 @@ const guardarAvanceDocente = async (req, res) => {
     }
 
     const client = await pool.connect();
+    const advertencias = [];
 
     try {
         await client.query('BEGIN');
 
         for (const ind of indicadores) {
-            // Validar que la ejecución no supere la meta (logro > 1.0 -> 100%)
+            // Parsear valores — usar ?? para que 0 se guarde como 0 (no como null)
+            let ejec8 = (ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined && ind.ejecucion_8 !== '')
+                ? parseInt(ind.ejecucion_8, 10) : 0;
+            let ejec16 = (ind.ejecucion_16 !== null && ind.ejecucion_16 !== undefined && ind.ejecucion_16 !== '')
+                ? parseInt(ind.ejecucion_16, 10) : 0;
+
+            // Asegurar que no sean negativos
+            if (isNaN(ejec8) || ejec8 < 0) ejec8 = 0;
+            if (isNaN(ejec16) || ejec16 < 0) ejec16 = 0;
+
+            // Obtener la meta desde la BD
             const resultMeta = await client.query(`
                 SELECT d.meta 
                 FROM indicadores i
@@ -419,11 +430,20 @@ const guardarAvanceDocente = async (req, res) => {
 
             if (resultMeta.rows.length > 0) {
                 const meta = parseFloat(resultMeta.rows[0].meta) || 0;
-                const ejec8 = parseFloat(ind.ejecucion_8) || 0;
-                const ejec16 = parseFloat(ind.ejecucion_16) || 0;
-                
-                if (meta > 0 && (ejec8 + ejec16) > meta) {
-                    throw new Error('SUPERA EL 100%');
+
+                if (meta > 0) {
+                    // Semana 8 no puede superar la meta
+                    if (ejec8 > meta) {
+                        advertencias.push(`Indicador ${ind.id_indicador}: Ejecución S8 (${ejec8}) ajustada a la meta (${meta}).`);
+                        ejec8 = meta;
+                    }
+
+                    // Semana 8 + Semana 16 no pueden superar la meta
+                    if ((ejec8 + ejec16) > meta) {
+                        const maxEjec16 = Math.max(0, meta - ejec8);
+                        advertencias.push(`Indicador ${ind.id_indicador}: Ejecución S16 (${ejec16}) ajustada al máximo permitido (${maxEjec16}).`);
+                        ejec16 = maxEjec16;
+                    }
                 }
             }
 
@@ -434,22 +454,25 @@ const guardarAvanceDocente = async (req, res) => {
                     observaciones = $3
                 WHERE id_indicadores = $4
             `, [
-                ind.ejecucion_8 || 0, 
-                ind.ejecucion_16 || 0, 
-                ind.observaciones || '',
+                ejec8,
+                ejec16,
+                ind.observaciones ?? '',
                 ind.id_indicador
             ]);
         }
 
         await client.query('COMMIT');
-        res.json({ mensaje: 'Avance guardado correctamente.' });
+        
+        const respuesta = { mensaje: 'Avance guardado correctamente.' };
+        if (advertencias.length > 0) {
+            respuesta.advertencias = advertencias;
+            respuesta.mensaje = 'Avance guardado. Algunos valores fueron ajustados para no superar la meta.';
+        }
+        res.json(respuesta);
 
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error en guardarAvanceDocente:', error.message);
-        if (error.message === 'SUPERA EL 100%') {
-            return res.status(400).json({ error: 'El avance registrado SUPERA EL 100% de la meta establecida.' });
-        }
         res.status(500).json({ error: 'Error al guardar el avance.', detalles: error.message });
     } finally {
         client.release();
