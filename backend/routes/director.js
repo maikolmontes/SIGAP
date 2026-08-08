@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { importarAsignaciones, actualizarImportacion, getDashboardDirector, eliminarAgendas } = require('../controllers/directorController');
+const { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDistribucionDocente, eliminarAgendas, eliminarAgendasDocentes } = require('../controllers/directorController');
 const { getAgendas, getAgendaDetalle, aprobarAgenda, devolverAgenda, getReportesResumen } = require('../controllers/directorRevisionController');
 const verifyToken = require('../middleware/verifyToken');
 const verifyRole = require('../middleware/verifyRole');
@@ -14,6 +14,8 @@ router.get('/dashboard', verifyToken, verifyRole('Director', 'Planeacion', 'Cons
 router.post('/importar', verifyToken, verifyRole('Director'), upload.single('archivo'), importarAsignaciones);
 router.post('/actualizar', verifyToken, verifyRole('Director'), upload.single('archivo'), actualizarImportacion);
 router.delete('/eliminar-agendas', verifyToken, verifyRole('Director'), eliminarAgendas);
+router.delete('/eliminar-agendas-docentes', verifyToken, verifyRole('Director'), eliminarAgendasDocentes);
+router.get('/docente/:id/distribucion', verifyToken, verifyRole('Director', 'Planeacion', 'Consultor'), getDistribucionDocente);
 
 // Rutas de revisión de agendas — módulo Director
 router.get('/agendas', verifyToken, verifyRole('Director', 'Consultor'), getAgendas);

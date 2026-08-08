@@ -243,7 +243,7 @@ export default function Docentes() {
         tipo_documento: tipoDocumento,
         numero_documento: numeroDocumento.trim(),
         correo: correo.trim().toLowerCase(),
-        id_contrato: 1,
+        id_contrato: 4,
         id_programa: soloConsultaOPl ? null : idPrograma,
         roles: rolesSeleccionados
       });
@@ -343,25 +343,79 @@ export default function Docentes() {
       const data = await archivoImportar.arrayBuffer();
       const workbook = XLSX.read(data);
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json<any>(worksheet);
+      
+      // Obtener filas como matriz (array de arrays) para localizar dinámicamente el encabezado
+      const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
 
-      const payload = jsonData.map(row => {
-        const userRol = row.Rol || row.rol || 'Docente';
-        const isPl = userRol.toLowerCase().includes('plane');
-        return {
-          nombres: row.Nombres || row.nombres || '',
-          apellidos: row.Apellidos || row.apellidos || '',
-          correo: row.Correo || row.correo || '',
-          tipo_documento: row['Tipo Documento'] || row.tipo_documento || row.tipoDocumento || 'CC',
-          numero_documento: row['Número Documento'] || row.numero_documento || row.numeroDocumento || '0000000000',
-          programa: isPl ? null : (row['Programa Académico'] || row['Programa Academico'] || row.programa || row.Programa || 'Ingeniería de Sistemas'),
-          facultad: isPl ? null : 'Ingeniería',
-          rol: userRol
+      if (!rawRows || rawRows.length === 0) {
+        setBulkError('El archivo Excel está vacío.');
+        return;
+      }
+
+      // Buscar la fila de encabezados que contenga 'nombre' o 'nombres'
+      let headerIndex = -1;
+      for (let i = 0; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        if (Array.isArray(row) && row.some(cell => String(cell || '').toLowerCase().includes('nombre'))) {
+          headerIndex = i;
+          break;
+        }
+      }
+
+      if (headerIndex === -1) {
+        headerIndex = 0; // Fallback a la primera fila si no encuentra coincidencia explícita
+      }
+
+      // Limpiar encabezados de asteriscos y espacios extra
+      const headers = (rawRows[headerIndex] || []).map(h => String(h || '').trim().replace(/\s*\*/g, ''));
+
+      const payload: any[] = [];
+      for (let i = headerIndex + 1; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        if (!Array.isArray(row) || row.length === 0) continue;
+
+        const rowObj: Record<string, any> = {};
+        headers.forEach((h, colIdx) => {
+          if (h && row[colIdx] !== undefined) {
+            rowObj[h] = String(row[colIdx]).trim();
+          }
+        });
+
+        // Buscar valor ignorando mayúsculas, minúsculas o variaciones de acento/nombre
+        const getVal = (...keys: string[]) => {
+          for (const k of keys) {
+            for (const objKey of Object.keys(rowObj)) {
+              if (objKey.toLowerCase().trim() === k.toLowerCase().trim()) {
+                return rowObj[objKey];
+              }
+            }
+          }
+          return '';
         };
-      }).filter(u => u.nombres && u.apellidos && u.correo);
+
+        const nombres = getVal('Nombres', 'Nombre', 'nombres');
+        const apellidos = getVal('Apellidos', 'Apellido', 'apellidos');
+        const correo = getVal('Correo Institucional', 'Correo', 'correo');
+        const tipoDoc = getVal('Tipo Documento', 'tipo_documento', 'tipoDocumento') || 'CC';
+        const numDoc = getVal('Número Documento', 'Numero Documento', 'numero_documento', 'numeroDocumento', 'Documento');
+        const roles = getVal('Roles', 'Rol', 'roles', 'rol', 'Roles de Acceso') || 'Docente';
+        const programa = getVal('Programa Académico', 'Programa Academico', 'programa', 'Programa');
+
+        if (nombres && apellidos && correo) {
+          payload.push({
+            nombres,
+            apellidos,
+            correo,
+            tipo_documento: tipoDoc,
+            numero_documento: numDoc,
+            roles,
+            programa
+          });
+        }
+      }
 
       if (payload.length === 0) {
-        setBulkError('El Excel no tiene datos válidos. Revisa las columnas (Nombres, Apellidos, Correo, Tipo Documento, Número Documento, Programa Académico, Rol).');
+        setBulkError('El Excel no tiene datos válidos. Revisa las columnas obligatorias: Nombres, Apellidos, Correo Institucional, Tipo Documento, Número Documento, Roles, Programa Académico.');
         return;
       }
 
@@ -683,11 +737,19 @@ export default function Docentes() {
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-700 font-medium flex items-center gap-1.5">
                           <Briefcase className="w-3.5 h-3.5 text-gray-400" />
-                          {user.tipo_contrato || 'Hora Cátedra'}
-                          {user.horas_contrato && (
-                            <span className="text-xs font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                              {user.horas_contrato}h
+                          {(!user.tipo_contrato || user.tipo_contrato === 'Por Definir') ? (
+                            <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                              Por Definir
                             </span>
+                          ) : (
+                            <>
+                              <span>{user.tipo_contrato}</span>
+                              {user.horas_contrato > 0 && (
+                                <span className="text-xs font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                                  {user.horas_contrato}h
+                                </span>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>
