@@ -75,17 +75,29 @@ export default function DashboardPlaneacion() {
     const [editNumeroDocumento, setEditNumeroDocumento] = useState('')
     const [editCorreo, setEditCorreo] = useState('')
     const [editIdPrograma, setEditIdPrograma] = useState(1)
-    const [editRol, setEditRol] = useState('Docente')
+    const [editRolesSeleccionados, setEditRolesSeleccionados] = useState<string[]>(['Docente'])
     const [editError, setEditError] = useState<string | null>(null)
+    const [editWarning, setEditWarning] = useState<string | null>(null)
     const [guardando, setGuardando] = useState(false)
     const [eliminando, setEliminando] = useState(false)
 
-    const mapRolesToValue = (rolesStr?: string) => {
-        if (!rolesStr) return 'Docente';
-        const lower = rolesStr.toLowerCase();
-        if (lower.includes('plane')) return 'Planeacion';
-        if (lower.includes('dire')) return 'Director';
-        return 'Docente';
+    const esSoloConsultorOPlaneacion = (list: string[]) => {
+        if (!list || list.length === 0) return false;
+        return list.every(r => {
+            const low = r.toLowerCase();
+            return low.includes('consult') || low.includes('planea');
+        });
+    }
+
+    const toggleEditRol = (rolName: string) => {
+        setEditRolesSeleccionados(prev => {
+            if (prev.includes(rolName)) {
+                if (prev.length === 1) return prev;
+                return prev.filter(r => r !== rolName);
+            } else {
+                return [...prev, rolName];
+            }
+        });
     }
 
     const mapProgramaToId = (progName?: string) => {
@@ -104,15 +116,18 @@ export default function DashboardPlaneacion() {
         setEditTipoDocumento(d.tipo_documento || 'CC')
         setEditNumeroDocumento(d.numero_documento || '')
         setEditCorreo(d.correo)
-        setEditRol(mapRolesToValue(d.roles))
         setEditIdPrograma(mapProgramaToId(d.programa))
+        const parsedRoles = (d.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean)
+        setEditRolesSeleccionados(parsedRoles.length > 0 ? parsedRoles : ['Docente'])
         setEditError(null)
+        setEditWarning(null)
         setModalEditarOpen(true)
     }
 
     const handleEditSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         setEditError(null)
+        setEditWarning(null)
 
         if (!docenteAEditar) return
 
@@ -121,23 +136,34 @@ export default function DashboardPlaneacion() {
             return
         }
 
+        if (editRolesSeleccionados.length === 0) {
+            setEditError('Debe seleccionar al menos un rol.')
+            return
+        }
+
+        const soloConsultaOPl = esSoloConsultorOPlaneacion(editRolesSeleccionados)
+
         try {
             setGuardando(true)
-            await updateUsuario(docenteAEditar.id_usuario, {
+            const res = await updateUsuario(docenteAEditar.id_usuario, {
                 nombres: editNombres.trim(),
                 apellidos: editApellidos.trim(),
                 tipo_documento: editTipoDocumento,
                 numero_documento: editNumeroDocumento.trim(),
                 correo: editCorreo.trim().toLowerCase(),
-                id_programa: editRol === 'Planeacion' ? null : editIdPrograma,
-                rol: editRol
+                id_programa: soloConsultaOPl ? null : editIdPrograma,
+                roles: editRolesSeleccionados
             })
             setModalEditarOpen(false)
             await cargarDocentes()
-            alert('Usuario actualizado correctamente')
+            if (res.data?.advertencia) {
+                alert(`Usuario actualizado correctamente.\n${res.data.advertencia}`)
+            } else {
+                alert('Usuario actualizado correctamente')
+            }
         } catch (err: any) {
             console.error('Error al editar usuario:', err)
-            const errMsg = err.response?.data?.error || 'No se pudo actualizar el usuario. Verifique los datos o si el correo ya existe.'
+            const errMsg = err.response?.data?.error || 'No se pudo actualizar el usuario. Verifique los datos o si la identificación/correo ya existe.'
             setEditError(errMsg)
         } finally {
             setGuardando(false)
@@ -715,6 +741,12 @@ export default function DashboardPlaneacion() {
                                     <div>{editError}</div>
                                 </div>
                             )}
+                            {editWarning && (
+                                <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
+                                    <svg className="w-4 h-4 shrink-0 text-yellow-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                    <div>{editWarning}</div>
+                                </div>
+                            )}
 
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
@@ -779,17 +811,59 @@ export default function DashboardPlaneacion() {
                                 </div>
                             </div>
 
+                            {/* Multiselección de Roles (Checklist) */}
+                            <div>
+                                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
+                                    Roles de Acceso (Selecciona uno o varios) *
+                                </label>
+                                <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                    {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
+                                        const isChecked = editRolesSeleccionados.includes(rItem);
+                                        return (
+                                            <label
+                                                key={rItem}
+                                                className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
+                                                    isChecked
+                                                        ? 'bg-blue-50 border-blue-400 text-blue-800'
+                                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
+                                                }`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => toggleEditRol(rItem)}
+                                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                                                />
+                                                <span>{rItem}</span>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Facultad y Programa Académico Dinámicos */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Programa Académico *</label>
+                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Facultad</label>
+                                    <input
+                                        type="text"
+                                        disabled
+                                        value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
+                                        Programa Académico {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : '*'}
+                                    </label>
                                     <select
-                                        disabled={editRol === 'Planeacion'}
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400"
-                                        value={editRol === 'Planeacion' ? '' : editIdPrograma}
+                                        disabled={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                        value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : editIdPrograma}
                                         onChange={(e) => setEditIdPrograma(Number(e.target.value))}
                                     >
-                                        {editRol === 'Planeacion' ? (
-                                            <option value="">No aplica (Administrativo)</option>
+                                        {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? (
+                                            <option value="">Deshabilitado (Sin asignación académica)</option>
                                         ) : (
                                             <>
                                                 <option value={1}>Ingeniería de Sistemas</option>
@@ -798,18 +872,6 @@ export default function DashboardPlaneacion() {
                                                 <option value={4}>Ingeniería Financiera</option>
                                             </>
                                         )}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Rol de Acceso Principal</label>
-                                    <select
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold"
-                                        value={editRol}
-                                        onChange={(e) => setEditRol(e.target.value)}
-                                    >
-                                        <option value="Docente">Docente</option>
-                                        <option value="Director">Director</option>
-                                        <option value="Planeacion">Planeación</option>
                                     </select>
                                 </div>
                             </div>

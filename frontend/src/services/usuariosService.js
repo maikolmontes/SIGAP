@@ -8,6 +8,10 @@ export const getUsuarioById = (id) => {
     return api.get(`/usuarios/${id}`)
 }
 
+export const validarUsuario = (data) => {
+    return api.post('/usuarios/validar', data)
+}
+
 export const createUsuario = (data) => {
     return api.post('/usuarios', data)
 }

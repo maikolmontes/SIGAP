@@ -89,6 +89,79 @@ const getById = async (req, res) => {
     }
 };
 
+const parseRoles = (roles, rol) => {
+    if (Array.isArray(roles) && roles.length > 0) {
+        return roles;
+    }
+    if (typeof rol === 'string' && rol.trim() !== '') {
+        return [rol.trim()];
+    }
+    return ['Docente'];
+};
+
+const normalizeRolName = (rName) => {
+    if (!rName) return 'docente';
+    const low = rName.trim().toLowerCase();
+    if (low.includes('planea')) return 'planeacion';
+    if (low.includes('direct')) return 'director';
+    if (low.includes('consult')) return 'consultor';
+    if (low.includes('docent')) return 'docente';
+    return low;
+};
+
+const isOnlyConsultorOrPlaneacion = (rolesList) => {
+    if (!rolesList || rolesList.length === 0) return false;
+    return rolesList.every(r => {
+        const norm = normalizeRolName(r);
+        return norm === 'consultor' || norm === 'planeacion';
+    });
+};
+
+const validar = async (req, res) => {
+    const { numero_documento, correo, nombres, apellidos, id_usuario } = req.body;
+    try {
+        let duplicaDocumento = false;
+        let duplicaCorreo = false;
+        let coincideNombre = false;
+
+        if (numero_documento) {
+            const resDoc = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND ($2::integer IS NULL OR id_usuario != $2)',
+                [numero_documento, id_usuario || null]
+            );
+            if (resDoc.rows.length > 0) duplicaDocumento = true;
+        }
+
+        if (correo) {
+            const resMail = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1) AND ($2::integer IS NULL OR id_usuario != $2)',
+                [correo, id_usuario || null]
+            );
+            if (resMail.rows.length > 0) duplicaCorreo = true;
+        }
+
+        if (nombres && apellidos) {
+            const resNom = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE LOWER(TRIM(nombres)) = LOWER(TRIM($1)) AND LOWER(TRIM(apellidos)) = LOWER(TRIM($2)) AND ($3::integer IS NULL OR id_usuario != $3)',
+                [nombres, apellidos, id_usuario || null]
+            );
+            if (resNom.rows.length > 0) coincideNombre = true;
+        }
+
+        res.json({
+            duplicaDocumento,
+            duplicaCorreo,
+            coincideNombre,
+            mensajeDocumento: duplicaDocumento ? 'Ya existe un usuario/docente registrado con esta identificación.' : null,
+            mensajeCorreo: duplicaCorreo ? 'Ya existe un usuario/docente registrado con este correo institucional.' : null,
+            mensajeNombre: coincideNombre ? '⚠️ Ya existe un docente registrado con este nombre. Verifique la identificación y el correo antes de continuar.' : null
+        });
+    } catch (error) {
+        console.error('Error en validar usuario:', error);
+        res.status(500).json({ error: 'Error al validar datos del usuario' });
+    }
+};
+
 const create = async (req, res) => {
     const {
         nombres,
@@ -98,13 +171,58 @@ const create = async (req, res) => {
         correo,
         id_contrato,
         id_programa,
-        rol // Nuevo campo esperado (ej: 'Docente')
+        rol,
+        roles
     } = req.body;
 
-    const isPlaneacion = rol && rol.toLowerCase().includes('plane');
-    const progId = isPlaneacion ? null : (id_programa || 1);
+    const rolesList = parseRoles(roles, rol);
+    const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
+    const progId = soloConsultorOPlaneacion ? null : (id_programa || 1);
+
+    const docNum = numero_documento ? String(numero_documento).trim() : '';
+    const emailStr = correo ? String(correo).trim().toLowerCase() : '';
 
     try {
+        // 1. Validar Identificación duplicada
+        if (docNum) {
+            const dupDoc = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1',
+                [docNum]
+            );
+            if (dupDoc.rows.length > 0) {
+                return res.status(409).json({
+                    error: `Ya existe un docente/usuario registrado con la identificación ${docNum}.`,
+                    campo: 'numero_documento'
+                });
+            }
+        }
+
+        // 2. Validar Correo duplicado
+        if (emailStr) {
+            const dupEmail = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1)',
+                [emailStr]
+            );
+            if (dupEmail.rows.length > 0) {
+                return res.status(409).json({
+                    error: `Ya existe un docente/usuario registrado con el correo institucional ${emailStr}.`,
+                    campo: 'correo'
+                });
+            }
+        }
+
+        // 3. Verificar coincidencia por Nombre (Advertencia)
+        let advertencia = null;
+        if (nombres && apellidos) {
+            const dupName = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE LOWER(TRIM(nombres)) = LOWER(TRIM($1)) AND LOWER(TRIM(apellidos)) = LOWER(TRIM($2))',
+                [nombres.trim(), apellidos.trim()]
+            );
+            if (dupName.rows.length > 0) {
+                advertencia = '⚠️ Ya existe un docente registrado con este nombre. Verifique la identificación y el correo antes de continuar.';
+            }
+        }
+
         await pool.query('BEGIN'); // Iniciar transacción
 
         // Buscar periodo activo
@@ -119,27 +237,39 @@ const create = async (req, res) => {
             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
             RETURNING id_usuario, nombres, apellidos, correo
         `, [
-            nombres, apellidos, 
+            nombres ? nombres.trim() : '', 
+            apellidos ? apellidos.trim() : '', 
             tipo_documento || 'CC', 
-            numero_documento || '0000000000', 
-            correo, 
+            docNum || '0000000000', 
+            emailStr, 
             id_contrato || 1,
             progId
         ]);
 
         const nuevoUsuario = result.rows[0];
 
-        // Insertar rol si se proporciona
-        if (rol) {
-            const roleResult = await pool.query('SELECT id_rol FROM roles WHERE nombre_rol = $1', [rol]);
+        // Insertar múltiples roles
+        for (const rName of rolesList) {
+            const roleResult = await pool.query(
+                'SELECT id_rol FROM roles WHERE LOWER(nombre_rol) = LOWER($1) OR LOWER(nombre_rol) = $2',
+                [rName.trim(), normalizeRolName(rName)]
+            );
             if (roleResult.rows.length > 0) {
                 const idRol = roleResult.rows[0].id_rol;
-                await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2)', [nuevoUsuario.id_usuario, idRol]);
+                await pool.query(
+                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    [nuevoUsuario.id_usuario, idRol]
+                );
             }
         }
 
-        // Asignar al periodo activo si existe
-        if (idPeriodoActivo) {
+        // Asignar al periodo activo si existe y tiene rol docente o director
+        const tieneRolAcademico = rolesList.some(r => {
+            const low = r.toLowerCase();
+            return low.includes('docent') || low.includes('direct');
+        });
+
+        if (idPeriodoActivo && tieneRolAcademico) {
             await pool.query(`
                 INSERT INTO docente_periodo (id_usuario, id_periodo)
                 VALUES ($1, $2)
@@ -166,12 +296,16 @@ const create = async (req, res) => {
         }
 
         await pool.query('COMMIT');
-        res.status(201).json(nuevoUsuario);
+        res.status(201).json({
+            ...nuevoUsuario,
+            roles: rolesList.join(', '),
+            advertencia
+        });
 
     } catch (error) {
         await pool.query('ROLLBACK');
         console.error('Error en create usuario:', error);
-        res.status(500).json({ error: 'Error al crear el usuario. Posible correo duplicado.' });
+        res.status(500).json({ error: 'Error al crear el usuario en la base de datos.' });
     }
 };
 
@@ -321,13 +455,58 @@ const update = async (req, res) => {
         numero_documento,
         correo,
         id_programa,
-        rol
+        rol,
+        roles
     } = req.body;
 
-    const isPlaneacion = rol && rol.toLowerCase().includes('plane');
-    const progId = isPlaneacion ? null : (id_programa || 1);
+    const rolesList = parseRoles(roles, rol);
+    const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
+    const progId = soloConsultorOPlaneacion ? null : (id_programa || 1);
+
+    const docNum = numero_documento ? String(numero_documento).trim() : '';
+    const emailStr = correo ? String(correo).trim().toLowerCase() : '';
 
     try {
+        // 1. Validar Identificación duplicada (excluyendo el usuario actual)
+        if (docNum) {
+            const dupDoc = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND id_usuario != $2',
+                [docNum, id]
+            );
+            if (dupDoc.rows.length > 0) {
+                return res.status(409).json({
+                    error: `Ya existe un docente/usuario registrado con la identificación ${docNum}.`,
+                    campo: 'numero_documento'
+                });
+            }
+        }
+
+        // 2. Validar Correo duplicado (excluyendo el usuario actual)
+        if (emailStr) {
+            const dupEmail = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1) AND id_usuario != $2',
+                [emailStr, id]
+            );
+            if (dupEmail.rows.length > 0) {
+                return res.status(409).json({
+                    error: `Ya existe un docente/usuario registrado con el correo institucional ${emailStr}.`,
+                    campo: 'correo'
+                });
+            }
+        }
+
+        // 3. Verificar coincidencia por Nombre (Advertencia)
+        let advertencia = null;
+        if (nombres && apellidos) {
+            const dupName = await pool.query(
+                'SELECT id_usuario FROM usuarios WHERE LOWER(TRIM(nombres)) = LOWER(TRIM($1)) AND LOWER(TRIM(apellidos)) = LOWER(TRIM($2)) AND id_usuario != $3',
+                [nombres.trim(), apellidos.trim(), id]
+            );
+            if (dupName.rows.length > 0) {
+                advertencia = '⚠️ Ya existe un docente registrado con este nombre. Verifique la identificación y el correo antes de continuar.';
+            }
+        }
+
         await pool.query('BEGIN');
 
         // Buscar periodo activo
@@ -346,11 +525,11 @@ const update = async (req, res) => {
             WHERE id_usuario = $7
             RETURNING id_usuario, nombres, apellidos, correo, id_programa
         `, [
-            nombres,
-            apellidos,
+            nombres ? nombres.trim() : '',
+            apellidos ? apellidos.trim() : '',
             tipo_documento || 'CC',
-            numero_documento || '0000000000',
-            correo,
+            docNum || '0000000000',
+            emailStr,
             progId,
             id
         ]);
@@ -362,44 +541,64 @@ const update = async (req, res) => {
 
         const usuarioActualizado = result.rows[0];
 
-        // Sincronizar Rol
-        if (rol) {
-            // Eliminar rol actual
-            await pool.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
-
-            // Obtener ID del nuevo rol
-            const roleResult = await pool.query('SELECT id_rol FROM roles WHERE nombre_rol = $1', [rol]);
+        // Sincronizar Roles (Eliminar antiguos e insertar nuevos)
+        await pool.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
+        for (const rName of rolesList) {
+            const roleResult = await pool.query(
+                'SELECT id_rol FROM roles WHERE LOWER(nombre_rol) = LOWER($1) OR LOWER(nombre_rol) = $2',
+                [rName.trim(), normalizeRolName(rName)]
+            );
             if (roleResult.rows.length > 0) {
                 const idRol = roleResult.rows[0].id_rol;
-                await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2)', [id, idRol]);
+                await pool.query(
+                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    [id, idRol]
+                );
             }
         }
 
-        // Si hay periodo activo y un programa, asegurar programa_periodo
-        if (idPeriodoActivo && progId) {
-            const existeProgPer = await pool.query(
-                'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
-                [progId, idPeriodoActivo]
-            );
-            if (existeProgPer.rows.length === 0) {
-                const pensul = await pool.query(
-                    'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
+        // Si hay periodo activo y rol académico (Docente/Director), asegurar docente_periodo y programa_periodo
+        const tieneRolAcademico = rolesList.some(r => {
+            const low = r.toLowerCase();
+            return low.includes('docent') || low.includes('direct');
+        });
+
+        if (idPeriodoActivo && tieneRolAcademico) {
+            await pool.query(`
+                INSERT INTO docente_periodo (id_usuario, id_periodo)
+                VALUES ($1, $2)
+                ON CONFLICT DO NOTHING
+            `, [id, idPeriodoActivo]);
+
+            if (progId) {
+                const existeProgPer = await pool.query(
+                    'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
+                    [progId, idPeriodoActivo]
                 );
-                const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-                await pool.query(`
-                    INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
-                    VALUES ($1, $2, $3)
-                `, [idPeriodoActivo, progId, id_pensulaca]);
+                if (existeProgPer.rows.length === 0) {
+                    const pensul = await pool.query(
+                        'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
+                    );
+                    const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
+                    await pool.query(`
+                        INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
+                        VALUES ($1, $2, $3)
+                    `, [idPeriodoActivo, progId, id_pensulaca]);
+                }
             }
         }
 
         await pool.query('COMMIT');
-        res.json(usuarioActualizado);
+        res.json({
+            ...usuarioActualizado,
+            roles: rolesList.join(', '),
+            advertencia
+        });
 
     } catch (error) {
         await pool.query('ROLLBACK');
         console.error('Error en update usuario:', error);
-        res.status(500).json({ error: 'Error al actualizar el usuario. Posible correo duplicado o error de base de datos.' });
+        res.status(500).json({ error: 'Error al actualizar el usuario en la base de datos.' });
     }
 };
 
@@ -448,6 +647,7 @@ const deleteUsuario = async (req, res) => {
 module.exports = {
     getAll,
     getById,
+    validar,
     create,
     createBulk,
     toggleActivo,
