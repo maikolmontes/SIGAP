@@ -260,17 +260,13 @@ const Evidencias: React.FC = () => {
                             {/* Periodo Dropdown */}
                             <div className="w-full sm:w-60">
                                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Periodo Académico</label>
-                                <select
-                                    value={selectedPeriod || ''}
-                                    onChange={(e) => setSelectedPeriod(Number(e.target.value))}
-                                    className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-gray-700 font-bold"
-                                >
-                                    {periodos.map((p) => (
-                                        <option key={p.id_periodo} value={p.id_periodo}>
-                                            Periodo {p.anio} - {p.semestre === 1 ? 'I' : 'II'} {p.activo ? '(Activo)' : ''}
-                                        </option>
-                                    ))}
-                                </select>
+                                <div className="w-full bg-gray-100 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-600 flex items-center justify-between cursor-not-allowed">
+                                    <span>
+                                        {periodos.find(p => p.id_periodo === activePeriodId)
+                                            ? `Periodo ${periodos.find(p => p.id_periodo === activePeriodId)?.anio} - ${periodos.find(p => p.id_periodo === activePeriodId)?.semestre === 1 ? 'I' : 'II'} (Activo)`
+                                            : 'No hay periodo activo'}
+                                    </span>
+                                </div>
                             </div>
 
                             {/* Semana Selector */}
