@@ -412,9 +412,9 @@ const guardarAvanceDocente = async (req, res) => {
         for (const ind of indicadores) {
             // Parsear valores — usar ?? para que 0 se guarde como 0 (no como null)
             let ejec8 = (ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined && ind.ejecucion_8 !== '')
-                ? parseInt(ind.ejecucion_8, 10) : 0;
+                ? parseFloat(String(ind.ejecucion_8)) : 0;
             let ejec16 = (ind.ejecucion_16 !== null && ind.ejecucion_16 !== undefined && ind.ejecucion_16 !== '')
-                ? parseInt(ind.ejecucion_16, 10) : 0;
+                ? parseFloat(String(ind.ejecucion_16)) : 0;
 
             // Asegurar que no sean negativos
             if (isNaN(ejec8) || ejec8 < 0) ejec8 = 0;

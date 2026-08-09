@@ -62,10 +62,10 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                      existing.indicadores.push({
                          id_indicador: curr.id_indicador,
                          nombre_indicador: curr.nombre_indicador,
-                         ejecucion_8: curr.ejecucion_8,
-                         ejecucion_16: curr.ejecucion_16,
+                         ejecucion_8: curr.ejecucion_8 !== null ? String(parseFloat(curr.ejecucion_8)) : null,
+                         ejecucion_16: curr.ejecucion_16 !== null ? String(parseFloat(curr.ejecucion_16)) : null,
                          observaciones: curr.observaciones,
-                         meta: curr.meta,
+                         meta: curr.meta !== null ? String(parseFloat(curr.meta)) : null,
                          evidencias: curr.evidencias || []
                      });
                  }
@@ -132,28 +132,34 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     const meta = Number(indicador.meta) || Number(actividad.meta) || 0;
 
     if (campo === 'ejecucion_8' || campo === 'ejecucion_16') {
-      let numVal = valor === '' || valor === null || valor === undefined ? null : parseInt(valor, 10);
-
-      // Validar que no sea NaN
-      if (numVal !== null && isNaN(numVal)) numVal = null;
-
-      // Validar que no sea negativo
-      if (numVal !== null && numVal < 0) numVal = 0;
-
-      // Validar que no supere la meta
-      if (numVal !== null && meta > 0) {
-        if (campo === 'ejecucion_8') {
-          // Semana 8: no puede superar la meta
-          if (numVal > meta) numVal = meta;
-        } else if (campo === 'ejecucion_16') {
-          // Semana 16: no puede superar (meta - lo que ya se ejecutó en semana 8)
-          const ejec8Actual = Number(indicador.ejecucion_8) || 0;
-          const maxPermitido = Math.max(0, meta - ejec8Actual);
-          if (numVal > maxPermitido) numVal = maxPermitido;
-        }
+      let valStr = String(valor);
+      
+      if (valStr === '') {
+          indicador[campo] = null;
+      } else {
+          // Permitir escribir números con decimales (ej. "0.")
+          let numVal = parseFloat(valStr);
+          
+          if (!isNaN(numVal)) {
+              if (numVal < 0) {
+                  valStr = "0";
+                  numVal = 0;
+              }
+              
+              if (meta > 0) {
+                  if (campo === 'ejecucion_8' && numVal > meta) {
+                      valStr = String(meta);
+                  } else if (campo === 'ejecucion_16') {
+                      const ejec8Actual = parseFloat(String(indicador.ejecucion_8)) || 0;
+                      const maxPermitido = Math.max(0, meta - ejec8Actual);
+                      if (numVal > maxPermitido) {
+                          valStr = String(maxPermitido);
+                      }
+                  }
+              }
+          }
+          indicador[campo] = valStr;
       }
-
-      indicador[campo] = numVal;
     } else {
       indicador[campo] = valor;
     }
@@ -340,8 +346,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                 <tbody className="divide-y divide-gray-100">
                                     {actividad.indicadores?.map((ind: any, iIndex: number) => {
                                         const meta = Number(ind.meta) || Number(actividad.meta) || 0;
-                                        const ejec8 = ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined && ind.ejecucion_8 !== '' ? parseInt(ind.ejecucion_8, 10) : 0;
-                                        const ejec16 = ind.ejecucion_16 !== null && ind.ejecucion_16 !== undefined && ind.ejecucion_16 !== '' ? parseInt(ind.ejecucion_16, 10) : 0;
+                                        const ejec8 = ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined && ind.ejecucion_8 !== '' ? parseFloat(String(ind.ejecucion_8)) : 0;
+                                        const ejec16 = ind.ejecucion_16 !== null && ind.ejecucion_16 !== undefined && ind.ejecucion_16 !== '' ? parseFloat(String(ind.ejecucion_16)) : 0;
                                         const totalEjecucion = ejec8 + (semana === '16' ? ejec16 : 0);
                                         const superaMeta = totalEjecucion > meta;
                                         const porcentaje = calcularAvance(meta, ejec8, ejec16);
@@ -355,9 +361,9 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                     <input 
                                                         type="number" 
                                                         min="0"
-                                                        step="1"
+                                                        step="any"
                                                         max={meta > 0 ? meta : undefined}
-                                                        value={ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined ? parseInt(ind.ejecucion_8, 10) : ''}
+                                                        value={ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined ? ind.ejecucion_8 : ''}
                                                         onChange={(e) => handleIndicadorChange(selectedFunctionIndex, aIndex, iIndex, 'ejecucion_8', e.target.value)}
                                                         disabled={semana !== '8'}
                                                         className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${semana !== '8' ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : 'bg-white border-gray-300'}`}
@@ -368,9 +374,9 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                     <input 
                                                         type="number" 
                                                         min="0"
-                                                        step="1"
+                                                        step="any"
                                                         max={meta > 0 ? Math.max(0, meta - ejec8) : undefined}
-                                                        value={ind.ejecucion_16 !== null && ind.ejecucion_16 !== undefined ? parseInt(ind.ejecucion_16, 10) : ''}
+                                                        value={ind.ejecucion_16 !== null && ind.ejecucion_16 !== undefined ? ind.ejecucion_16 : ''}
                                                         onChange={(e) => handleIndicadorChange(selectedFunctionIndex, aIndex, iIndex, 'ejecucion_16', e.target.value)}
                                                         className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors bg-white border-gray-300`}
                                                     />
