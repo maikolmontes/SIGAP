@@ -34,7 +34,7 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
                 : 'DO'
 
     return (
-        <header className="h-14 sm:h-11 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-5 flex-shrink-0 z-10 w-full relative">
+        <header className="h-14 sm:h-11 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-5 flex-shrink-0 z-40 w-full relative">
             <div className="flex items-center gap-3">
                 {onOpenMenu && (
                     <button 

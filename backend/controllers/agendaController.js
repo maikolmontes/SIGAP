@@ -12,7 +12,7 @@ const getAgenda = async (req, res) => {
                 tc.tipo             AS tipo_contrato,
                 tc.horas_contrato,
                 pa.nombre_programa,
-                na.nivel            AS nivel_academico,
+                na.nombre_titulo    AS nivel_academico,
                 per.anio || '-' || per.semestre AS periodo
             FROM usuarios u
             JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato

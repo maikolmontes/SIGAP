@@ -57,7 +57,7 @@ const getById = async (req, res) => {
                 tc.horas_contrato,
                 pa.nombre_programa AS programa,
                 f.nombre_facultad  AS facultad,
-                na.nivel           AS nivel_academico,
+                na.nombre_titulo   AS nivel_academico,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato   = tc.id_contrato
@@ -251,11 +251,11 @@ const create = async (req, res) => {
             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
             RETURNING id_usuario, nombres, apellidos, correo
         `, [
-            nombres ? nombres.trim() : '', 
-            apellidos ? apellidos.trim() : '', 
-            tipo_documento || 'CC', 
-            docNum || '0000000000', 
-            emailStr, 
+            nombres ? nombres.trim() : '',
+            apellidos ? apellidos.trim() : '',
+            tipo_documento || 'CC',
+            docNum || '0000000000',
+            emailStr,
             id_contrato || resolverIdContrato(req.body.tipo_contrato) || 4,
             progId
         ]);
@@ -456,8 +456,8 @@ const createBulk = async (req, res) => {
 
             // Parsear roles (soporta múltiples separados por coma)
             const rawRoles = u.roles || u.Rol || u.rol || u['Roles'] || u['roles'] || u['Roles de Acceso'] || 'Docente';
-            const rolesList = typeof rawRoles === 'string' 
-                ? rawRoles.split(',').map(r => r.trim()).filter(Boolean) 
+            const rolesList = typeof rawRoles === 'string'
+                ? rawRoles.split(',').map(r => r.trim()).filter(Boolean)
                 : (Array.isArray(rawRoles) ? rawRoles : ['Docente']);
 
             const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
@@ -736,6 +736,208 @@ const update = async (req, res) => {
     }
 };
 
+const getPerfilCompleto = async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // 1. Datos básicos del usuario
+        const userResult = await pool.query(`
+            SELECT
+                u.id_usuario,
+                u.nombres,
+                u.apellidos,
+                u.tipo_documento,
+                u.numero_documento,
+                u.correo,
+                u.id_contrato,
+                u.id_programa,
+                u.activo,
+                tc.tipo AS tipo_contrato,
+                tc.horas_contrato,
+                pa.nombre_programa AS programa,
+                f.nombre_facultad AS facultad,
+                STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
+            FROM usuarios u
+            LEFT JOIN tipo_contrato tc ON u.id_contrato = tc.id_contrato
+            LEFT JOIN programa_academico pa ON u.id_programa = pa.id_programa
+            LEFT JOIN facultad f ON pa.id_facultad = f.id_facultad
+            LEFT JOIN usuario_rol ur ON u.id_usuario = ur.id_usuario
+            LEFT JOIN roles r ON ur.id_rol = r.id_rol
+            WHERE u.id_usuario = $1
+            GROUP BY u.id_usuario, tc.tipo, tc.horas_contrato, pa.nombre_programa, f.nombre_facultad
+        `, [id]);
+
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const usuario = userResult.rows[0];
+
+        // 2. Títulos académicos del usuario (desde usuario_nivel + nivel_academico)
+        const titulosResult = await pool.query(`
+            SELECT
+                na.id_nivelaca,
+                na.nombre_titulo,
+                na.nivel,
+                na.titulo_convalidado
+            FROM usuario_nivel un
+            JOIN nivel_academico na ON un.id_nivelaca = na.id_nivelaca
+            WHERE un.id_usuario = $1
+            ORDER BY na.nivel
+        `, [id]);
+
+        const titulos = titulosResult.rows;
+        const titulo_pregrado = titulos.find(t => t.nivel && t.nivel.toLowerCase().includes('pregrado'));
+        const titulo_posgrado = titulos.find(t => t.nivel && t.nivel.toLowerCase().includes('posgrado'));
+        const titulo_convalidado = titulos.find(t => t.titulo_convalidado === true);
+
+        // 3. Listas para los dropdowns del formulario
+        const contratosResult = await pool.query('SELECT id_contrato, tipo, horas_contrato FROM tipo_contrato WHERE activo = TRUE ORDER BY tipo');
+        const programasResult = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico WHERE activo = TRUE ORDER BY nombre_programa');
+        const periodoResult = await pool.query('SELECT id_periodo, anio, semestre FROM periodo WHERE activo = TRUE LIMIT 1');
+
+        const periodoActivo = periodoResult.rows.length > 0 ? periodoResult.rows[0] : null;
+
+        // 4. Determinar si el perfil está completo
+        const perfilCompleto = !!(
+            usuario.nombres && usuario.nombres.trim() !== '' &&
+            usuario.apellidos && usuario.apellidos.trim() !== '' &&
+            usuario.tipo_documento && usuario.tipo_documento.trim() !== '' &&
+            usuario.numero_documento && usuario.numero_documento.trim() !== '' && usuario.numero_documento !== '0000000000' &&
+            usuario.id_contrato && usuario.id_contrato !== 4 &&
+            usuario.id_programa &&
+            titulo_pregrado
+        );
+
+        res.json({
+            ...usuario,
+            titulo_pregrado: titulo_pregrado ? { id_nivelaca: titulo_pregrado.id_nivelaca, nombre_titulo: titulo_pregrado.nombre_titulo } : null,
+            titulo_posgrado: titulo_posgrado ? { id_nivelaca: titulo_posgrado.id_nivelaca, nombre_titulo: titulo_posgrado.nombre_titulo } : null,
+            titulo_convalidado: titulo_convalidado ? { id_nivelaca: titulo_convalidado.id_nivelaca, nombre_titulo: titulo_convalidado.nombre_titulo } : null,
+            contratos: contratosResult.rows,
+            programas: programasResult.rows,
+            periodo_activo: periodoActivo,
+            perfil_completo: perfilCompleto
+        });
+
+    } catch (error) {
+        console.error('Error en getPerfilCompleto:', error.message);
+        res.status(500).json({ error: 'Error al obtener el perfil completo.' });
+    }
+};
+
+const updatePerfil = async (req, res) => {
+    const { id } = req.params;
+    const {
+        nombres,
+        apellidos,
+        tipo_documento,
+        numero_documento,
+        id_contrato,
+        id_programa,
+        titulo_pregrado,
+        titulo_posgrado,
+        titulo_convalidado
+    } = req.body;
+
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // 1. Actualizar datos básicos del usuario
+        const docNum = numero_documento ? String(numero_documento).trim() : '';
+
+        // Validar documento duplicado
+        if (docNum) {
+            const dupDoc = await client.query(
+                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND id_usuario != $2',
+                [docNum, id]
+            );
+            if (dupDoc.rows.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: `Ya existe un usuario registrado con la identificación ${docNum}.` });
+            }
+        }
+
+        await client.query(`
+            UPDATE usuarios
+            SET nombres = $1,
+                apellidos = $2,
+                tipo_documento = $3,
+                numero_documento = $4,
+                id_contrato = $5,
+                id_programa = $6
+            WHERE id_usuario = $7
+        `, [
+            nombres ? nombres.trim() : '',
+            apellidos ? apellidos.trim() : '',
+            tipo_documento || 'CC',
+            docNum || '0000000000',
+            id_contrato || 4,
+            id_programa || null,
+            id
+        ]);
+
+        // 2. Gestionar títulos académicos (upsert en nivel_academico + usuario_nivel)
+        const upsertTitulo = async (nombreTitulo, nivel, esConvalidado) => {
+            if (!nombreTitulo || nombreTitulo.trim() === '') return;
+
+            // Buscar si ya existe un registro del usuario para este nivel
+            const existente = await client.query(`
+                SELECT un.id_usuarionivel, na.id_nivelaca
+                FROM usuario_nivel un
+                JOIN nivel_academico na ON un.id_nivelaca = na.id_nivelaca
+                WHERE un.id_usuario = $1 AND LOWER(na.nivel) = LOWER($2)
+                ${esConvalidado ? 'AND na.titulo_convalidado = TRUE' : 'AND (na.titulo_convalidado = FALSE OR na.titulo_convalidado IS NULL)'}
+            `, [id, nivel]);
+
+            if (existente.rows.length > 0) {
+                // Actualizar el título existente
+                await client.query(`
+                    UPDATE nivel_academico SET nombre_titulo = $1 WHERE id_nivelaca = $2
+                `, [nombreTitulo.trim(), existente.rows[0].id_nivelaca]);
+            } else {
+                // Crear nuevo registro en nivel_academico y vincular
+                const newNivel = await client.query(`
+                    INSERT INTO nivel_academico (nombre_titulo, nivel, titulo_convalidado, activo)
+                    VALUES ($1, $2, $3, TRUE)
+                    RETURNING id_nivelaca
+                `, [nombreTitulo.trim(), nivel, esConvalidado || false]);
+
+                await client.query(`
+                    INSERT INTO usuario_nivel (id_usuario, id_nivelaca, fecha_inicio)
+                    VALUES ($1, $2, NOW())
+                `, [id, newNivel.rows[0].id_nivelaca]);
+            }
+        };
+
+        await upsertTitulo(titulo_pregrado, 'Pregrado', false);
+        await upsertTitulo(titulo_posgrado, 'Posgrado', false);
+        await upsertTitulo(titulo_convalidado, 'Posgrado', true);
+
+        // 3. Asegurar docente_periodo para el periodo activo
+        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        if (periodoRes.rows.length > 0) {
+            await client.query(`
+                INSERT INTO docente_periodo (id_usuario, id_periodo)
+                VALUES ($1, $2)
+                ON CONFLICT DO NOTHING
+            `, [id, periodoRes.rows[0].id_periodo]);
+        }
+
+        await client.query('COMMIT');
+        res.json({ mensaje: 'Perfil actualizado correctamente.' });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en updatePerfil:', error.message);
+        res.status(500).json({ error: 'Error al actualizar el perfil.' });
+    } finally {
+        client.release();
+    }
+};
+
 const deleteUsuario = async (req, res) => {
     const { id } = req.params;
 
@@ -786,5 +988,7 @@ module.exports = {
     createBulk,
     toggleActivo,
     update,
-    deleteUsuario
+    deleteUsuario,
+    getPerfilCompleto,
+    updatePerfil
 };
