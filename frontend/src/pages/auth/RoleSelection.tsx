@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Users, Settings, Eye, ChevronRight } from 'lucide-react';
+import api from '../../services/api';
 
 interface Rol {
   id_rol: number;
@@ -23,15 +24,8 @@ const RoleSelection = () => {
             return;
         }
 
-        const response = await fetch('http://localhost:3000/api/user/roles', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        if (!response.ok) {
-            throw new Error('No se pudieron obtener los roles');
-        }
-
-        const data = await response.json();
+        const response = await api.get('/user/roles');
+        const data = response.data;
         
         if (data.length === 1) {
           handleRoleSelection(data[0]);

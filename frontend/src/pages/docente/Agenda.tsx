@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
 import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, CheckCircle2, AlertTriangle, Clock, Lock, CalendarX } from 'lucide-react';
-import axios from 'axios';
+import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { getPeriodoActivo } from '../../services/periodosService';
 
@@ -80,7 +80,7 @@ export default function AgendaDocente() {
                 }
 
                 try {
-                    const semanasRes = await axios.get('http://localhost:3000/api/semanas');
+                    const semanasRes = await api.get('/semanas');
                     const semanaCero = semanasRes.data.find((s: any) => s.numero_semana === '0');
                     if (semanaCero && semanaCero.habilitada && semanaCero.fecha_inicio && semanaCero.fecha_fin) {
                         const ahora = new Date();
@@ -108,11 +108,11 @@ export default function AgendaDocente() {
                     setSemanaActiva(true); // Fallback en caso de error
                 }
 
-                const catRes = await axios.get('http://localhost:3000/api/funciones/catalogo');
+                const catRes = await api.get('/funciones/catalogo');
                 const catalogoData = catRes.data;
                 setCatalogoGlobal(catalogoData);
 
-                const baseRes = await axios.get(`http://localhost:3000/api/agenda/base/${(user as any)?.id_usuario || user?.id}`);
+                const baseRes = await api.get(`/agenda/base/${(user as any)?.id_usuario || user?.id}`);
                 const { funciones: dbFunciones, actividades: dbActs } = baseRes.data;
 
                 if (dbFunciones && dbFunciones.length > 0) {
@@ -319,7 +319,7 @@ export default function AgendaDocente() {
                     };
                 })
             };
-            await axios.post('http://localhost:3000/api/agenda/guardar-funcion', payload);
+            await api.post('/agenda/guardar-funcion', payload);
             
             // Actualizar estado local
             const nuevas = [...funciones];
