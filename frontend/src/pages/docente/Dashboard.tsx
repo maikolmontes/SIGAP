@@ -15,7 +15,7 @@ import {
   CheckCircle2,
   Hourglass
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
 interface DocenteData {
   nombre: string;
@@ -323,7 +323,7 @@ export default function DashboardDocente() {
                     paddingAngle={2}
                     dataKey="horas"
                   >
-                    {distribucionHoras.map((entry, index) => (
+                    {distribucionHoras.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>

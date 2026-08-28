@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
-import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, Save, CheckCircle2, AlertTriangle, Clock, Lock, CalendarX } from 'lucide-react';
+import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, CheckCircle2, AlertTriangle, Clock, Lock, CalendarX } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { getPeriodoActivo } from '../../services/periodosService';
@@ -119,7 +119,6 @@ export default function AgendaDocente() {
                     const mappedFunciones = dbFunciones.map((f: any) => {
                         const misActs = dbActs.filter((a: any) => a.id_funciones === f.id_funciones);
                         
-                        const uniqueActs: any[] = [];
                         const actMap = new Map();
                         for (let act of misActs) {
                             if (!actMap.has(act.id_asignacionact)) {
@@ -193,11 +192,6 @@ export default function AgendaDocente() {
         cargarData();
     }, [user]);
 
-    const cambiarFuncion = (funcIndex: number, campo: keyof FuncionBloque, valor: any) => {
-        const nuevas = [...funciones];
-        nuevas[funcIndex] = { ...nuevas[funcIndex], [campo]: valor };
-        setFunciones(nuevas);
-    };
 
     const cambiarActividad = (funcIndex: number, actIndex: number, campo: keyof Actividad, valor: any) => {
         const nuevas = [...funciones];
