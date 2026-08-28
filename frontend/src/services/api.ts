@@ -19,4 +19,12 @@ api.interceptors.request.use((config) => {
     return Promise.reject(error);
 });
 
-export default api
+export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/api\/?$/, '');
+
+export const getStaticFileUrl = (ruta: string) => {
+    if (!ruta) return '';
+    if (ruta.startsWith('http://') || ruta.startsWith('https://')) return ruta;
+    return `${API_BASE_URL}${ruta.startsWith('/') ? '' : '/'}${ruta}`;
+};
+
+export default api;

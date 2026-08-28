@@ -4,8 +4,13 @@ const router = express.Router();
 const controller = require('../controllers/usuariosController');
 router.get('/', controller.getAll);
 router.get('/:id', controller.getById);
+router.post('/validar', controller.validar);
 router.post('/', controller.create);
 router.post('/bulk', controller.createBulk);
 router.patch('/:id/activo', controller.toggleActivo);
+router.get('/:id/perfil-completo', controller.getPerfilCompleto);
+router.put('/:id/perfil', controller.updatePerfil);
+router.put('/:id', controller.update);
+router.delete('/:id', controller.deleteUsuario);
 
 module.exports = router;

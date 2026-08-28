@@ -356,6 +356,24 @@ const importarAsignaciones = async (req, res) => {
             }
             const idUsuario = userRes.rows[0].id_usuario;
 
+            // Actualizar tipo de vinculación / contrato automáticamente si se incluye en el Excel (MT: Medio Tiempo, TC: Tiempo Completo, HC: Hora Cátedra)
+            const vinculacionRaw = row['vinculacion'] || row['tipovinculacion'] || row['vinculación'] || row['tipodevinculacion'] || row['contrato'] || row['tipocontrato'] || row['dedicacion'] || row['dedicaciondocente'];
+            if (vinculacionRaw) {
+                const vincStr = String(vinculacionRaw).trim().toLowerCase();
+                let nuevoContratoId = null;
+                if (vincStr.includes('mt') || vincStr.includes('medio')) {
+                    nuevoContratoId = 2; // Medio Tiempo (20h)
+                } else if (vincStr.includes('tc') || vincStr.includes('completo')) {
+                    nuevoContratoId = 1; // Tiempo Completo (40h)
+                } else if (vincStr.includes('hc') || vincStr.includes('catedra') || vincStr.includes('cátedra')) {
+                    nuevoContratoId = 3; // Hora Cátedra
+                }
+
+                if (nuevoContratoId) {
+                    await client.query('UPDATE usuarios SET id_contrato = $1 WHERE id_usuario = $2', [nuevoContratoId, idUsuario]);
+                }
+            }
+
             const { numero, grupo } = parseSemestre(semestreRaw);
             
             let idSemestre;
@@ -440,8 +458,6 @@ const importarAsignaciones = async (req, res) => {
             console.log(`[IMPORT] Fila ${i+2}: Función="${funcionSustantivaStr}" | Asignatura="${asignaturas}" → Match=${matchResult ? matchResult.rolSeleccionado : 'NINGUNO'}`);
             if (matchResult) {
                 rolToInsert = matchResult.rolSeleccionado;
-            } else if (funcionSustantivaStr === 'Docencia Directa') {
-                rolToInsert = semestreRaw || ''; // Guardamos "6E-N" aquí para mostrarlo en el frontend
             } else {
                 // Si tiene catálogo pero no se encontró match, dejar vacío para que el docente elija
                 const esFuncionCatalogo = await client.query(`
@@ -455,9 +471,9 @@ const importarAsignaciones = async (req, res) => {
             }
 
             await client.query(`
-                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, rol_seleccionado, horas_rol, orden)
-                VALUES ($1, $2, $3, $4, $5)
-            `, [idFunciones, idEspacioAca, rolToInsert, horasActividad, procesados + 1]);
+                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [idFunciones, idEspacioAca, idGrupo, rolToInsert, horasActividad, procesados + 1]);
 
             procesados++;
         }
@@ -636,8 +652,6 @@ const actualizarImportacion = async (req, res) => {
             console.log(`[ACTUALIZAR] Fila ${i+2}: Función="${funcionSustantivaStr}" | Asignatura="${asignaturas}" → Match=${matchResult ? matchResult.rolSeleccionado : 'NINGUNO'}`);
             if (matchResult) {
                 rolToInsert = matchResult.rolSeleccionado;
-            } else if (funcionSustantivaStr === 'Docencia Directa') {
-                rolToInsert = semestreRaw || ''; // Guardamos "6E-N" aquí para mostrarlo en el frontend
             } else {
                 const esFuncionCatalogo = await client.query(`
                     SELECT COUNT(*) as cnt FROM asignacion_funciones 
@@ -649,22 +663,28 @@ const actualizarImportacion = async (req, res) => {
                 }
             }
 
-            // Verificar si esta actividad exacta ya existe para no duplicar
+            // Verificar si esta actividad ya existe (por nombre de materia)
             const actExiste = await client.query(`
                 SELECT id_asignacionact FROM asignacion_actividades 
-                WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2) AND horas_rol = $3
-            `, [idFunciones, rolToInsert, horasActividad]);
+                WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
+            `, [idFunciones, rolToInsert]);
 
             if (actExiste.rows.length > 0) {
-                omitidos++;
-                continue; // Ya existe, no duplicar
+                // Actualizar el grupo y las horas de la materia existente
+                await client.query(`
+                    UPDATE asignacion_actividades 
+                    SET id_grupos = $1, horas_rol = $2 
+                    WHERE id_asignacionact = $3
+                `, [idGrupo, horasActividad, actExiste.rows[0].id_asignacionact]);
+                procesados++;
+                continue;
             }
 
-            // Insertar actividad nueva
+            // Insertar actividad nueva si no existía
             await client.query(`
-                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, rol_seleccionado, horas_rol, orden)
-                VALUES ($1, $2, $3, $4, $5)
-            `, [idFunciones, idEspacioAca, rolToInsert, horasActividad, procesados + 1]);
+                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [idFunciones, idEspacioAca, idGrupo, rolToInsert, horasActividad, procesados + 1]);
 
             procesados++;
         }
@@ -728,24 +748,40 @@ const getDashboardDirector = async (req, res) => {
                     pa.nombre_programa,
                     tc.tipo AS tipo_contrato,
                     tc.horas_contrato,
-                    COUNT(DISTINCT af.id_funciones) AS total_funciones,
-                    COUNT(DISTINCT CASE WHEN af.estado_agenda = 'Aceptado' THEN af.id_funciones END) AS funciones_aceptadas,
-                    COALESCE(SUM(DISTINCT af.horas_funcion), 0) AS horas_asignadas
+                    COUNT(af.id_funciones) AS total_funciones,
+                    COUNT(CASE WHEN af.estado_agenda = 'Aceptado' THEN af.id_funciones END) AS funciones_aceptadas,
+                    COALESCE(SUM(af.horas_funcion), 0) AS horas_asignadas,
+                    COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
+                    COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Investigación' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
                 FROM usuarios u
+                JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
                 JOIN programa_academico pa ON pa.id_programa = u.id_programa
                 JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
                 JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
                 JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
-                LEFT JOIN programa_periodo pp ON pp.id_programa = pa.id_programa AND pp.id_periodo = $1
                 LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
                 LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
                 WHERE u.activo = TRUE
-                  AND (pp.id_periodo = $1 OR af.id_periodo = $1)
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
                          pa.nombre_programa, tc.tipo, tc.horas_contrato
                 ORDER BY u.apellidos, u.nombres
             `, [idPeriodo]);
-            docentes = docentesRes.rows;
+            docentes = docentesRes.rows.map(d => {
+                const hDirectas = parseFloat(d.horas_directas) || 0;
+                const hInvestigacion = parseFloat(d.horas_investigacion) || 0;
+                const docenciaIndirecta = Math.round(hDirectas * 0.3);
+                
+                const tipoContrato = (d.tipo_contrato || '').toUpperCase();
+                const totalHoras = parseFloat(d.horas_asignadas) || 0;
+                const horasContrato = parseFloat(d.horas_contrato) || 40;
+                let perfilDocente = (totalHoras === horasContrato) ? "AGENDA CORRECTA" : "INCONSISTENCIAS EN AGENDA AC 30";
+
+                return {
+                    ...d,
+                    docencia_indirecta: docenciaIndirecta,
+                    perfil_docente: perfilDocente
+                };
+            });
 
             // Check if import was done for this period
             const importCheck = await pool.query(
@@ -774,6 +810,7 @@ const getDashboardDirector = async (req, res) => {
                 FROM asignacion_funciones af
                 JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
                 JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
+                JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
                 WHERE af.id_periodo = $1
                 GROUP BY af.funcion_sustantiva
                 ORDER BY horas DESC
@@ -794,4 +831,218 @@ const getDashboardDirector = async (req, res) => {
     }
 };
 
-module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector };
+// ================================================================
+// GET /director/docente/:id/distribucion
+// Retorna la distribución de horas por función sustantiva
+// de UN docente específico en el periodo activo.
+// ================================================================
+const getDistribucionDocente = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const idUsuario = parseInt(id, 10);
+        if (isNaN(idUsuario)) return res.status(400).json({ error: 'ID de usuario inválido.' });
+
+        // Periodo activo
+        const periodoRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        const periodo = periodoRes.rows[0];
+        if (!periodo) return res.status(404).json({ error: 'No hay periodo activo.' });
+        const idPeriodo = periodo.id_periodo;
+
+        // Distribución de horas por función sustantiva del docente
+        const distRes = await pool.query(`
+            SELECT
+                af.funcion_sustantiva,
+                COALESCE(SUM(af.horas_funcion), 0) AS horas
+            FROM asignacion_funciones af
+            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            WHERE ua.id_usuario = $1 AND af.id_periodo = $2
+            GROUP BY af.funcion_sustantiva
+            ORDER BY horas DESC
+        `, [idUsuario, idPeriodo]);
+
+        // Datos adicionales del docente
+        const docenteRes = await pool.query(`
+            SELECT
+                u.nombres || ' ' || u.apellidos AS nombre,
+                u.correo,
+                tc.tipo AS tipo_contrato,
+                tc.horas_contrato,
+                COALESCE(SUM(af.horas_funcion), 0) AS horas_asignadas
+            FROM usuarios u
+            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
+            LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
+            WHERE u.id_usuario = $1
+            GROUP BY u.nombres, u.apellidos, u.correo, tc.tipo, tc.horas_contrato
+        `, [idUsuario, idPeriodo]);
+
+        const docente = docenteRes.rows[0] || null;
+        const distribucion = distRes.rows;
+
+        res.json({ docente, distribucion });
+    } catch (error) {
+        console.error('Error en getDistribucionDocente:', error);
+        res.status(500).json({ error: 'Error al obtener distribución del docente.', detalles: error.message });
+    }
+};
+
+const eliminarAgendas = async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Obtener el periodo activo
+        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        if (periodoRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'No hay un periodo académico activo.' });
+        }
+        const idPeriodoActivo = periodoRes.rows[0].id_periodo;
+
+        // 2. Obtener todas las funciones asociadas a este periodo
+        const funcRes = await client.query('SELECT id_funciones FROM asignacion_funciones WHERE id_periodo = $1', [idPeriodoActivo]);
+        const funcIds = funcRes.rows.map(r => r.id_funciones);
+
+        if (funcIds.length > 0) {
+            // Obtener todas las actividades asociadas a estas funciones
+            const actIdsRes = await client.query('SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = ANY($1)', [funcIds]);
+            const actIds = actIdsRes.rows.map(r => r.id_asignacionact);
+
+            if (actIds.length > 0) {
+                // Eliminar evidencias
+                await client.query(`
+                    DELETE FROM evidencias WHERE id_indicadores IN (
+                        SELECT i.id_indicadores FROM indicadores i
+                        JOIN descripcion d ON i.id_descripcion = d.id_descripcion
+                        WHERE d.id_asignacionact = ANY($1)
+                    )
+                `, [actIds]);
+
+                // Eliminar indicadores
+                await client.query(`
+                    DELETE FROM indicadores WHERE id_descripcion IN (
+                        SELECT id_descripcion FROM descripcion WHERE id_asignacionact = ANY($1)
+                    )
+                `, [actIds]);
+
+                // Eliminar descripciones
+                await client.query('DELETE FROM descripcion WHERE id_asignacionact = ANY($1)', [actIds]);
+
+                // Eliminar actividades_semana
+                await client.query('DELETE FROM actividad_semana WHERE id_asignacionact = ANY($1)', [actIds]);
+
+                // Eliminar asignacion_actividades
+                await client.query('DELETE FROM asignacion_actividades WHERE id_funciones = ANY($1)', [funcIds]);
+            }
+
+            // Eliminar usuario_asignacion
+            await client.query('DELETE FROM usuario_asignacion WHERE id_funciones = ANY($1)', [funcIds]);
+
+            // Eliminar asignacion_funciones
+            await client.query('DELETE FROM asignacion_funciones WHERE id_periodo = $1', [idPeriodoActivo]);
+        }
+
+        await client.query('COMMIT');
+        res.status(200).json({ mensaje: 'Todas las agendas del periodo activo fueron eliminadas correctamente.' });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error eliminando agendas:", error);
+        res.status(500).json({ error: 'Ocurrió un error al intentar eliminar las agendas.', detalles: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+// ================================================================
+// DELETE /director/eliminar-agendas-docentes
+// Body: { ids: [id_usuario1, id_usuario2, ...] }
+// Elimina SOLO las agendas de los docentes indicados en el
+// periodo activo, con cascada completa.
+// ================================================================
+const eliminarAgendasDocentes = async (req, res) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: 'Debes proporcionar al menos un docente.' });
+    }
+    const idsNum = ids.map(Number).filter(n => !isNaN(n));
+    if (idsNum.length === 0) {
+        return res.status(400).json({ error: 'IDs de docentes inválidos.' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Periodo activo
+        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        if (periodoRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'No hay un periodo académico activo.' });
+        }
+        const idPeriodoActivo = periodoRes.rows[0].id_periodo;
+
+        // Obtener las funciones de los docentes seleccionados en el periodo activo
+        const funcRes = await client.query(`
+            SELECT DISTINCT af.id_funciones
+            FROM asignacion_funciones af
+            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            WHERE af.id_periodo = $1 AND ua.id_usuario = ANY($2)
+        `, [idPeriodoActivo, idsNum]);
+
+        const funcIds = funcRes.rows.map(r => r.id_funciones);
+
+        if (funcIds.length > 0) {
+            // Actividades
+            const actIdsRes = await client.query(
+                'SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = ANY($1)',
+                [funcIds]
+            );
+            const actIds = actIdsRes.rows.map(r => r.id_asignacionact);
+
+            if (actIds.length > 0) {
+                // Evidencias
+                await client.query(`
+                    DELETE FROM evidencias WHERE id_indicadores IN (
+                        SELECT i.id_indicadores FROM indicadores i
+                        JOIN descripcion d ON i.id_descripcion = d.id_descripcion
+                        WHERE d.id_asignacionact = ANY($1)
+                    )
+                `, [actIds]);
+                // Indicadores
+                await client.query(`
+                    DELETE FROM indicadores WHERE id_descripcion IN (
+                        SELECT id_descripcion FROM descripcion WHERE id_asignacionact = ANY($1)
+                    )
+                `, [actIds]);
+                // Descripciones
+                await client.query('DELETE FROM descripcion WHERE id_asignacionact = ANY($1)', [actIds]);
+                // Actividades semana
+                await client.query('DELETE FROM actividad_semana WHERE id_asignacionact = ANY($1)', [actIds]);
+                // Asignacion actividades
+                await client.query('DELETE FROM asignacion_actividades WHERE id_funciones = ANY($1)', [funcIds]);
+            }
+
+            // Usuario asignacion
+            await client.query('DELETE FROM usuario_asignacion WHERE id_funciones = ANY($1)', [funcIds]);
+            // Asignacion funciones
+            await client.query('DELETE FROM asignacion_funciones WHERE id_funciones = ANY($1)', [funcIds]);
+        }
+
+        await client.query('COMMIT');
+        res.status(200).json({
+            mensaje: `Agendas de ${idsNum.length} docente(s) eliminadas correctamente.`,
+            eliminados: idsNum.length
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error eliminando agendas de docentes:', error);
+        res.status(500).json({ error: 'Error al eliminar las agendas.', detalles: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDistribucionDocente, eliminarAgendas, eliminarAgendasDocentes };
+

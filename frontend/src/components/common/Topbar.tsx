@@ -5,7 +5,7 @@ import { RefreshCw } from 'lucide-react';
 
 interface TopbarProps {
     path: string
-    rol: 'planeacion' | 'director' | 'docente'
+    rol: 'planeacion' | 'director' | 'docente' | 'consultor'
     onOpenMenu?: () => void
     onToggleDesktop?: () => void
 }
@@ -18,11 +18,23 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
     // Verificar si el usuario tiene más de un rol
     const rolesArray = user?.roles ? user.roles.split(',').map(r => r.trim()) : [];
     const hasMultipleRoles = rolesArray.length > 1;
-    const rolLabel = rol === 'planeacion' ? 'Planeación' : rol === 'director' ? 'Director' : 'Docente'
-    const iniciales = rol === 'planeacion' ? 'PL' : rol === 'director' ? 'DI' : 'DO'
+    const rolLabel = rol === 'planeacion' 
+        ? 'Planeación' 
+        : rol === 'director' 
+            ? 'Director' 
+            : rol === 'consultor' 
+                ? 'Consultor' 
+                : 'Docente'
+    const iniciales = rol === 'planeacion' 
+        ? 'PL' 
+        : rol === 'director' 
+            ? 'DI' 
+            : rol === 'consultor' 
+                ? 'CO' 
+                : 'DO'
 
     return (
-        <header className="h-14 sm:h-11 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-5 flex-shrink-0 z-10 w-full relative">
+        <header className="h-14 sm:h-11 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-5 flex-shrink-0 z-40 w-full relative">
             <div className="flex items-center gap-3">
                 {onOpenMenu && (
                     <button 
@@ -51,7 +63,7 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
 
             <div className="flex items-center gap-2 sm:gap-3">
                 <span className="hidden md:inline-block bg-yellow-50 text-yellow-800 border border-yellow-300 rounded px-2 py-0.5 text-xs font-medium">
-                    {rolLabel} · 2025 IIP
+                    {rolLabel}
                 </span>
 
                 {hasMultipleRoles && (

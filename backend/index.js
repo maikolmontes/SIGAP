@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 require('./db/connection');
 
@@ -11,6 +12,8 @@ const authRouter = require('./routes/auth');
 const periodosRouter = require('./routes/periodos');
 const docenteRouter = require('./routes/docente');
 const userRouter = require('./routes/user');
+const facultadesRouter = require('./routes/facultades');
+const programasRouter = require('./routes/programas');
 
 const app = express();
 
@@ -24,8 +27,15 @@ app.use('/api/auth', authRouter);
 app.use('/api/periodos', periodosRouter);
 app.use('/api/docente', docenteRouter);
 app.use('/api/user', userRouter);
+app.use('/api/facultades', facultadesRouter);
+app.use('/api/programas', programasRouter);
 app.use('/api/director', require('./routes/director'));
 app.use('/api/semanas', require('./routes/semanas'));
+app.use('/api/evidencias', require('./routes/evidencias'));
+app.use('/api/observaciones', require('./routes/observaciones'));
+
+// Servir archivos estáticos de evidencias
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/api', (req, res) => {
     res.json({

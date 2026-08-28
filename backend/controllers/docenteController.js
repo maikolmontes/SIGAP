@@ -78,21 +78,56 @@ const getDashboard = async (req, res) => {
             JOIN DESCRIPCION d ON d.id_asignacionact = aa.id_asignacionact
             JOIN INDICADORES i ON i.id_descripcion = d.id_descripcion
             WHERE ua.id_usuario = $1 AND af.id_periodo = $2
+              AND COALESCE(d.activo, TRUE) = TRUE
+              AND COALESCE(i.activo, TRUE) = TRUE
             GROUP BY af.funcion_sustantiva
             ORDER BY af.funcion_sustantiva
-        `, [idUsuario, docenteRow.id_periodo_activo || null]);
+        `, [idUsuario, idPeriodoActivo]);
 
-        // 4. Evidencias pendientes
-        const evidenciasQuery = await pool.query(`
-            SELECT COUNT(*) AS pendientes
+        // 4b. Evidencias pendientes por período (total de pendientes)
+        const evidenciasPorPeriodoQuery = await pool.query(`
+            SELECT
+                p.id_periodo,
+                p.anio,
+                p.semestre,
+                COUNT(*) AS pendientes
             FROM INDICADORES i
             JOIN DESCRIPCION d ON d.id_descripcion = i.id_descripcion
             JOIN ASIGNACION_ACTIVIDADES aa ON aa.id_asignacionact = d.id_asignacionact
             JOIN USUARIO_ASIGNACION ua ON ua.id_funciones = aa.id_funciones
             JOIN ASIGNACION_FUNCIONES af ON af.id_funciones = ua.id_funciones
+            JOIN PERIODO p ON p.id_periodo = af.id_periodo
             LEFT JOIN EVIDENCIAS e ON e.id_indicadores = i.id_indicadores
-            WHERE ua.id_usuario = $1 AND af.id_periodo = $2 AND e.id_evidencias IS NULL
-        `, [idUsuario, docenteRow.id_periodo_activo || null]);
+            WHERE ua.id_usuario = $1
+              AND e.id_evidencias IS NULL
+              AND COALESCE(i.activo, TRUE) = TRUE
+              AND COALESCE(d.activo, TRUE) = TRUE
+            GROUP BY p.id_periodo, p.anio, p.semestre
+            ORDER BY p.anio DESC, p.semestre DESC
+        `, [idUsuario]);
+
+        // 4c. Evidencias subidas (presentes) por período
+        const evidenciasSubidasPorPeriodoQuery = await pool.query(`
+            SELECT
+                p.id_periodo,
+                p.anio,
+                p.semestre,
+                COUNT(*) AS subidas
+            FROM EVIDENCIAS e
+            JOIN INDICADORES i ON i.id_indicadores = e.id_indicadores
+            JOIN DESCRIPCION d ON d.id_descripcion = i.id_descripcion
+            JOIN ASIGNACION_ACTIVIDADES aa ON aa.id_asignacionact = d.id_asignacionact
+            JOIN USUARIO_ASIGNACION ua ON ua.id_funciones = aa.id_funciones
+            JOIN ASIGNACION_FUNCIONES af ON af.id_funciones = ua.id_funciones
+            JOIN PERIODO p ON p.id_periodo = af.id_periodo
+            WHERE ua.id_usuario = $1
+              AND COALESCE(i.activo, TRUE) = TRUE
+              AND COALESCE(d.activo, TRUE) = TRUE
+            GROUP BY p.id_periodo, p.anio, p.semestre
+            ORDER BY p.anio DESC, p.semestre DESC
+        `, [idUsuario]);
+
+
 
         // 5. Estado de la agenda (funciones aceptadas)
         const estadoFuncionesQuery = await pool.query(`
@@ -103,7 +138,7 @@ const getDashboard = async (req, res) => {
             JOIN ASIGNACION_FUNCIONES af ON af.id_funciones = ua.id_funciones
             WHERE ua.id_usuario = $1 AND af.id_periodo = $2
             GROUP BY af.estado_agenda
-        `, [idUsuario, docenteRow.id_periodo_activo || null]);
+        `, [idUsuario, idPeriodoActivo]);
 
         // 6. Total horas de ejecucion (suma ejecucion_8 + ejecucion_16)
         const horasEjecucionQuery = await pool.query(`
@@ -115,16 +150,40 @@ const getDashboard = async (req, res) => {
             JOIN USUARIO_ASIGNACION ua ON ua.id_funciones = aa.id_funciones
             JOIN ASIGNACION_FUNCIONES af ON af.id_funciones = ua.id_funciones
             WHERE ua.id_usuario = $1 AND af.id_periodo = $2
-        `, [idUsuario, docenteRow.id_periodo_activo || null]);
+              AND COALESCE(i.activo, TRUE) = TRUE
+              AND COALESCE(d.activo, TRUE) = TRUE
+        `, [idUsuario, idPeriodoActivo]);
 
 
         // Procesar datos - distribución de horas
-        const distribucionHoras = distribucionQuery.rows.map(row => ({
-            funcion: row.funcion,
-            horas: parseFloat(row.horas_asignadas) || 0
-        }));
+        let horasDirectas = 0;
+        let horasInvestigacion = 0;
+
+        const distribucionHoras = distribucionQuery.rows.map(row => {
+            const horas = parseFloat(row.horas_asignadas) || 0;
+            if (row.funcion === 'Docencia Directa') horasDirectas = horas;
+            if (row.funcion === 'Investigación') horasInvestigacion = horas;
+            return {
+                funcion: row.funcion,
+                horas: horas
+            };
+        });
+
+        // 1. Docencia Indirecta (automática)
+        const docenciaIndirecta = Math.round(horasDirectas * 0.3);
+        const indexIndirecta = distribucionHoras.findIndex(d => d.funcion === 'Docencia Indirecta');
+        if (indexIndirecta !== -1) {
+            distribucionHoras[indexIndirecta].horas = docenciaIndirecta;
+        } else if (horasDirectas > 0) {
+            distribucionHoras.push({ funcion: 'Docencia Indirecta', horas: docenciaIndirecta });
+        }
 
         const totalHoras = distribucionHoras.reduce((sum, item) => sum + item.horas, 0);
+
+        // 2. Validación de consistencia
+        const tipoContrato = (docenteRow.tipo_contrato || '').toUpperCase();
+        const horasContrato = parseFloat(docenteRow.total_horas_contrato) || 40;
+        let perfilDocente = (totalHoras === horasContrato) ? "AGENDA CORRECTA" : "INCONSISTENCIAS EN AGENDA AC 30";
 
         // Avance por función sustantiva basado en indicadores reales
         const avanceSemana8 = avanceQuery.rows.map(row => {
@@ -139,7 +198,10 @@ const getDashboard = async (req, res) => {
             : 0;
 
         let evidenciasPendientes = 0;
-        try { evidenciasPendientes = parseInt(evidenciasQuery.rows[0]?.pendientes, 10) || 0; } catch {}
+        const activePeriodPendingRow = evidenciasPorPeriodoQuery.rows.find(row => row.id_periodo === idPeriodoActivo);
+        if (activePeriodPendingRow) {
+            evidenciasPendientes = parseInt(activePeriodPendingRow.pendientes, 10) || 0;
+        }
 
         const totalHorasEjecucion = parseFloat(horasEjecucionQuery.rows[0]?.total_ejecucion) || 0;
 
@@ -168,6 +230,21 @@ const getDashboard = async (req, res) => {
             ? `${periodoRow.semestre === 1 ? 'I' : 'II'} - ${periodoRow.anio}`
             : 'Sin período activo';
 
+        // Preparar evidencias por período para UI
+        const evidenciasPorPeriodo = evidenciasPorPeriodoQuery.rows.map(row => ({
+            idPeriodo: row.id_periodo,
+            label: `${row.semestre === 1 ? 'I' : 'II'} - ${row.anio}`,
+            pendientes: parseInt(row.pendientes, 10) || 0
+        }));
+
+        // Preparar evidencias subidas por período para UI
+        const evidenciasSubidasPorPeriodo = evidenciasSubidasPorPeriodoQuery.rows.map(row => ({
+            idPeriodo: row.id_periodo,
+            label: `${row.semestre === 1 ? 'I' : 'II'} - ${row.anio}`,
+            subidas: parseInt(row.subidas, 10) || 0
+        }));
+
+
         res.json({
             docente: {
                 nombre: `${docenteRow.nombres} ${docenteRow.apellidos}`,
@@ -176,7 +253,8 @@ const getDashboard = async (req, res) => {
                 periodo: periodoLabel,
                 cierre: periodoRow?.fecha_fin || null,
                 periodoActivo: !!periodoRow?.activo,
-                totalHorasContrato: parseFloat(docenteRow.total_horas_contrato) || 40
+                totalHorasContrato: parseFloat(docenteRow.total_horas_contrato) || 40,
+                perfilDocente: perfilDocente
             },
             metricas: {
                 totalHoras,
@@ -184,7 +262,9 @@ const getDashboard = async (req, res) => {
                 funcionesSustantivas: distribucionHoras.length,
                 evidenciasPendientes: evidenciasPendientes,
                 totalHorasEjecucion,
-                avanceGeneral
+                avanceGeneral,
+                evidenciasPorPeriodo,
+                evidenciasSubidasPorPeriodo
             },
             distribucionHoras,
             avanceSemana8,

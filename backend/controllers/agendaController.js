@@ -12,7 +12,7 @@ const getAgenda = async (req, res) => {
                 tc.tipo             AS tipo_contrato,
                 tc.horas_contrato,
                 pa.nombre_programa,
-                na.nivel            AS nivel_academico,
+                na.nombre_titulo    AS nivel_academico,
                 per.anio || '-' || per.semestre AS periodo
             FROM usuarios u
             JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
@@ -196,15 +196,28 @@ const getAgendaBase = async (req, res) => {
                 i.nombre_indicador,
                 i.ejecucion_8,
                 i.ejecucion_16,
-                i.observaciones
+                i.observaciones,
+
+                (
+                    SELECT COALESCE(json_agg(json_build_object(
+                        'id_evidencias', ev.id_evidencias,
+                        'nombre_archivo', ev.nombre_archivo,
+                        'ruta_archivo', ev.ruta_archivo,
+                        'tipo_archivo', ev.tipo_archivo,
+                        'tamanio_archivo_kb', ev.tamanio_archivo_kb,
+                        'fecha_carga', ev.fecha_carga,
+                        'semana', ev.semana
+                    ) ORDER BY ev.fecha_carga DESC), '[]'::json)
+                    FROM evidencias ev
+                    WHERE ev.id_indicadores = i.id_indicadores
+                ) AS evidencias
                 
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af    ON ua.id_funciones     = af.id_funciones
             JOIN asignacion_actividades aa  ON af.id_funciones     = aa.id_funciones
             LEFT JOIN espacio_academico ea  ON aa.id_espacio_aca   = ea.id_espacio_aca
             LEFT JOIN semestres s           ON ea.id_semestre      = s.id_semestre
-            LEFT JOIN semestres_grupos sg   ON sg.id_semestre      = s.id_semestre
-            LEFT JOIN grupos g              ON g.id_grupos         = sg.id_grupos
+            LEFT JOIN grupos g              ON g.id_grupos         = aa.id_grupos
             LEFT JOIN descripcion d         ON aa.id_asignacionact = d.id_asignacionact
             LEFT JOIN indicadores i         ON i.id_descripcion    = d.id_descripcion
             JOIN periodo p                  ON p.id_periodo        = af.id_periodo
@@ -259,36 +272,107 @@ const guardarFuncionDocente = async (req, res) => {
 
             // Si hay resultado esperado o descripciones fijas, gestionar descripción e indicadores
             if (idAct && (resultadoEsperado || (act.descripciones && act.descripciones.length > 0))) {
-                // Borrar indicadores y descripciones anteriores de esta actividad
-                await client.query(`
-                    DELETE FROM indicadores WHERE id_descripcion IN (
-                        SELECT id_descripcion FROM descripcion WHERE id_asignacionact = $1
-                    )
-                `, [idAct]);
-                await client.query('DELETE FROM descripcion WHERE id_asignacionact = $1', [idAct]);
-
                 const descsToInsert = act.descripciones && act.descripciones.length > 0
                     ? act.descripciones
                     : [{ resultadoEsperado, meta, indicadores }];
 
-                for (const descData of descsToInsert) {
-                    // Insertar nueva descripción
-                    const descRes = await client.query(`
-                        INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta)
-                        VALUES ($1, $2, $3) RETURNING id_descripcion
-                    `, [idAct, descData.resultadoEsperado, descData.meta || null]);
+                // Obtener descripciones existentes para esta actividad
+                const existingDescsRes = await client.query(
+                    'SELECT id_descripcion, resultado_esperado, meta FROM descripcion WHERE id_asignacionact = $1 ORDER BY id_descripcion',
+                    [idAct]
+                );
+                const existingDescs = existingDescsRes.rows;
 
-                    const idDescripcion = descRes.rows[0].id_descripcion;
+                for (let idx = 0; idx < descsToInsert.length; idx++) {
+                    const descData = descsToInsert[idx];
+                    const existingDesc = existingDescs[idx];
 
-                    // Insertar indicadores
-                    for (const ind of descData.indicadores) {
-                        if (ind.nombre_indicador) {
-                            await client.query(`
-                                INSERT INTO indicadores (id_descripcion, nombre_indicador)
-                                VALUES ($1, $2)
-                            `, [idDescripcion, ind.nombre_indicador]);
+                    let idDescripcion;
+                    if (existingDesc) {
+                        // Actualizar descripción existente
+                        idDescripcion = existingDesc.id_descripcion;
+                        await client.query(
+                            'UPDATE descripcion SET resultado_esperado = $1, meta = $2 WHERE id_descripcion = $3',
+                            [descData.resultadoEsperado, descData.meta || null, idDescripcion]
+                        );
+                    } else {
+                        // Insertar nueva descripción
+                        const descRes = await client.query(
+                            'INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta) VALUES ($1, $2, $3) RETURNING id_descripcion',
+                            [idAct, descData.resultadoEsperado, descData.meta || null]
+                        );
+                        idDescripcion = descRes.rows[0].id_descripcion;
+                    }
+
+                    // Gestionar indicadores para esta descripción
+                    const existingIndsRes = await client.query(
+                        'SELECT id_indicadores, nombre_indicador FROM indicadores WHERE id_descripcion = $1 ORDER BY id_indicadores',
+                        [idDescripcion]
+                    );
+                    const existingInds = existingIndsRes.rows;
+
+                    const incomingInds = descData.indicadores || [];
+                    const updatedOrInsertedIds = [];
+
+                    for (let i = 0; i < incomingInds.length; i++) {
+                        const indData = incomingInds[i];
+                        if (!indData.nombre_indicador || !indData.nombre_indicador.trim()) continue;
+
+                        const numericId = parseInt(indData.id, 10);
+                        let matchedInd = null;
+
+                        if (!isNaN(numericId)) {
+                            matchedInd = existingInds.find(e => e.id_indicadores === numericId);
+                        }
+
+                        if (!matchedInd && existingInds[i]) {
+                            matchedInd = existingInds[i];
+                        }
+
+                        if (matchedInd) {
+                            // Actualizar indicador existente sin alterar ejecuciones o evidencias
+                            await client.query(
+                                'UPDATE indicadores SET nombre_indicador = $1 WHERE id_indicadores = $2',
+                                [indData.nombre_indicador.trim(), matchedInd.id_indicadores]
+                            );
+                            updatedOrInsertedIds.push(matchedInd.id_indicadores);
+                        } else {
+                            // Insertar nuevo indicador
+                            const indRes = await client.query(
+                                'INSERT INTO indicadores (id_descripcion, nombre_indicador) VALUES ($1, $2) RETURNING id_indicadores',
+                                [idDescripcion, indData.nombre_indicador.trim()]
+                            );
+                            updatedOrInsertedIds.push(indRes.rows[0].id_indicadores);
                         }
                     }
+
+                    // Eliminar indicadores que ya no estén presentes
+                    const idsToDelete = existingInds
+                        .map(e => e.id_indicadores)
+                        .filter(id => !updatedOrInsertedIds.includes(id));
+
+                    if (idsToDelete.length > 0) {
+                        await client.query('DELETE FROM evidencias WHERE id_indicadores = ANY($1)', [idsToDelete]);
+                        await client.query('DELETE FROM indicadores WHERE id_indicadores = ANY($1)', [idsToDelete]);
+                    }
+                }
+
+                // Eliminar descripciones extras si existen
+                if (existingDescs.length > descsToInsert.length) {
+                    const extraDescs = existingDescs.slice(descsToInsert.length);
+                    const extraDescIds = extraDescs.map(d => d.id_descripcion);
+
+                    const extraIndsRes = await client.query(
+                        'SELECT id_indicadores FROM indicadores WHERE id_descripcion = ANY($1)',
+                        [extraDescIds]
+                    );
+                    const extraIndIds = extraIndsRes.rows.map(e => e.id_indicadores);
+
+                    if (extraIndIds.length > 0) {
+                        await client.query('DELETE FROM evidencias WHERE id_indicadores = ANY($1)', [extraIndIds]);
+                        await client.query('DELETE FROM indicadores WHERE id_indicadores = ANY($1)', [extraIndIds]);
+                    }
+                    await client.query('DELETE FROM descripcion WHERE id_descripcion = ANY($1)', [extraDescIds]);
                 }
             }
         }
@@ -320,11 +404,49 @@ const guardarAvanceDocente = async (req, res) => {
     }
 
     const client = await pool.connect();
+    const advertencias = [];
 
     try {
         await client.query('BEGIN');
 
         for (const ind of indicadores) {
+            // Parsear valores — usar ?? para que 0 se guarde como 0 (no como null)
+            let ejec8 = (ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined && ind.ejecucion_8 !== '')
+                ? parseFloat(String(ind.ejecucion_8)) : 0;
+            let ejec16 = (ind.ejecucion_16 !== null && ind.ejecucion_16 !== undefined && ind.ejecucion_16 !== '')
+                ? parseFloat(String(ind.ejecucion_16)) : 0;
+
+            // Asegurar que no sean negativos
+            if (isNaN(ejec8) || ejec8 < 0) ejec8 = 0;
+            if (isNaN(ejec16) || ejec16 < 0) ejec16 = 0;
+
+            // Obtener la meta desde la BD
+            const resultMeta = await client.query(`
+                SELECT d.meta 
+                FROM indicadores i
+                JOIN descripcion d ON d.id_descripcion = i.id_descripcion
+                WHERE i.id_indicadores = $1
+            `, [ind.id_indicador]);
+
+            if (resultMeta.rows.length > 0) {
+                const meta = parseFloat(resultMeta.rows[0].meta) || 0;
+
+                if (meta > 0) {
+                    // Semana 8 no puede superar la meta
+                    if (ejec8 > meta) {
+                        advertencias.push(`Indicador ${ind.id_indicador}: Ejecución S8 (${ejec8}) ajustada a la meta (${meta}).`);
+                        ejec8 = meta;
+                    }
+
+                    // Semana 8 + Semana 16 no pueden superar la meta
+                    if ((ejec8 + ejec16) > meta) {
+                        const maxEjec16 = Math.max(0, meta - ejec8);
+                        advertencias.push(`Indicador ${ind.id_indicador}: Ejecución S16 (${ejec16}) ajustada al máximo permitido (${maxEjec16}).`);
+                        ejec16 = maxEjec16;
+                    }
+                }
+            }
+
             await client.query(`
                 UPDATE indicadores 
                 SET ejecucion_8 = $1, 
@@ -332,15 +454,21 @@ const guardarAvanceDocente = async (req, res) => {
                     observaciones = $3
                 WHERE id_indicadores = $4
             `, [
-                ind.ejecucion_8 || 0, 
-                ind.ejecucion_16 || 0, 
-                ind.observaciones || '',
+                ejec8,
+                ejec16,
+                ind.observaciones ?? '',
                 ind.id_indicador
             ]);
         }
 
         await client.query('COMMIT');
-        res.json({ mensaje: 'Avance guardado correctamente.' });
+        
+        const respuesta = { mensaje: 'Avance guardado correctamente.' };
+        if (advertencias.length > 0) {
+            respuesta.advertencias = advertencias;
+            respuesta.mensaje = 'Avance guardado. Algunos valores fueron ajustados para no superar la meta.';
+        }
+        res.json(respuesta);
 
     } catch (error) {
         await client.query('ROLLBACK');
