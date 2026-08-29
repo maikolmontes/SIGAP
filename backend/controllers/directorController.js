@@ -545,6 +545,7 @@ const actualizarImportacion = async (req, res) => {
         let procesados = 0;
         let omitidos = 0;
         let errores = [];
+        let docentesNoEncontrados = []; // Docentes del Excel que no existen en el sistema
 
         const pensulRes = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = true LIMIT 1');
         const idPensulAca = pensulRes.rows.length > 0 ? pensulRes.rows[0].id_pensulaca : 1;
@@ -565,6 +566,7 @@ const actualizarImportacion = async (req, res) => {
             const semestreRaw = row['semestre'];
             const programasRaw = row['programas'];
             const horasRaw = row['horas'] || row['horassemana'] || row['horassemanales'];
+            const nombreDocenteExcel = row['docentes'] || row['nombre'] || row['docente'] || null;
             
             if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
 
@@ -574,9 +576,18 @@ const actualizarImportacion = async (req, res) => {
                 continue;
             }
 
-            const userRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [String(inscripcion)]);
+            const userRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [String(inscripcion).trim()]);
             if (userRes.rows.length === 0) {
-                errores.push(`Fila ${i+2}: Docente con documento ${inscripcion} no encontrado.`);
+                // Verificar si ya fue registrado en esta importación (mismo documento, diferente fila)
+                const yaRegistrado = docentesNoEncontrados.some(d => d.documento === String(inscripcion).trim());
+                if (!yaRegistrado) {
+                    docentesNoEncontrados.push({
+                        fila: i + 2,
+                        documento: String(inscripcion).trim(),
+                        nombre: nombreDocenteExcel ? String(nombreDocenteExcel).trim() : null,
+                        programa: programasRaw ? String(programasRaw).trim() : null
+                    });
+                }
                 continue;
             }
             const idUsuario = userRes.rows[0].id_usuario;
@@ -710,7 +721,9 @@ const actualizarImportacion = async (req, res) => {
                 procesados,
                 omitidos,
                 erroresEncontrados: errores.length,
-                detallesErrores: errores
+                detallesErrores: errores,
+                docentesNoEncontrados,
+                totalNoEncontrados: docentesNoEncontrados.length
             }
         });
 

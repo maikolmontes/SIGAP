@@ -4,7 +4,7 @@ import api from '../../services/api';
 import {
   Users, CheckCircle, Clock, TrendingUp, AlertCircle,
   Upload, UploadCloud, X, BookOpen, Calendar, Lock,
-  FileBarChart2, ChevronRight, RefreshCw, Trash2
+  FileBarChart2, ChevronRight, RefreshCw, Trash2, ChevronDown, ChevronUp, UserX, Info
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 
@@ -18,6 +18,157 @@ const getEstadoDocente = (d: any) => {
   if (aceptadas > 0) return { label: 'En progreso', color: 'bg-yellow-100 text-yellow-700', dot: 'bg-yellow-500' };
   return { label: 'Pendiente', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' };
 };
+
+// ─────────────────────────────────────────────────────────────
+// Panel de resultado de importación con advertencias detalladas
+// ─────────────────────────────────────────────────────────────
+function ImportResultPanel({ result, onClose }: { result: any; onClose: () => void }) {
+  const [showNoEncontrados, setShowNoEncontrados] = useState(true);
+  const [showErrores, setShowErrores] = useState(false);
+
+  if (!result.success) {
+    return (
+      <div className="mb-6 p-5 rounded-2xl border border-red-200 bg-red-50 relative">
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        <div className="flex items-center gap-3">
+          <AlertCircle className="w-6 h-6 text-red-600 shrink-0" />
+          <p className="font-bold text-red-900">{result.error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const r = result.data?.resultados || {};
+  const noEncontrados: any[] = r.docentesNoEncontrados || [];
+  const erroresTecnicos: string[] = r.detallesErrores || [];
+  const procesados: number = r.procesados || 0;
+  const totalNoEncontrados: number = r.totalNoEncontrados || 0;
+  const tieneAdvertencias = totalNoEncontrados > 0;
+  const tieneErrores = erroresTecnicos.length > 0;
+
+  return (
+    <div className="mb-6 rounded-2xl border overflow-hidden shadow-sm">
+      {/* Cabecera verde */}
+      <div className="bg-green-50 border-b border-green-200 px-5 py-4 flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <CheckCircle className="w-6 h-6 text-green-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold text-green-900">{result.tipo} procesada correctamente</p>
+            <p className="text-sm text-green-700 mt-0.5">
+              <span className="font-semibold">{procesados}</span> registro{procesados !== 1 ? 's' : ''} procesado{procesados !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 mt-0.5"><X className="w-5 h-5" /></button>
+      </div>
+
+      {/* Resumen de contadores */}
+      <div className="bg-white px-5 py-3 flex flex-wrap gap-4 border-b border-gray-100">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
+          <span className="text-gray-700"><span className="font-semibold text-gray-900">{procesados}</span> procesados</span>
+        </div>
+        {tieneAdvertencias && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+            <span className="text-gray-700"><span className="font-semibold text-amber-700">{totalNoEncontrados}</span> docente{totalNoEncontrados !== 1 ? 's' : ''} no encontrado{totalNoEncontrados !== 1 ? 's' : ''}</span>
+          </div>
+        )}
+        {tieneErrores && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
+            <span className="text-gray-700"><span className="font-semibold text-red-700">{erroresTecnicos.length}</span> error{erroresTecnicos.length !== 1 ? 'es' : ''} técnico{erroresTecnicos.length !== 1 ? 's' : ''}</span>
+          </div>
+        )}
+        {!tieneAdvertencias && !tieneErrores && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />
+            <span className="text-gray-500">Sin advertencias — todos los docentes fueron encontrados</span>
+          </div>
+        )}
+      </div>
+
+      {/* Panel: Docentes no encontrados */}
+      {tieneAdvertencias && (
+        <div className="border-b border-amber-100">
+          <button
+            onClick={() => setShowNoEncontrados(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 bg-amber-50 hover:bg-amber-100 transition-colors text-left"
+          >
+            <div className="flex items-center gap-2">
+              <UserX className="w-4 h-4 text-amber-600" />
+              <span className="font-semibold text-amber-800 text-sm">
+                ⚠️ {totalNoEncontrados} docente{totalNoEncontrados !== 1 ? 's' : ''} del Excel no existe{totalNoEncontrados !== 1 ? 'n' : ''} en el sistema
+              </span>
+            </div>
+            {showNoEncontrados
+              ? <ChevronUp className="w-4 h-4 text-amber-600" />
+              : <ChevronDown className="w-4 h-4 text-amber-600" />
+            }
+          </button>
+          {showNoEncontrados && (
+            <div className="bg-white">
+              <div className="px-5 py-2 bg-amber-50/50">
+                <p className="text-xs text-amber-700 flex items-start gap-1.5">
+                  <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  Las filas de estos docentes fueron <strong>omitidas</strong>. Pídele a Planeación que los registre en el sistema y vuelve a importar.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-y border-gray-100">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left font-bold">Documento</th>
+                      <th className="px-4 py-2.5 text-left font-bold">Nombre</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {noEncontrados.map((d: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-amber-50/30 transition-colors">
+                        <td className="px-4 py-2.5 font-semibold text-gray-800 font-mono">{d.documento}</td>
+                        <td className="px-4 py-2.5 text-gray-700">{d.nombre || <span className="text-gray-400 italic">—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Panel: Errores técnicos */}
+      {tieneErrores && (
+        <div>
+          <button
+            onClick={() => setShowErrores(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 bg-red-50 hover:bg-red-100 transition-colors text-left"
+          >
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600" />
+              <span className="font-semibold text-red-800 text-sm">
+                {erroresTecnicos.length} error{erroresTecnicos.length !== 1 ? 'es' : ''} técnico{erroresTecnicos.length !== 1 ? 's' : ''} (filas sin inscripción u otros)
+              </span>
+            </div>
+            {showErrores
+              ? <ChevronUp className="w-4 h-4 text-red-500" />
+              : <ChevronDown className="w-4 h-4 text-red-500" />
+            }
+          </button>
+          {showErrores && (
+            <ul className="bg-white px-5 py-3 space-y-1 border-t border-red-100">
+              {erroresTecnicos.map((e: string, idx: number) => (
+                <li key={idx} className="text-xs text-red-700 font-mono bg-red-50 rounded px-2 py-1">{e}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 export default function DashboardDirector() {
   const [data, setData] = useState<any>(null);
@@ -268,28 +419,7 @@ export default function DashboardDirector() {
 
       {/* RESULTADO IMPORTACIÓN */}
       {uploadResult && (
-        <div className={`mb-6 p-5 rounded-2xl border relative ${uploadResult.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-          <button onClick={() => setUploadResult(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-          {uploadResult.success ? (
-            <div className="flex items-center gap-3">
-              <CheckCircle className="w-6 h-6 text-green-600 shrink-0" />
-              <div>
-                <p className="font-bold text-green-900">
-                  {uploadResult.tipo} exitosa
-                  {uploadResult.data?.resultados?.procesados !== undefined ? ` — ${uploadResult.data.resultados.procesados} registros procesados` : ''}
-                </p>
-                {uploadResult.data?.resultados?.erroresEncontrados > 0 && (
-                  <p className="text-sm text-red-600 mt-1">{uploadResult.data.resultados.erroresEncontrados} filas con errores</p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <AlertCircle className="w-6 h-6 text-red-600 shrink-0" />
-              <p className="font-bold text-red-900">{uploadResult.error}</p>
-            </div>
-          )}
-        </div>
+        <ImportResultPanel result={uploadResult} onClose={() => setUploadResult(null)} />
       )}
 
       {/* SIN PERIODO ACTIVO */}
