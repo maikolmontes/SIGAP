@@ -558,146 +558,207 @@ const actualizarImportacion = async (req, res) => {
 
         // NO HAY PASO DE LIMPIEZA - Solo agregar
 
+        // Agrupar records por inscripción (documento)
+        const recordsPorDocente = {};
         for (let i = 0; i < records.length; i++) {
             const row = normalizeObjectKeys(records[i]);
-            
             const inscripcion = row['inscripcion'] || row['documento'];
-            const asignaturas = row['asignaturas'] || row['espaciosacademicos'] || row['espacioacademico'];
             const semestreRaw = row['semestre'];
             const programasRaw = row['programas'];
-            const horasRaw = row['horas'] || row['horassemana'] || row['horassemanales'];
-            const nombreDocenteExcel = row['docentes'] || row['nombre'] || row['docente'] || null;
-            
+
             if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
 
             if (!inscripcion) {
-                if (!programasRaw && !asignaturas) continue;
-                errores.push(`Fila ${i+2}: No tiene campo Inscripción.`);
+                if (programasRaw || row['asignaturas'] || row['espaciosacademicos'] || row['espacioacademico']) {
+                    errores.push(`Fila ${i+2}: No tiene campo Inscripción.`);
+                }
                 continue;
             }
 
-            const userRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [String(inscripcion).trim()]);
+            const docTrimmed = String(inscripcion).trim();
+            if (!recordsPorDocente[docTrimmed]) {
+                recordsPorDocente[docTrimmed] = [];
+            }
+            row._filaExcel = i + 2; 
+            recordsPorDocente[docTrimmed].push(row);
+        }
+
+        // Iterar por docente
+        for (const [inscripcion, filasDocente] of Object.entries(recordsPorDocente)) {
+            const userRes = await client.query(`
+                SELECT u.id_usuario, u.nombres, u.apellidos, tc.horas_contrato 
+                FROM usuarios u
+                LEFT JOIN tipo_contrato tc ON u.id_contrato = tc.id_contrato
+                WHERE u.numero_documento = $1
+            `, [inscripcion]);
+
             if (userRes.rows.length === 0) {
-                // Verificar si ya fue registrado en esta importación (mismo documento, diferente fila)
-                const yaRegistrado = docentesNoEncontrados.some(d => d.documento === String(inscripcion).trim());
-                if (!yaRegistrado) {
-                    docentesNoEncontrados.push({
-                        fila: i + 2,
-                        documento: String(inscripcion).trim(),
-                        nombre: nombreDocenteExcel ? String(nombreDocenteExcel).trim() : null,
-                        programa: programasRaw ? String(programasRaw).trim() : null
-                    });
-                }
+                const filaRepr = filasDocente[0];
+                const nombreDocenteExcel = filaRepr['docentes'] || filaRepr['nombre'] || filaRepr['docente'] || null;
+                const programasRaw = filaRepr['programas'];
+                
+                docentesNoEncontrados.push({
+                    fila: filaRepr._filaExcel,
+                    documento: inscripcion,
+                    nombre: nombreDocenteExcel ? String(nombreDocenteExcel).trim() : null,
+                    programa: programasRaw ? String(programasRaw).trim() : null
+                });
                 continue;
             }
-            const idUsuario = userRes.rows[0].id_usuario;
 
-            // Semestre y Grupo
-            const { numero, grupo } = parseSemestre(semestreRaw);
-            let idSemestre;
-            const semRes = await client.query('SELECT id_semestre FROM semestres WHERE nombre_sem = $1', [numero]);
-            if (semRes.rows.length > 0) { idSemestre = semRes.rows[0].id_semestre; }
-            else {
-                const newSem = await client.query('INSERT INTO semestres (id_pensulaca, nombre_sem) VALUES ($1, $2) RETURNING id_semestre', [idPensulAca, numero]);
-                idSemestre = newSem.rows[0].id_semestre;
-            }
-            let idGrupo;
-            const gruRes = await client.query('SELECT id_grupos FROM grupos WHERE nombre_grupo = $1', [grupo]);
-            if (gruRes.rows.length > 0) { idGrupo = gruRes.rows[0].id_grupos; }
-            else {
-                const newGru = await client.query('INSERT INTO grupos (nombre_grupo, jornada) VALUES ($1, $2) RETURNING id_grupos', [grupo, 'Diurna']);
-                idGrupo = newGru.rows[0].id_grupos;
-            }
-            const sgRes = await client.query('SELECT id_semestregrupo FROM semestres_grupos WHERE id_semestre = $1 AND id_grupos = $2', [idSemestre, idGrupo]);
-            if (sgRes.rows.length === 0) {
-                await client.query('INSERT INTO semestres_grupos (id_semestre, id_grupos, activo) VALUES ($1, $2, true)', [idSemestre, idGrupo]);
-            }
+            const usuario = userRes.rows[0];
+            const idUsuario = usuario.id_usuario;
+            const horasContrato = usuario.horas_contrato || 0; // Podría ser null si no tiene contrato asignado
+            const nombreCompleto = `${usuario.nombres} ${usuario.apellidos}`.trim();
 
-            // Función Sustantiva
-            const funcionSustantivaStr = await mapFuncionSustantiva(client, programasRaw);
+            const savepointName = `docente_${idUsuario}`;
+            await client.query(`SAVEPOINT ${savepointName}`);
 
-            // Buscar si el usuario ya tiene esta función
-            let idFunciones;
-            const funcAsigRes = await client.query(`
-                SELECT af.id_funciones 
-                FROM asignacion_funciones af
-                JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
-                WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2 AND af.id_periodo = $3
-            `, [idUsuario, funcionSustantivaStr, idPeriodoActivo]);
+            let exitoDocente = true;
+            let procesadosDocente = 0;
 
-            let horasActividad = parseFloat(horasRaw || 0);
+            try {
+                // Procesar todas las filas del docente
+                for (const row of filasDocente) {
+                    const asignaturas = row['asignaturas'] || row['espaciosacademicos'] || row['espacioacademico'];
+                    const semestreRaw = row['semestre'];
+                    const programasRaw = row['programas'];
+                    const horasRaw = row['horas'] || row['horassemana'] || row['horassemanales'];
 
-            if (funcAsigRes.rows.length > 0) {
-                idFunciones = funcAsigRes.rows[0].id_funciones;
-                // No sumar horas aquí, se recalculan al final
-            } else {
-                // Crear nueva función
-                const newFunc = await client.query(`
-                    INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
-                    VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
-                `, [funcionSustantivaStr, 0, 'Pendiente', 'Agregado vía actualización Excel', idPeriodoActivo]);
-                idFunciones = newFunc.rows[0].id_funciones;
-                await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
-            }
+                    // Semestre y Grupo
+                    const { numero, grupo } = parseSemestre(semestreRaw);
+                    let idSemestre;
+                    const semRes = await client.query('SELECT id_semestre FROM semestres WHERE nombre_sem = $1', [numero]);
+                    if (semRes.rows.length > 0) { idSemestre = semRes.rows[0].id_semestre; }
+                    else {
+                        const newSem = await client.query('INSERT INTO semestres (id_pensulaca, nombre_sem) VALUES ($1, $2) RETURNING id_semestre', [idPensulAca, numero]);
+                        idSemestre = newSem.rows[0].id_semestre;
+                    }
+                    let idGrupo;
+                    const gruRes = await client.query('SELECT id_grupos FROM grupos WHERE nombre_grupo = $1', [grupo]);
+                    if (gruRes.rows.length > 0) { idGrupo = gruRes.rows[0].id_grupos; }
+                    else {
+                        const newGru = await client.query('INSERT INTO grupos (nombre_grupo, jornada) VALUES ($1, $2) RETURNING id_grupos', [grupo, 'Diurna']);
+                        idGrupo = newGru.rows[0].id_grupos;
+                    }
+                    const sgRes = await client.query('SELECT id_semestregrupo FROM semestres_grupos WHERE id_semestre = $1 AND id_grupos = $2', [idSemestre, idGrupo]);
+                    if (sgRes.rows.length === 0) {
+                        await client.query('INSERT INTO semestres_grupos (id_semestre, id_grupos, activo) VALUES ($1, $2, true)', [idSemestre, idGrupo]);
+                    }
 
-            // Buscar o crear espacio académico
-            let idEspacioAca = null;
-            if (funcionSustantivaStr === 'Docencia Directa' && asignaturas) {
-                const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 AND id_semestre = $2 LIMIT 1', [String(asignaturas).toLowerCase().trim(), idSemestre]);
-                if (espRes.rows.length > 0) {
-                    idEspacioAca = espRes.rows[0].id_espacio_aca;
+                    // Función Sustantiva
+                    const funcionSustantivaStr = await mapFuncionSustantiva(client, programasRaw);
+
+                    // Buscar si el usuario ya tiene esta función
+                    let idFunciones;
+                    const funcAsigRes = await client.query(`
+                        SELECT af.id_funciones 
+                        FROM asignacion_funciones af
+                        JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+                        WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2 AND af.id_periodo = $3
+                    `, [idUsuario, funcionSustantivaStr, idPeriodoActivo]);
+
+                    let horasActividad = parseFloat(horasRaw || 0);
+
+                    if (funcAsigRes.rows.length > 0) {
+                        idFunciones = funcAsigRes.rows[0].id_funciones;
+                        // No sumar horas aquí, se recalculan al final
+                    } else {
+                        // Crear nueva función
+                        const newFunc = await client.query(`
+                            INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
+                            VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
+                        `, [funcionSustantivaStr, 0, 'Pendiente', 'Agregado vía actualización Excel', idPeriodoActivo]);
+                        idFunciones = newFunc.rows[0].id_funciones;
+                        await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
+                    }
+
+                    // Buscar o crear espacio académico
+                    let idEspacioAca = null;
+                    if (funcionSustantivaStr === 'Docencia Directa' && asignaturas) {
+                        const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 AND id_semestre = $2 LIMIT 1', [String(asignaturas).toLowerCase().trim(), idSemestre]);
+                        if (espRes.rows.length > 0) {
+                            idEspacioAca = espRes.rows[0].id_espacio_aca;
+                        } else {
+                            const newEsp = await client.query('INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca', [String(asignaturas).trim(), idSemestre]);
+                            idEspacioAca = newEsp.rows[0].id_espacio_aca;
+                        }
+                    } else if (asignaturas) {
+                        const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 LIMIT 1', [String(asignaturas).toLowerCase().trim()]);
+                        if (espRes.rows.length > 0) {
+                            idEspacioAca = espRes.rows[0].id_espacio_aca;
+                        }
+                    }
+
+                    // Fuzzy Matching: buscar en catálogo maestro (actividades Y descripciones)
+                    let rolToInsert = asignaturas || '';
+                    const matchResult = await buscarEnCatalogo(client, asignaturas, funcionSustantivaStr);
+                    if (matchResult) {
+                        rolToInsert = matchResult.rolSeleccionado;
+                    } else {
+                        const esFuncionCatalogo = await client.query(`
+                            SELECT COUNT(*) as cnt FROM asignacion_funciones 
+                            WHERE funcion_sustantiva = $1 
+                            AND NOT EXISTS (SELECT 1 FROM usuario_asignacion ua WHERE ua.id_funciones = asignacion_funciones.id_funciones)
+                        `, [funcionSustantivaStr]);
+                        if (parseInt(esFuncionCatalogo.rows[0].cnt) > 0) {
+                            rolToInsert = '';
+                        }
+                    }
+
+                    // Verificar si esta actividad ya existe (por nombre de materia)
+                    const actExiste = await client.query(`
+                        SELECT id_asignacionact FROM asignacion_actividades 
+                        WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
+                    `, [idFunciones, rolToInsert]);
+
+                    if (actExiste.rows.length > 0) {
+                        // Actualizar el grupo y las horas de la materia existente
+                        await client.query(`
+                            UPDATE asignacion_actividades 
+                            SET id_grupos = $1, horas_rol = $2 
+                            WHERE id_asignacionact = $3
+                        `, [idGrupo, horasActividad, actExiste.rows[0].id_asignacionact]);
+                        procesadosDocente++;
+                        continue;
+                    }
+
+                    // Insertar actividad nueva si no existía
+                    await client.query(`
+                        INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                    `, [idFunciones, idEspacioAca, idGrupo, rolToInsert, horasActividad, procesados + procesadosDocente + 1]);
+
+                    procesadosDocente++;
+                }
+
+                // Calcular horas totales REALES en DB del docente tras los cambios
+                const sumRes = await client.query(`
+                    SELECT COALESCE(SUM(aa.horas_rol), 0) as total_horas
+                    FROM asignacion_actividades aa
+                    JOIN asignacion_funciones af ON aa.id_funciones = af.id_funciones
+                    JOIN usuario_asignacion ua ON af.id_funciones = ua.id_funciones
+                    WHERE ua.id_usuario = $1 AND af.id_periodo = $2
+                `, [idUsuario, idPeriodoActivo]);
+
+                const totalHorasBD = parseFloat(sumRes.rows[0].total_horas);
+
+                if (horasContrato > 0 && totalHorasBD > horasContrato) {
+                    await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+                    exitoDocente = false;
+                    errores.push(`El docente ${nombreCompleto} excede sus horas de contrato (${horasContrato}h). Sus horas quedarían en ${totalHorasBD}h. No se agregaron las nuevas asignaturas/funciones.`);
+                    omitidos += procesadosDocente;
                 } else {
-                    const newEsp = await client.query('INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca', [String(asignaturas).trim(), idSemestre]);
-                    idEspacioAca = newEsp.rows[0].id_espacio_aca;
+                    await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+                    procesados += procesadosDocente;
                 }
-            } else if (asignaturas) {
-                const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 LIMIT 1', [String(asignaturas).toLowerCase().trim()]);
-                if (espRes.rows.length > 0) {
-                    idEspacioAca = espRes.rows[0].id_espacio_aca;
-                }
+
+            } catch (err) {
+                await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+                console.error(`Error procesando docente ${inscripcion}:`, err);
+                errores.push(`Error al procesar el docente con documento ${inscripcion}: ${err.message}`);
+                omitidos += procesadosDocente;
             }
-
-            // Fuzzy Matching: buscar en catálogo maestro (actividades Y descripciones)
-            let rolToInsert = asignaturas || '';
-            const matchResult = await buscarEnCatalogo(client, asignaturas, funcionSustantivaStr);
-            console.log(`[ACTUALIZAR] Fila ${i+2}: Función="${funcionSustantivaStr}" | Asignatura="${asignaturas}" → Match=${matchResult ? matchResult.rolSeleccionado : 'NINGUNO'}`);
-            if (matchResult) {
-                rolToInsert = matchResult.rolSeleccionado;
-            } else {
-                const esFuncionCatalogo = await client.query(`
-                    SELECT COUNT(*) as cnt FROM asignacion_funciones 
-                    WHERE funcion_sustantiva = $1 
-                    AND NOT EXISTS (SELECT 1 FROM usuario_asignacion ua WHERE ua.id_funciones = asignacion_funciones.id_funciones)
-                `, [funcionSustantivaStr]);
-                if (parseInt(esFuncionCatalogo.rows[0].cnt) > 0) {
-                    rolToInsert = '';
-                }
-            }
-
-            // Verificar si esta actividad ya existe (por nombre de materia)
-            const actExiste = await client.query(`
-                SELECT id_asignacionact FROM asignacion_actividades 
-                WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
-            `, [idFunciones, rolToInsert]);
-
-            if (actExiste.rows.length > 0) {
-                // Actualizar el grupo y las horas de la materia existente
-                await client.query(`
-                    UPDATE asignacion_actividades 
-                    SET id_grupos = $1, horas_rol = $2 
-                    WHERE id_asignacionact = $3
-                `, [idGrupo, horasActividad, actExiste.rows[0].id_asignacionact]);
-                procesados++;
-                continue;
-            }
-
-            // Insertar actividad nueva si no existía
-            await client.query(`
-                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
-                VALUES ($1, $2, $3, $4, $5, $6)
-            `, [idFunciones, idEspacioAca, idGrupo, rolToInsert, horasActividad, procesados + 1]);
-
-            procesados++;
         }
 
         // Recalcular horas de cada función basado en la suma real de actividades
