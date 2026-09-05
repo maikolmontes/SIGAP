@@ -138,11 +138,7 @@ const Evidencias: React.FC = () => {
 
     const getFileUrl = (ev: Evidencia) => {
         if (ev.tipo_archivo === 'enlace') return ev.ruta_archivo;
-<<<<<<< HEAD
-        return getStaticFileUrl(ev.ruta_archivo);
-=======
         return getArchivoUrl(ev.ruta_archivo);
->>>>>>> dev
     };
 
     const isImage = (type: string) => type && type.startsWith('image/');

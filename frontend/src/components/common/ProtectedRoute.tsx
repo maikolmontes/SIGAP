@@ -122,11 +122,7 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
             if (userId) {
                 try {
                     const response = await api.get(`/usuarios/${userId}/perfil-completo`);
-<<<<<<< HEAD
-                    setIsProfileComplete(response.data?.perfil_completo);
-=======
-                    setIsProfileComplete(response.data.perfil_completo);
->>>>>>> dev
+                    setIsProfileComplete(response.data?.perfil_completo ?? false);
                 } catch (error) {
                     setIsProfileComplete(false);
                 }

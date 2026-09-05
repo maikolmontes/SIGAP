@@ -468,11 +468,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                                 {ind.evidencias.filter((ev: any) => String(ev.semana) === semana).map((ev: any) => (
                                                                     <a 
                                                                         key={ev.id_evidencias}
-<<<<<<< HEAD
-                                                                        href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : getStaticFileUrl(ev.ruta_archivo)}
-=======
                                                                         href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : getArchivoUrl(ev.ruta_archivo)}
->>>>>>> dev
                                                                         target="_blank"
                                                                         rel="noopener noreferrer"
                                                                         className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline bg-white p-1.5 rounded border border-gray-100 shadow-sm"
