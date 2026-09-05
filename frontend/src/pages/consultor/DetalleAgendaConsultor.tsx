@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/common/Layout';
-import api, { getStaticFileUrl } from '../../services/api';
+import api, { getArchivoUrl } from '../../services/api';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, CheckCircle, XCircle, AlertTriangle, FileText,
@@ -227,7 +227,11 @@ export default function DetalleAgendaConsultor() {
                                                                                                     {ind.evidencias.map((ev: any) => (
                                                                                                         <a
                                                                                                             key={ev.id_evidencias}
+<<<<<<< HEAD
                                                                                                             href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : getStaticFileUrl(ev.ruta_archivo)}
+=======
+                                                                                                            href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : getArchivoUrl(ev.ruta_archivo)}
+>>>>>>> dev
                                                                                                             target="_blank"
                                                                                                             rel="noopener noreferrer"
                                                                                                             className="inline-flex items-center gap-1.5 text-xs bg-white text-teal-600 px-3 py-1.5 rounded-md border border-teal-200 hover:bg-teal-50 transition-colors shadow-sm font-medium"

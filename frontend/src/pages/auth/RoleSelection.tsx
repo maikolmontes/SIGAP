@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Users, Settings, Eye, ChevronRight, LogOut, Check, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+// @ts-ignore
 import api from '../../services/api';
 
 interface Rol {
@@ -28,11 +29,23 @@ const RoleSelection = () => {
         }
 
         const response = await api.get('/user/roles');
-        const data = response.data;
-        if (data.length === 1) {
-          handleRoleSelection(data[0]);
+        const data: Rol[] = response.data;
+
+        // Deduplicar estrictamente por nombre canónico de rol
+        const seen = new Set<string>();
+        const uniqueRoles: Rol[] = [];
+        for (const r of data) {
+          const key = (r.nombre_rol || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueRoles.push(r);
+          }
+        }
+
+        if (uniqueRoles.length === 1) {
+          handleRoleSelection(uniqueRoles[0]);
         } else {
-          setRoles(data);
+          setRoles(uniqueRoles);
           setIsLoading(false);
         }
       } catch (error) {

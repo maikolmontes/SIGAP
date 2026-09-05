@@ -8,6 +8,7 @@ import Periodos from './pages/planeacion/Periodos'
 import Semanas from './pages/planeacion/Semanas'
 import Facultades from './pages/planeacion/Facultades'
 import Programas from './pages/planeacion/Programas'
+import GestionPerfiles from './pages/planeacion/GestionPerfiles'
 import DashboardDirector from './pages/director/DashboardDirector'
 import AgendasPorRevisar from './pages/director/AgendasPorRevisar'
 import DetalleAgenda from './pages/director/DetalleAgenda'
@@ -42,6 +43,8 @@ function App() {
         <Route path="/planeacion/semanas" element={<Semanas />} />
         <Route path="/planeacion/facultades" element={<Facultades />} />
         <Route path="/planeacion/programas" element={<Programas />} />
+        <Route path="/planeacion/perfiles" element={<GestionPerfiles />} />
+        <Route path="/planeacion/permisos" element={<GestionPerfiles />} />
         <Route path="/planeacion/analitica" element={<Analitica rol="planeacion" />} />
       </Route>
 

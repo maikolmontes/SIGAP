@@ -33,6 +33,7 @@ app.use('/api/director', require('./routes/director'));
 app.use('/api/semanas', require('./routes/semanas'));
 app.use('/api/evidencias', require('./routes/evidencias'));
 app.use('/api/observaciones', require('./routes/observaciones'));
+app.use('/api/permisos', require('./routes/permisos'));
 
 // Servir archivos estáticos de evidencias
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

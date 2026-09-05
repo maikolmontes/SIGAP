@@ -5,10 +5,11 @@ exports.getUserRoles = async (req, res) => {
     const userId = req.user.id; 
 
     const query = `
-      SELECT r.id_rol, r.nombre_rol, r.descripcion_rol
+      SELECT DISTINCT r.id_rol, r.nombre_rol, r.descripcion_rol
       FROM roles r
       INNER JOIN usuario_rol ur ON r.id_rol = ur.id_rol
       WHERE ur.id_usuario = $1
+      ORDER BY r.id_rol ASC
     `;
     
     const { rows } = await pool.query(query, [userId]);

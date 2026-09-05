@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
-import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, CheckCircle2, AlertTriangle, Clock, Lock, CalendarX } from 'lucide-react';
+import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, Save, CheckCircle2, AlertTriangle, Clock, Lock, CalendarX } from 'lucide-react';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { getPeriodoActivo } from '../../services/periodosService';

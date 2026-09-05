@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import Layout from '../../components/common/Layout';
 import * as XLSX from 'xlsx';
+import { usePermisosPagina } from '../../hooks/usePermisos';
 
 import { 
   Users, 
@@ -36,6 +37,14 @@ import {
   getPeriodoActivo,
   getDocentesPeriodo
 } from '../../services/periodosService';
+import { getProgramas } from '../../services/programasService';
+import { exportarDocentesExcel } from '../../utils/exportExcelDocentes';
+
+interface ProgramaItem {
+  id_programa: number;
+  nombre_programa: string;
+  activo?: boolean;
+}
 
 interface Usuario {
   id_usuario: number;
@@ -55,6 +64,7 @@ interface Usuario {
 
 export default function Docentes() {
   const location = useLocation();
+  const { puedeCrear, puedeEditar } = usePermisosPagina('Docentes y Usuarios');
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(true);
   const [mensaje, setMensaje] = useState<{ tipo: 'exito' | 'error', texto: string } | null>(null);
@@ -74,6 +84,7 @@ export default function Docentes() {
   const [showEditModal, setShowEditModal] = useState(false);
 
   // Formulario de Creación Individual (Multirrol)
+  const [programas, setProgramas] = useState<ProgramaItem[]>([]);
   const [nombres, setNombres] = useState('');
   const [apellidos, setApellidos] = useState('');
   const [tipoDocumento, setTipoDocumento] = useState('CC');
@@ -118,9 +129,19 @@ export default function Docentes() {
   const cargarUsuarios = async () => {
     try {
       setLoading(true);
-      const activePeriodRes = await getPeriodoActivo();
+      const [activePeriodRes, progsRes] = await Promise.all([
+        getPeriodoActivo().catch(() => ({ data: null })),
+        getProgramas().catch(() => ({ data: [] }))
+      ]);
+
       const pActivo = activePeriodRes.data;
       setPeriodoActivo(pActivo);
+
+      const listaProgs = progsRes.data || [];
+      setProgramas(listaProgs);
+      if (listaProgs.length > 0) {
+        setIdPrograma(listaProgs[0].id_programa);
+      }
 
       if (pActivo) {
         const res = await getDocentesPeriodo(pActivo.id_periodo);
@@ -136,43 +157,54 @@ export default function Docentes() {
     }
   };
 
+  const normalizarRol = (r: string) => {
+    const low = (r || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (low.includes('planea') || low.includes('admin')) return 'planeacion';
+    if (low.includes('direct')) return 'director';
+    if (low.includes('consult')) return 'consultor';
+    return 'docente';
+  };
+
+  const rolEstaSeleccionado = (lista: string[], rolName: string) => {
+    const normTarget = normalizarRol(rolName);
+    return lista.some(r => normalizarRol(r) === normTarget);
+  };
+
   const esSoloConsultorOPlaneacion = (list: string[]) => {
     if (!list || list.length === 0) return false;
     return list.every(r => {
-      const low = r.toLowerCase();
-      return low.includes('consult') || low.includes('planea');
+      const norm = normalizarRol(r);
+      return norm === 'consultor' || norm === 'planeacion';
     });
   };
 
   const toggleRol = (rolName: string, isEdit = false) => {
+    const normTarget = normalizarRol(rolName);
+    const updater = (prev: string[]) => {
+      const yaExiste = prev.some(r => normalizarRol(r) === normTarget);
+      if (yaExiste) {
+        if (prev.length <= 1) return prev;
+        return prev.filter(r => normalizarRol(r) !== normTarget);
+      } else {
+        return [...prev, rolName];
+      }
+    };
+
     if (isEdit) {
-      setEditRolesSeleccionados(prev => {
-        if (prev.includes(rolName)) {
-          if (prev.length === 1) return prev;
-          return prev.filter(r => r !== rolName);
-        } else {
-          return [...prev, rolName];
-        }
-      });
+      setEditRolesSeleccionados(updater);
     } else {
-      setRolesSeleccionados(prev => {
-        if (prev.includes(rolName)) {
-          if (prev.length === 1) return prev;
-          return prev.filter(r => r !== rolName);
-        } else {
-          return [...prev, rolName];
-        }
-      });
+      setRolesSeleccionados(updater);
     }
   };
 
   const mapProgramaToId = (progName?: string): number => {
-    if (!progName) return 1;
-    const low = progName.toLowerCase();
-    if (low.includes('electrónica') || low.includes('electronica')) return 2;
-    if (low.includes('industrial')) return 3;
-    if (low.includes('financiera')) return 4;
-    return 1;
+    if (!progName || programas.length === 0) return programas[0]?.id_programa || 1;
+    const low = progName.toLowerCase().trim();
+    const exact = programas.find(p => p.nombre_programa.toLowerCase().trim() === low);
+    if (exact) return exact.id_programa;
+    const partial = programas.find(p => p.nombre_programa.toLowerCase().includes(low) || low.includes(p.nombre_programa.toLowerCase()));
+    if (partial) return partial.id_programa;
+    return programas[0]?.id_programa || 1;
   };
 
   const handleOpenEditModal = (u: Usuario) => {
@@ -185,7 +217,16 @@ export default function Docentes() {
     setEditIdPrograma(mapProgramaToId(u.programa));
 
     const parsedRoles = (u.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean);
-    setEditRolesSeleccionados(parsedRoles.length > 0 ? parsedRoles : ['Docente']);
+    // Normalizar a los nombres estándar de la interfaz
+    const mappedRoles = parsedRoles.map(r => {
+      const norm = normalizarRol(r);
+      if (norm === 'planeacion') return 'Planeación';
+      if (norm === 'director') return 'Director';
+      if (norm === 'consultor') return 'Consultor';
+      return 'Docente';
+    });
+    const uniqueMapped = Array.from(new Set(mappedRoles));
+    setEditRolesSeleccionados(uniqueMapped.length > 0 ? uniqueMapped : ['Docente']);
     setEditFormError(null);
     setEditWarning(null);
     setShowEditModal(true);
@@ -473,28 +514,17 @@ export default function Docentes() {
     link.click();
   };
 
-  // Exportar la lista de docentes actual a Excel (.xlsx)
-  const handleExportarExcel = () => {
-    const encabezados = [['Nombres', 'Apellidos', 'Correo', 'Tipo Documento', 'Número Documento', 'Programa Académico', 'Facultad', 'Tipo Contrato', 'Roles', 'Estado']];
-    const filas = usuarios.map(u => {
-      const isOnlyConsult = esSoloConsultorOPlaneacion((u.roles || '').split(',').map(r=>r.trim()));
-      return [
-        u.nombres,
-        u.apellidos,
-        u.correo,
-        u.tipo_documento || 'CC',
-        u.numero_documento || '0000000000',
-        isOnlyConsult ? 'No aplica' : (u.programa || 'Sin Asignar'),
-        isOnlyConsult ? 'No aplica' : (u.facultad || 'Ingeniería'),
-        u.tipo_contrato || 'Hora Cátedra',
-        u.roles || 'Docente',
-        u.activo ? 'Habilitado' : 'Bloqueado'
-      ];
-    });
-    const ws = XLSX.utils.aoa_to_sheet([...encabezados, ...filas]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Docentes");
-    XLSX.writeFile(wb, "docentes_SIGAP.xlsx");
+  // Exportar la lista de docentes actual a Excel (.xlsx) con diseño institucional
+  const handleExportarExcel = async () => {
+    try {
+      await exportarDocentesExcel(
+        usuarios,
+        periodoActivo ? `Período ${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : undefined
+      );
+    } catch (err) {
+      console.error('Error al exportar Excel:', err);
+      alert('Ocurrió un error al generar el reporte Excel.');
+    }
   };
 
   return (
@@ -513,6 +543,7 @@ export default function Docentes() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
+            {puedeCrear && (
             <button
               onClick={() => {
                 handleResetForm();
@@ -523,6 +554,8 @@ export default function Docentes() {
               <UserPlus className="w-4 h-4" />
               Agregar Usuario
             </button>
+            )}
+            {puedeCrear && (
             <button
               onClick={() => {
                 setShowBulkModal(true);
@@ -535,6 +568,7 @@ export default function Docentes() {
               <Upload className="w-4 h-4" />
               Importar Excel
             </button>
+            )}
             <button
               onClick={handleExportarExcel}
               className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white px-4 py-2.5 rounded-lg font-bold border border-white/10 transition-all duration-200 text-sm backdrop-blur-sm"
@@ -755,6 +789,7 @@ export default function Docentes() {
                       </td>
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-3">
+                          {puedeEditar ? (
                           <label className="relative inline-flex items-center cursor-pointer select-none">
                             <input
                               type="checkbox"
@@ -764,12 +799,18 @@ export default function Docentes() {
                             />
                             <div className="w-10 h-5.5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
                           </label>
+                          ) : (
+                          <div className="w-10 h-5.5 rounded-full bg-gray-100 flex items-center justify-center" title="Sin permiso para cambiar estado">
+                            <div className={`w-4 h-4 rounded-full ${user.activo ? 'bg-emerald-400' : 'bg-gray-300'}`}></div>
+                          </div>
+                          )}
                           <span className={`text-[11px] font-bold uppercase w-16 text-left ${user.activo ? 'text-emerald-600' : 'text-gray-400'}`}>
                             {user.activo ? 'Habilitado' : 'Bloqueado'}
                           </span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
+                        {puedeEditar && (
                         <button
                           onClick={() => handleOpenEditModal(user)}
                           title="Editar Usuario"
@@ -777,6 +818,7 @@ export default function Docentes() {
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -892,7 +934,7 @@ export default function Docentes() {
                 </label>
                 <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
                   {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
-                    const isChecked = rolesSeleccionados.includes(rItem);
+                    const isChecked = rolEstaSeleccionado(rolesSeleccionados, rItem);
                     return (
                       <label
                         key={rItem}
@@ -941,12 +983,11 @@ export default function Docentes() {
                     {esSoloConsultorOPlaneacion(rolesSeleccionados) ? (
                       <option value="">Deshabilitado (Sin asignación académica)</option>
                     ) : (
-                      <>
-                        <option value={1}>Ingeniería de Sistemas</option>
-                        <option value={2}>Ingeniería Electrónica</option>
-                        <option value={3}>Ingeniería Industrial</option>
-                        <option value={4}>Ingeniería Financiera</option>
-                      </>
+                      programas.map((p) => (
+                        <option key={p.id_programa} value={p.id_programa}>
+                          {p.nombre_programa}
+                        </option>
+                      ))
                     )}
                   </select>
                 </div>
@@ -1086,7 +1127,7 @@ export default function Docentes() {
                 </label>
                 <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
                   {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
-                    const isChecked = editRolesSeleccionados.includes(rItem);
+                    const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
                     return (
                       <label
                         key={rItem}
@@ -1135,12 +1176,11 @@ export default function Docentes() {
                     {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? (
                       <option value="">Deshabilitado (Sin asignación académica)</option>
                     ) : (
-                      <>
-                        <option value={1}>Ingeniería de Sistemas</option>
-                        <option value={2}>Ingeniería Electrónica</option>
-                        <option value={3}>Ingeniería Industrial</option>
-                        <option value={4}>Ingeniería Financiera</option>
-                      </>
+                      programas.map((p) => (
+                        <option key={p.id_programa} value={p.id_programa}>
+                          {p.nombre_programa}
+                        </option>
+                      ))
                     )}
                   </select>
                 </div>
