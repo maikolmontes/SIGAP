@@ -23,22 +23,25 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    // Restaurar sesión desde localStorage al cargar
-    const storedToken = localStorage.getItem('sigap_token');
-    const storedUser = localStorage.getItem('sigap_user');
-
-    if (storedToken && storedUser) {
-        setToken(storedToken);
-        setUser(JSON.parse(storedUser));
+  const [token, setToken] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('sigap_token');
+    } catch {
+      return null;
     }
-    setIsLoading(false);
-  }, []);
+  });
+
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const stored = localStorage.getItem('sigap_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const navigate = useNavigate();
 
   // Control de inactividad de sesión (3 minutos = 180,000 ms)
   useEffect(() => {

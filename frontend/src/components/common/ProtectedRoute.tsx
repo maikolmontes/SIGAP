@@ -92,7 +92,11 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
 
     // Si se especificaron roles permitidos, verificar que el usuario tenga al menos uno
     if (allowedRoles && user?.roles) {
-        const hasRole = allowedRoles.some(role => user.roles.includes(role));
+        const normUserRoles = user.roles.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const hasRole = allowedRoles.some(role => {
+            const normRole = role.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            return normUserRoles.includes(normRole);
+        });
         if (!hasRole) {
             return <Navigate to="/login" replace />;
         }
