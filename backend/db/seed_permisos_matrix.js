@@ -107,16 +107,20 @@ const matrixData = [
 
 const acciones = ['Ver', 'Crear', 'Editar', 'Eliminar'];
 
-async function seed() {
-  const client = await pool.connect();
+async function runSeed(poolInstance = pool) {
+  const client = await poolInstance.connect();
   try {
     console.log('Iniciando actualización de esquema de permisos...');
     await client.query('BEGIN');
 
-    // 1. Agregar columna pagina si no existe
+    // 1. Agregar columnas si no existen
     await client.query(`
       ALTER TABLE permisos 
+      ADD COLUMN IF NOT EXISTS modulo VARCHAR(100);
+      ALTER TABLE permisos 
       ADD COLUMN IF NOT EXISTS pagina VARCHAR(100);
+      ALTER TABLE permisos 
+      ADD COLUMN IF NOT EXISTS accion VARCHAR(50);
     `);
 
     // 2. Verificar o limpiar constraint única
@@ -159,15 +163,8 @@ async function seed() {
       }
     }
 
-    // 3. Asignar permisos iniciales por defecto a los roles:
-    // id_rol 1: Planeacion -> Todos los permisos
-    // id_rol 2: Docente -> Gestión Docente (todos), Perfil (Ver, Editar)
-    // id_rol 3: Director -> Dirección y Supervisión (todos), Gestión Docente (Ver), Reportes (Ver)
-    // id_rol 4: Consultor -> Solo 'Ver' en todos los módulos
     console.log('Configurando permisos iniciales por rol...');
-    
-    // Traer todos los permisos
-    const allPermisosRes = await client.query('SELECT id_permisos, modulo, pagina, accion FROM permisos');
+    const allPermisosRes = await client.query('SELECT id_permisos, modulo, pagina, accion FROM permisos WHERE pagina IS NOT NULL');
     const allPermisos = allPermisosRes.rows;
 
     const rolesRes = await client.query('SELECT id_rol, nombre_rol FROM roles');
@@ -178,10 +175,8 @@ async function seed() {
       let permitidos = [];
 
       if (normRol.includes('planea') || normRol.includes('admin')) {
-        // Planeación tiene todos
         permitidos = allPermisos;
       } else if (normRol.includes('direct')) {
-        // Director: todos de Dirección y Supervisión, Ver en Gestión Docente, Ver en Planeación
         permitidos = allPermisos.filter(p => 
           p.modulo === 'Dirección y Supervisión' ||
           (p.modulo === 'Gestión Docente' && (p.accion === 'Ver' || p.accion === 'Editar')) ||
@@ -189,13 +184,11 @@ async function seed() {
           p.pagina === 'Perfil de Usuario'
         );
       } else if (normRol.includes('docen')) {
-        // Docente: todos de Gestión Docente, Ver y Editar en Perfil
         permitidos = allPermisos.filter(p => 
           p.modulo === 'Gestión Docente' ||
           (p.pagina === 'Perfil de Usuario' && (p.accion === 'Ver' || p.accion === 'Editar'))
         );
       } else if (normRol.includes('consult')) {
-        // Consultor: solo 'Ver' en todo
         permitidos = allPermisos.filter(p => p.accion === 'Ver');
       }
 
@@ -210,14 +203,18 @@ async function seed() {
 
     await client.query('COMMIT');
     console.log('Sembrado de matriz de permisos finalizado exitosamente.');
-    process.exit(0);
+    return { ok: true, total: allPermisos.length };
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error al sembrar matriz de permisos:', error);
-    process.exit(1);
+    throw error;
   } finally {
     client.release();
   }
 }
 
-seed();
+if (require.main === module) {
+  runSeed().then(() => process.exit(0)).catch(() => process.exit(1));
+}
+
+module.exports = { runSeed, matrixData };

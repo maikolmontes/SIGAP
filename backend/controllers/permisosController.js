@@ -1,9 +1,54 @@
 const pool = require('../db/connection');
+const { runSeed } = require('../db/seed_permisos_matrix');
+
+let esquemaVerificado = false;
+
+async function asegurarEsquemaYDatos() {
+  if (esquemaVerificado) return;
+  try {
+    // 1. Verificar si existen las columnas modulo, pagina, accion
+    const colCheck = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'permisos' AND column_name IN ('modulo', 'pagina', 'accion')
+    `);
+    
+    if (colCheck.rows.length < 3) {
+      console.log('Faltan columnas en permisos. Ejecutando migración DDL...');
+      await pool.query(`
+        ALTER TABLE permisos ADD COLUMN IF NOT EXISTS modulo VARCHAR(100);
+        ALTER TABLE permisos ADD COLUMN IF NOT EXISTS pagina VARCHAR(100);
+        ALTER TABLE permisos ADD COLUMN IF NOT EXISTS accion VARCHAR(50);
+      `);
+    }
+
+    // 2. Verificar si hay datos matriciales
+    const countRes = await pool.query(`SELECT COUNT(*) as count FROM permisos WHERE pagina IS NOT NULL`);
+    if (parseInt(countRes.rows[0].count, 10) === 0) {
+      console.log('Base de datos sin matriz de permisos detectada. Ejecutando auto-seed...');
+      await runSeed(pool);
+    }
+    esquemaVerificado = true;
+  } catch (err) {
+    console.error('Aviso al verificar esquema de permisos:', err.message);
+  }
+}
+
+// Endpoint manual de siembra
+exports.ejecutarSeed = async (req, res) => {
+  try {
+    const result = await runSeed(pool);
+    res.json({ mensaje: 'Matriz de permisos inicializada con éxito', result });
+  } catch (err) {
+    res.status(500).json({ error: 'Error ejecutando seed', detalle: err.message });
+  }
+};
 
 // Obtener permisos activos asignados a un rol específico
 exports.getPermisosByRol = async (req, res) => {
   const { id_rol } = req.params;
   try {
+    await asegurarEsquemaYDatos();
     const permisosRes = await pool.query(`
       SELECT p.id_permisos, p.modulo, p.pagina, p.accion
       FROM rol_permiso rp
@@ -39,6 +84,7 @@ exports.getPermisosByRol = async (req, res) => {
 // Obtener catálogo completo de la matriz y permisos asignados por rol
 exports.getCatalogoYAsignaciones = async (req, res) => {
   try {
+    await asegurarEsquemaYDatos();
     // 1. Roles
     const rolesRes = await pool.query(`
       SELECT id_rol, nombre_rol, descripcion_rol 

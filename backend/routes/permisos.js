@@ -5,6 +5,10 @@ const controller = require('../controllers/permisosController');
 // Catálogo matricial y asignaciones por rol
 router.get('/catalogo', controller.getCatalogoYAsignaciones);
 
+// Sembrado / inicialización de matriz
+router.get('/seed', controller.ejecutarSeed);
+router.post('/seed', controller.ejecutarSeed);
+
 // Permisos activos de un rol específico
 router.get('/rol/:id_rol', controller.getPermisosByRol);
 
