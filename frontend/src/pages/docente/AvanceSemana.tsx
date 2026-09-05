@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
 import { FileText, CheckCircle, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye } from 'lucide-react';
-import api from '../../services/api';
+import api, { getArchivoUrl } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
 
@@ -14,6 +14,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   const { user } = useAuth();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sinPermiso, setSinPermiso] = useState(false);
+  const [puedeEditar, setPuedeEditar] = useState(true);
   const [semanaInfo, setSemanaInfo] = useState<any>(null);
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: string, texto: string } | null>(null);
@@ -37,6 +39,28 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
       setLoading(true);
       const userId = (user as any)?.id_usuario || user?.id;
       if (!userId) return;
+
+      // Validar permisos del rol activo para esta semana
+      try {
+        const storedRole = localStorage.getItem('sigap_active_role');
+        const roleId = storedRole ? JSON.parse(storedRole).id_rol : 2;
+        const permRes = await api.get(`/permisos/rol/${roleId}`);
+        const paginas = permRes.data.paginasVer || [];
+        const tieneVer = paginas.some((p: string) => 
+          p.toLowerCase().trim() === `avance semana ${semana}`.toLowerCase().trim() ||
+          p.toLowerCase().includes(`semana ${semana}`)
+        );
+        if (!tieneVer) {
+          setSinPermiso(true);
+          setLoading(false);
+          return;
+        }
+        const accionesPagina = permRes.data.mapaPermisos[`Avance Semana ${semana}`] || [];
+        const canEdit = accionesPagina.includes('Editar') || accionesPagina.includes('Crear');
+        setPuedeEditar(canEdit);
+      } catch (e) {
+        // En caso de fallo de red en permisos, continuar
+      }
 
       // Fetch week status
       const semRes = await api.get('/semanas');
@@ -172,6 +196,28 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
       <Layout rol="docente" path={`Registro de Actividades / Reporte Semana ${semana}`}>
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (sinPermiso) {
+    return (
+      <Layout rol="docente" path={`Registro de Actividades / Reporte Semana ${semana}`}>
+        <div className="flex flex-col items-center justify-center min-h-[50vh] text-center p-8 bg-white rounded-2xl border border-gray-200 mt-6 shadow-sm max-w-lg mx-auto">
+          <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-4 shadow-inner">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <h2 className="text-lg font-bold text-gray-800 mb-1">Acceso Restringido por Permisos</h2>
+          <p className="text-xs text-gray-500 max-w-md mb-6 leading-relaxed">
+            Tu perfil de docente no tiene permisos activos de visualización para el Reporte de la Semana {semana}. Este acceso es administrado por el equipo de Planeación en la Gestión de Perfiles.
+          </p>
+          <a
+            href="/docente/dashboard"
+            className="px-5 py-2.5 bg-[#063759] text-white rounded-xl text-xs font-bold hover:bg-[#084b7a] transition-all shadow-md"
+          >
+            Volver al Dashboard
+          </a>
         </div>
       </Layout>
     );
@@ -422,7 +468,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                                 {ind.evidencias.filter((ev: any) => String(ev.semana) === semana).map((ev: any) => (
                                                                     <a 
                                                                         key={ev.id_evidencias}
-                                                                        href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : `http://localhost:3000${ev.ruta_archivo.startsWith('/') ? ev.ruta_archivo : '/' + ev.ruta_archivo}`}
+                                                                        href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : getArchivoUrl(ev.ruta_archivo)}
                                                                         target="_blank"
                                                                         rel="noopener noreferrer"
                                                                         className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline bg-white p-1.5 rounded border border-gray-100 shadow-sm"

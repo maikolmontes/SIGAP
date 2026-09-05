@@ -40,6 +40,50 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsLoading(false);
   }, []);
 
+  // Control de inactividad de sesión (3 minutos = 180,000 ms)
+  useEffect(() => {
+    if (!token) return;
+
+    const INACTIVITY_LIMIT_MS = 3 * 60 * 1000; // 3 minutos
+    let timer: any = null;
+
+    const resetTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        // Expirar sesión
+        setToken(null);
+        setUser(null);
+        localStorage.removeItem('sigap_token');
+        localStorage.removeItem('sigap_user');
+        localStorage.removeItem('sigap_active_role');
+        navigate('/login', { 
+          replace: true, 
+          state: { mensajeInactividad: 'Tu sesión ha expirado por inactividad (3 minutos).' } 
+        });
+      }, INACTIVITY_LIMIT_MS);
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+    
+    // Throttle de eventos para no reiniciar el timer en cada milisegundo de movimiento
+    let lastActivity = Date.now();
+    const handleUserActivity = () => {
+      const now = Date.now();
+      if (now - lastActivity > 1000) {
+        lastActivity = now;
+        resetTimer();
+      }
+    };
+
+    events.forEach(evt => window.addEventListener(evt, handleUserActivity, { passive: true }));
+    resetTimer();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      events.forEach(evt => window.removeEventListener(evt, handleUserActivity));
+    };
+  }, [token, navigate]);
+
   const login = (newToken: string, newUser: User) => {
     setToken(newToken);
     setUser(newUser);
@@ -55,6 +99,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
     localStorage.removeItem('sigap_token');
     localStorage.removeItem('sigap_user');
+    localStorage.removeItem('sigap_active_role');
     navigate('/login', { replace: true });
   };
 

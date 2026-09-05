@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import api from '../../services/api'
 import { 
@@ -18,7 +18,8 @@ import {
     Settings,
     ChevronDown,
     ChevronRight,
-    Plus
+    Plus,
+    ShieldCheck
 } from 'lucide-react'
 
 type MenuItem = {
@@ -40,6 +41,8 @@ const menuPlaneacion: MenuItem[] = [
     { label: 'Programas', path: '/planeacion/programas', icon: GraduationCap },
     { label: 'Períodos', path: '/planeacion/periodos', icon: Calendar },
     { label: 'Semanas', path: '/planeacion/semanas', icon: Clock },
+    { label: 'Seguridad y Accesos', isHeader: true },
+    { label: 'Gestión de Perfiles', path: '/planeacion/perfiles', icon: ShieldCheck },
     { label: 'Reportes', isHeader: true },
     { label: 'Analítica', path: '/planeacion/analitica', icon: BarChart3 },
 ]
@@ -76,6 +79,36 @@ const menuConsultor: MenuItem[] = [
     { label: 'Analítica', path: '/consultor/analitica', icon: BarChart3 },
 ]
 
+const PATH_TO_PAGINA: Record<string, string> = {
+    // Planeación
+    '/planeacion/docentes': 'Docentes y Usuarios',
+    '/planeacion/facultades': 'Facultades',
+    '/planeacion/programas': 'Programas Académicos',
+    '/planeacion/periodos': 'Períodos Académicos',
+    '/planeacion/semanas': 'Semanas y Cortes',
+    '/planeacion/analitica': 'Analítica y Reportes',
+    '/planeacion/perfiles': 'Gestión de Perfiles y Permisos',
+    '/planeacion/permisos': 'Gestión de Perfiles y Permisos',
+
+    // Director
+    '/director/agendas': 'Agendas por Revisar',
+    '/director/historial': 'Historial de Agendas',
+    '/director/observaciones': 'Observaciones Docentes',
+    '/director/reportes': 'Reportes de Gestión',
+    '/director/analitica': 'Reportes de Gestión',
+
+    // Docente
+    '/docente/agenda': 'Mi Agenda Académica',
+    '/docente/avance-semana-8': 'Avance Semana 8',
+    '/docente/avance-semana-16': 'Avance Semana 16',
+    '/docente/evidencias': 'Evidencias e Indicadores',
+
+    // Consultor
+    '/consultor/agendas': 'Seguimiento y Auditoría',
+    '/consultor/observaciones': 'Observaciones de Control',
+    '/consultor/analitica': 'Analítica Institucional',
+};
+
 interface SidebarProps {
     rol: 'planeacion' | 'director' | 'docente' | 'consultor'
     onClose?: () => void
@@ -84,6 +117,7 @@ interface SidebarProps {
 export default function Sidebar({ rol, onClose }: SidebarProps) {
     const [periodoEtiqueta, setPeriodoEtiqueta] = useState<string>('Cargando...')
     const [tienePeriodo, setTienePeriodo] = useState<boolean>(false)
+    const [paginasPermitidas, setPaginasPermitidas] = useState<string[] | null>(null)
     const location = useLocation()
     const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
 
@@ -101,6 +135,87 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
             : rol === 'consultor' 
                 ? 'Consultor' 
                 : 'Docente'
+
+    // Cargar permisos activos asignados al rol actual
+    const cargarPermisos = async () => {
+        try {
+            let roleId: number | null = null;
+            const storedRole = localStorage.getItem('sigap_active_role');
+            if (storedRole) {
+                const parsed = JSON.parse(storedRole);
+                roleId = parsed.id_rol;
+            }
+            if (!roleId) {
+                if (rol === 'planeacion') roleId = 1;
+                else if (rol === 'docente') roleId = 2;
+                else if (rol === 'director') roleId = 3;
+                else if (rol === 'consultor') roleId = 4;
+            }
+            if (roleId) {
+                const res = await api.get(`/permisos/rol/${roleId}`);
+                setPaginasPermitidas(res.data.paginasVer || []);
+            }
+        } catch (err) {
+            console.error('Error al verificar permisos en Sidebar:', err);
+        }
+    };
+
+    useEffect(() => {
+        cargarPermisos();
+
+        const handleActualizacion = () => {
+            cargarPermisos();
+        };
+
+        window.addEventListener('sigap_permisos_actualizados', handleActualizacion);
+        window.addEventListener('storage', handleActualizacion);
+
+        return () => {
+            window.removeEventListener('sigap_permisos_actualizados', handleActualizacion);
+            window.removeEventListener('storage', handleActualizacion);
+        };
+    }, [rol]);
+
+    // Filtrar items del menú según permisos de lectura (Ver)
+    const menuFiltrado = useMemo(() => {
+        if (!paginasPermitidas) return menu;
+
+        // 1. Filtrar los items normales según los permisos de Ver
+        const itemsValidos = menu.map(item => {
+            if (item.isHeader || !item.path || item.path.includes('/dashboard')) {
+                return item;
+            }
+            const paginaRequerida = PATH_TO_PAGINA[item.path];
+            if (!paginaRequerida) return item;
+
+            const tienePermiso = paginasPermitidas.some(
+                p => p.toLowerCase().trim() === paginaRequerida.toLowerCase().trim()
+            );
+            return tienePermiso ? item : null;
+        }).filter(Boolean) as MenuItem[];
+
+        // 2. Ocultar encabezados que se hayan quedado sin ningún item visible
+        const resultado: MenuItem[] = [];
+        for (let i = 0; i < itemsValidos.length; i++) {
+            const curr = itemsValidos[i];
+            if (curr.isHeader) {
+                // Verificar si hay algún item hijo normal antes del siguiente header
+                let tieneHijos = false;
+                for (let j = i + 1; j < itemsValidos.length; j++) {
+                    if (itemsValidos[j].isHeader) break;
+                    tieneHijos = true;
+                    break;
+                }
+                if (tieneHijos) {
+                    resultado.push(curr);
+                }
+            } else {
+                resultado.push(curr);
+            }
+        }
+
+        return resultado;
+    }, [menu, paginasPermitidas]);
 
     useEffect(() => {
         const fetchPeriodoActivo = async () => {
@@ -144,11 +259,20 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
 
     return (
         <aside className="w-64 h-screen overflow-y-auto bg-[#063759] flex flex-col shadow-2xl lg:shadow-none overflow-x-hidden relative">
-            <div className="px-4 py-5 border-b border-white/10 flex justify-between items-center sticky top-0 bg-[#063759] z-10">
-                <div>
-                    <div className="text-white font-bold text-sm tracking-wide">SIGAP</div>
-                    <div className="text-white/60 text-xs mt-0.5">
-                        {rolLabel} {tienePeriodo && `· ${periodoEtiqueta}`}
+            <div className="px-4 py-4 border-b border-white/10 flex justify-between items-center sticky top-0 bg-[#063759] z-10">
+                <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-lg bg-white p-1 flex items-center justify-center shadow-md overflow-hidden shrink-0">
+                        <img 
+                            src="/logo_cesmag.png" 
+                            alt="Universidad CESMAG" 
+                            className="w-full h-full object-contain" 
+                        />
+                    </div>
+                    <div>
+                        <div className="text-white font-black text-sm tracking-wide">SIGAP</div>
+                        <div className="text-white/70 text-[11px] mt-0.5 font-medium leading-tight truncate max-w-[135px]">
+                            {rolLabel} {tienePeriodo && `· ${periodoEtiqueta}`}
+                        </div>
                     </div>
                 </div>
                 {onClose && (
@@ -168,7 +292,7 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
             </div>
 
             <nav className="flex-1 px-3 pb-8">
-                {menu.map((item, idx) => {
+                {menuFiltrado.map((item, idx) => {
                     if (item.isHeader) {
                         return (
                             <div key={`header-${idx}`} className="text-white/30 text-[10px] uppercase tracking-widest px-2 mb-2 mt-5 font-bold">

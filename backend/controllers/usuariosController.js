@@ -15,7 +15,7 @@ const getAll = async (req, res) => {
                 tc.horas_contrato,
                 pa.nombre_programa AS programa,
                 f.nombre_facultad  AS facultad,
-                STRING_AGG(r.nombre_rol, ', ') AS roles
+                STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
             LEFT JOIN programa_academico pa  ON u.id_programa  = pa.id_programa
@@ -89,24 +89,42 @@ const getById = async (req, res) => {
     }
 };
 
-const parseRoles = (roles, rol) => {
-    if (Array.isArray(roles) && roles.length > 0) {
-        return roles;
-    }
-    if (typeof rol === 'string' && rol.trim() !== '') {
-        return [rol.trim()];
-    }
-    return ['Docente'];
-};
-
 const normalizeRolName = (rName) => {
     if (!rName) return 'docente';
-    const low = rName.trim().toLowerCase();
-    if (low.includes('planea')) return 'planeacion';
+    const low = rName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (low.includes('planea') || low.includes('admin')) return 'planeacion';
     if (low.includes('direct')) return 'director';
-    if (low.includes('consult')) return 'consultor';
+    if (low.includes('consult') || low.includes('auditor')) return 'consultor';
     if (low.includes('docent')) return 'docente';
     return low;
+};
+
+const parseRoles = (roles, rol) => {
+    let rawList = [];
+    if (Array.isArray(roles) && roles.length > 0) {
+        rawList = roles;
+    } else if (typeof rol === 'string' && rol.trim() !== '') {
+        rawList = rol.split(',').map(r => r.trim()).filter(Boolean);
+    } else {
+        rawList = ['Docente'];
+    }
+
+    const canonicalMap = {
+        'docente': 'Docente',
+        'director': 'Director',
+        'consultor': 'Consultor',
+        'planeacion': 'Planeacion'
+    };
+
+    const uniqueSet = new Set();
+    for (const r of rawList) {
+        if (!r) continue;
+        const norm = normalizeRolName(r);
+        const canon = canonicalMap[norm] || r.trim();
+        if (canon) uniqueSet.add(canon);
+    }
+
+    return uniqueSet.size > 0 ? Array.from(uniqueSet) : ['Docente'];
 };
 
 const isOnlyConsultorOrPlaneacion = (rolesList) => {
@@ -271,7 +289,7 @@ const create = async (req, res) => {
             if (roleResult.rows.length > 0) {
                 const idRol = roleResult.rows[0].id_rol;
                 await pool.query(
-                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
                     [nuevoUsuario.id_usuario, idRol]
                 );
             }
@@ -399,6 +417,23 @@ const createBulk = async (req, res) => {
             const correo = u.correo || u['correo'] || u['Correo'] || u['Correo Institucional'] || '';
             const correoStr = String(correo).trim().toLowerCase();
             const docStr = String(numDoc).trim();
+
+            // Ignorar filas de ejemplo o marcas de agua de la plantilla
+            const nombresLow = nombres.toLowerCase();
+            const apellidosLow = apellidos.toLowerCase();
+            if (
+                nombresLow.startsWith('ej:') || 
+                nombresLow.startsWith('ej.') ||
+                apellidosLow.startsWith('ej:') || 
+                apellidosLow.startsWith('ej.') ||
+                nombresLow.includes('ejemplo') ||
+                correoStr.includes('ejemplo') ||
+                correoStr.startsWith('ej:') ||
+                docStr.startsWith('ej:') ||
+                docStr === '0000000000'
+            ) {
+                continue;
+            }
 
             if (!nombres || !apellidos || !correoStr || !docStr) {
                 errores.push({
@@ -685,7 +720,7 @@ const update = async (req, res) => {
             if (roleResult.rows.length > 0) {
                 const idRol = roleResult.rows[0].id_rol;
                 await pool.query(
-                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
                     [id, idRol]
                 );
             }

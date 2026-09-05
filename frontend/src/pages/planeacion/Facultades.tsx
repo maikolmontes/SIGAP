@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
+import { usePermisosPagina } from '../../hooks/usePermisos'
 import { 
     Library, 
     GraduationCap, 
@@ -31,6 +32,8 @@ interface Facultad {
 }
 
 export default function Facultades() {
+    const { puedeCrear, puedeEditar, puedeEliminar } = usePermisosPagina('Facultades')
+
     const [facultades, setFacultades] = useState<Facultad[]>([])
     const [totalProgramas, setTotalProgramas] = useState<number>(0)
     const [cargando, setCargando] = useState<boolean>(true)
@@ -242,6 +245,7 @@ export default function Facultades() {
                             Administra las facultades institucionales del ecosistema UNICESMAG.
                         </p>
                     </div>
+                    {puedeCrear && (
                     <button
                         onClick={() => { limpiarFormulario(); setModalCrearOpen(true); }}
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-[#00a896] hover:bg-[#029081] text-white rounded-xl shadow-sm text-sm font-medium transition-all transform hover:scale-[1.02]"
@@ -249,6 +253,7 @@ export default function Facultades() {
                         <Plus className="w-4 h-4" />
                         Agregar Facultad
                     </button>
+                    )}
                 </div>
 
                 {/* Estadísticas Superiores */}
@@ -343,6 +348,7 @@ export default function Facultades() {
                                     </span>
 
                                     <div className="flex items-center gap-2">
+                                        {puedeEditar && (
                                         <button
                                             onClick={() => abrirEditarModal(f)}
                                             className="p-1.5 hover:bg-sky-50 text-[#063759] hover:text-sky-600 rounded-lg transition-colors"
@@ -350,6 +356,8 @@ export default function Facultades() {
                                         >
                                             <Edit className="w-4 h-4" />
                                         </button>
+                                        )}
+                                        {puedeEliminar && (
                                         <button
                                             onClick={() => abrirEliminarModal(f)}
                                             className="p-1.5 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-lg transition-colors"
@@ -357,6 +365,7 @@ export default function Facultades() {
                                         >
                                             <Trash2 className="w-4 h-4" />
                                         </button>
+                                        )}
                                     </div>
                                 </div>
                             </div>
