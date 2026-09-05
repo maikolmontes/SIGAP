@@ -1,12 +1,24 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
-import * as XLSX from 'xlsx'
 import api from '../../services/api'
 // @ts-ignore
 import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios, updateUsuario, deleteUsuario } from '../../services/usuariosService'
 import { getPeriodos } from '../../services/periodosService'
-import { Library, GraduationCap } from 'lucide-react'
+import { getProgramas } from '../../services/programasService'
+import { exportarDocentesExcel } from '../../utils/exportExcelDocentes'
+import * as XLSX from 'xlsx'
+import { 
+    Library, 
+    GraduationCap, 
+    CheckCircle2, 
+    XCircle, 
+    RefreshCw, 
+    Clock, 
+    TrendingUp, 
+    CheckCircle, 
+    AlertCircle 
+} from 'lucide-react'
 
 interface Periodo {
     id_periodo: number
@@ -47,12 +59,16 @@ interface AgendaStat {
 
 export default function DashboardPlaneacion() {
     const [docentes, setDocentes] = useState<Docente[]>([])
+    const [programas, setProgramas] = useState<any[]>([])
     const [agendaStats, setAgendaStats] = useState<AgendaStat[]>([])
     const [agendaMetricas, setAgendaMetricas] = useState<any>(null)
+    const [ultimaActualizacionAgendas, setUltimaActualizacionAgendas] = useState<string>('')
+    const [cargandoAgendas, setCargandoAgendas] = useState(false)
     const [busqueda, setBusqueda] = useState('')
     const [filtroEstado, setFiltroEstado] = useState<'Todos' | 'Activos' | 'Inactivos'>('Todos')
     const [cargando, setCargando] = useState(true)
     const [error, setError] = useState('')
+    const [toast, setToast] = useState<{ tipo: 'exito' | 'error'; mensaje: string } | null>(null)
     const navigate = useNavigate()
     // New state for active period
     const [periodoActivo, setPeriodoActivo] = useState<Periodo | null>(null)
@@ -81,19 +97,34 @@ export default function DashboardPlaneacion() {
     const [guardando, setGuardando] = useState(false)
     const [eliminando, setEliminando] = useState(false)
 
+    const normalizarRol = (r: string) => {
+        const low = (r || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+        if (low.includes('planea') || low.includes('admin')) return 'planeacion';
+        if (low.includes('direct')) return 'director';
+        if (low.includes('consult')) return 'consultor';
+        return 'docente';
+    };
+
+    const rolEstaSeleccionado = (lista: string[], rolName: string) => {
+        const normTarget = normalizarRol(rolName);
+        return lista.some(r => normalizarRol(r) === normTarget);
+    };
+
     const esSoloConsultorOPlaneacion = (list: string[]) => {
         if (!list || list.length === 0) return false;
         return list.every(r => {
-            const low = r.toLowerCase();
-            return low.includes('consult') || low.includes('planea');
+            const norm = normalizarRol(r);
+            return norm === 'consultor' || norm === 'planeacion';
         });
     }
 
     const toggleEditRol = (rolName: string) => {
+        const normTarget = normalizarRol(rolName);
         setEditRolesSeleccionados(prev => {
-            if (prev.includes(rolName)) {
-                if (prev.length === 1) return prev;
-                return prev.filter(r => r !== rolName);
+            const yaExiste = prev.some(r => normalizarRol(r) === normTarget);
+            if (yaExiste) {
+                if (prev.length <= 1) return prev;
+                return prev.filter(r => normalizarRol(r) !== normTarget);
             } else {
                 return [...prev, rolName];
             }
@@ -101,12 +132,13 @@ export default function DashboardPlaneacion() {
     }
 
     const mapProgramaToId = (progName?: string) => {
-        if (!progName) return 1;
-        const name = progName.toLowerCase();
-        if (name.includes('electrónica') || name.includes('electronica')) return 2;
-        if (name.includes('industrial')) return 3;
-        if (name.includes('financiera')) return 4;
-        return 1;
+        if (!progName || programas.length === 0) return programas[0]?.id_programa || 1;
+        const low = progName.toLowerCase().trim();
+        const exact = programas.find((p: any) => p.nombre_programa.toLowerCase().trim() === low);
+        if (exact) return exact.id_programa;
+        const partial = programas.find((p: any) => p.nombre_programa.toLowerCase().includes(low) || low.includes(p.nombre_programa.toLowerCase()));
+        if (partial) return partial.id_programa;
+        return programas[0]?.id_programa || 1;
     }
 
     const handleOpenEditModal = (d: Docente) => {
@@ -118,7 +150,15 @@ export default function DashboardPlaneacion() {
         setEditCorreo(d.correo)
         setEditIdPrograma(mapProgramaToId(d.programa))
         const parsedRoles = (d.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean)
-        setEditRolesSeleccionados(parsedRoles.length > 0 ? parsedRoles : ['Docente'])
+        const mappedRoles = parsedRoles.map(r => {
+            const norm = normalizarRol(r);
+            if (norm === 'planeacion') return 'Planeación';
+            if (norm === 'director') return 'Director';
+            if (norm === 'consultor') return 'Consultor';
+            return 'Docente';
+        });
+        const uniqueMapped = Array.from(new Set(mappedRoles));
+        setEditRolesSeleccionados(uniqueMapped.length > 0 ? uniqueMapped : ['Docente'])
         setEditError(null)
         setEditWarning(null)
         setModalEditarOpen(true)
@@ -196,8 +236,12 @@ export default function DashboardPlaneacion() {
     const cargarDocentes = useCallback(async () => {
         try {
             setCargando(true)
-            const res = await getUsuarios()
+            const [res, resProgs] = await Promise.all([
+                getUsuarios(),
+                getProgramas().catch(() => ({ data: [] }))
+            ])
             setDocentes(res.data)
+            setProgramas(resProgs.data || [])
         } catch {
             setError('No se pudieron cargar los docentes')
         } finally {
@@ -207,10 +251,15 @@ export default function DashboardPlaneacion() {
 
     const cargarAgendas = useCallback(async () => {
         try {
+            setCargandoAgendas(true)
             const res = await api.get('/director/dashboard')
             setAgendaStats(res.data.docentes || [])
             setAgendaMetricas(res.data.metricas || null)
+            setUltimaActualizacionAgendas(new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
         } catch { /* silently ignore */ }
+        finally {
+            setCargandoAgendas(false)
+        }
     }, [])
 
     useEffect(() => {
@@ -244,18 +293,23 @@ export default function DashboardPlaneacion() {
     const handleToggle = async (id: number) => {
         try {
             setEditandoId(id)
-            await toggleActivo(id)
+            const res = await toggleActivo(id)
+            const nuevoEstado = res.data.activo
             setDocentes(prev =>
-                prev.map(d => d.id_usuario === id ? { ...d, activo: !d.activo } : d)
+                prev.map(d => d.id_usuario === id ? { ...d, activo: nuevoEstado } : d)
             )
+            const doc = docentes.find(d => d.id_usuario === id);
+            setToast({
+                tipo: 'exito',
+                mensaje: `Usuario ${doc ? `${doc.nombres} ${doc.apellidos}` : ''} ha sido ${nuevoEstado ? 'habilitado' : 'inhabilitado'} exitosamente.`
+            })
+            setTimeout(() => setToast(null), 4000)
         } catch {
             setError('Error al cambiar el estado del docente')
         } finally {
             setEditandoId(null)
         }
     }
-
-
 
     const handleDownloadTemplate = () => {
         const link = document.createElement('a');
@@ -279,7 +333,7 @@ export default function DashboardPlaneacion() {
             const worksheet = workbook.Sheets[workbook.SheetNames[0]]
             const jsonData = XLSX.utils.sheet_to_json<any>(worksheet)
 
-            const payload = jsonData.map(row => {
+            const payload = jsonData.map((row: any) => {
                 const userRol = row.Rol || row.rol || 'Docente';
                 const isPl = userRol.toLowerCase().includes('plane');
                 return {
@@ -292,7 +346,7 @@ export default function DashboardPlaneacion() {
                     facultad: isPl ? null : 'Ingeniería',
                     rol: userRol
                 };
-            }).filter(u => u.nombres && u.apellidos && u.correo)
+            }).filter((u: any) => u.nombres && u.apellidos && u.correo)
 
             if (payload.length === 0) {
                 setError('El Excel no tiene datos válidos. Revisa las columnas (Nombres, Apellidos, Correo, Tipo Documento, Número Documento, Programa Académico, Rol).')
@@ -312,27 +366,16 @@ export default function DashboardPlaneacion() {
         }
     }
 
-    const handleExportar = () => {
-        const encabezado = [['Nombres', 'Apellidos', 'Correo', 'Tipo Documento', 'Número Documento', 'Programa Académico', 'Facultad', 'Tipo Contrato', 'Roles', 'Estado']]
-        const filas = docentes.map(d => {
-            const isPl = d.roles && d.roles.toLowerCase().includes('plane');
-            return [
-                d.nombres,
-                d.apellidos,
-                d.correo,
-                d.tipo_documento || 'CC',
-                d.numero_documento || '0000000000',
-                isPl ? 'No aplica' : (d.programa || 'Sin Asignar'),
-                isPl ? 'No aplica' : (d.facultad || 'Ingeniería'),
-                d.tipo_contrato || 'Hora Cátedra',
-                d.roles || 'Docente',
-                d.activo ? 'Habilitado' : 'Bloqueado'
-            ];
-        });
-        const ws = XLSX.utils.aoa_to_sheet([...encabezado, ...filas])
-        const wb = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(wb, ws, "Docentes")
-        XLSX.writeFile(wb, "docentes_SIGAP.xlsx")
+    const handleExportar = async () => {
+        try {
+            await exportarDocentesExcel(
+                docentes,
+                periodoActivo ? `Período ${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : undefined
+            )
+        } catch (err) {
+            console.error('Error al exportar Excel:', err)
+            alert('Ocurrió un error al generar el reporte Excel.')
+        }
     }
 
     return (
@@ -347,6 +390,25 @@ export default function DashboardPlaneacion() {
                     </p>
                 </div>
             </div>
+
+            {/* ── Toast de Feedback / Notificaciones ── */}
+            {toast && (
+                <div className={`mb-4 px-4 py-3 rounded-xl border flex items-center justify-between text-sm font-medium transition-all animate-in fade-in slide-in-from-top-2 duration-200 ${
+                    toast.tipo === 'error'
+                        ? 'bg-red-50 border-red-200 text-red-700'
+                        : 'bg-green-50 border-green-200 text-green-700'
+                }`}>
+                    <div className="flex items-center gap-2">
+                        {toast.tipo === 'error' ? (
+                            <svg className="w-5 h-5 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        ) : (
+                            <svg className="w-5 h-5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                        )}
+                        <span>{toast.mensaje}</span>
+                    </div>
+                    <button onClick={() => setToast(null)} className="text-gray-400 hover:text-gray-600 font-bold ml-4">✕</button>
+                </div>
+            )}
 
             {/* ── Métricas (Cards) ── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -569,13 +631,22 @@ export default function DashboardPlaneacion() {
                                                 <td className="px-4 py-3 text-gray-700">{d.apellidos}</td>
                                                 <td className="px-4 py-3 text-gray-500 text-xs">{d.correo}</td>
                                                 <td className="px-4 py-3 text-center">
-                                                    <button
-                                                        onClick={() => handleToggle(d.id_usuario)}
-                                                        disabled={editandoId === d.id_usuario}
-                                                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${d.activo ? 'bg-green-500' : 'bg-gray-300'}`}
-                                                    >
-                                                        <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${d.activo ? 'translate-x-4' : 'translate-x-1'}`} />
-                                                    </button>
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                                            d.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'
+                                                        }`}>
+                                                            <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${d.activo ? 'bg-green-500' : 'bg-red-400'}`}></span>
+                                                            {d.activo ? 'Activo' : 'Inactivo'}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => handleToggle(d.id_usuario)}
+                                                            disabled={editandoId === d.id_usuario}
+                                                            title={d.activo ? 'Desactivar docente' : 'Activar docente'}
+                                                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${d.activo ? 'bg-green-500' : 'bg-gray-300'} disabled:opacity-50`}
+                                                        >
+                                                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${d.activo ? 'translate-x-4' : 'translate-x-1'}`} />
+                                                        </button>
+                                                    </div>
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
                                                     <div className="flex items-center justify-center gap-1.5">
@@ -611,11 +682,51 @@ export default function DashboardPlaneacion() {
                 </>
             ) : (
                 <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-                    <div className="flex items-center justify-between mb-6">
-                        <h2 className="text-lg font-bold text-gray-800">Estado de Agendas (Tiempo Real)</h2>
-                        <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium animate-pulse">
-                            <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
-                            Actualización automática
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+                        <div>
+                            <h2 className="text-lg font-bold text-gray-800">Estado de Agendas (Tiempo Real)</h2>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                                Monitoreo y métricas de carga académica del período activo
+                                {ultimaActualizacionAgendas && (
+                                    <span className="ml-1 text-gray-400">· Actualizado: {ultimaActualizacionAgendas}</span>
+                                )}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={cargarAgendas}
+                                disabled={cargandoAgendas}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                <svg className={`w-3.5 h-3.5 ${cargandoAgendas ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                {cargandoAgendas ? 'Actualizando...' : 'Actualizar ahora'}
+                            </button>
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 border border-green-200 rounded-full text-xs font-semibold">
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-ping"></span>
+                                Tiempo Real
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Resumen KPIs de Agendas */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Total Agendas</p>
+                            <p className="text-xl font-black text-gray-800 mt-0.5">{agendaMetricas.total}</p>
+                        </div>
+                        <div className="bg-green-50/70 border border-green-200 rounded-lg p-3">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-green-700">Aceptadas</p>
+                            <p className="text-xl font-black text-green-800 mt-0.5">{agendaMetricas.aceptadas}</p>
+                        </div>
+                        <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-3">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pendientes / Revisión</p>
+                            <p className="text-xl font-black text-amber-800 mt-0.5">{agendaMetricas.pendientes}</p>
+                        </div>
+                        <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-3">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Total Horas Asignadas</p>
+                            <p className="text-xl font-black text-blue-800 mt-0.5">{agendaMetricas.total_horas}h</p>
                         </div>
                     </div>
 
@@ -818,7 +929,7 @@ export default function DashboardPlaneacion() {
                                 </label>
                                 <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
                                     {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
-                                        const isChecked = editRolesSeleccionados.includes(rItem);
+                                        const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
                                         return (
                                             <label
                                                 key={rItem}
@@ -866,10 +977,20 @@ export default function DashboardPlaneacion() {
                                             <option value="">Deshabilitado (Sin asignación académica)</option>
                                         ) : (
                                             <>
-                                                <option value={1}>Ingeniería de Sistemas</option>
-                                                <option value={2}>Ingeniería Electrónica</option>
-                                                <option value={3}>Ingeniería Industrial</option>
-                                                <option value={4}>Ingeniería Financiera</option>
+                                                {programas.length > 0 ? (
+                                                    programas.map((prog) => (
+                                                        <option key={prog.id_programa} value={prog.id_programa}>
+                                                            {prog.nombre_programa}
+                                                        </option>
+                                                    ))
+                                                ) : (
+                                                    <>
+                                                        <option value={1}>Ingeniería de Sistemas</option>
+                                                        <option value={2}>Ingeniería Electrónica</option>
+                                                        <option value={3}>Ingeniería Industrial</option>
+                                                        <option value={6}>Ingeniería Financiera</option>
+                                                    </>
+                                                )}
                                             </>
                                         )}
                                     </select>

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Users, Settings, Eye, ChevronRight, LogOut, Check, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+// @ts-ignore
+import api from '../../services/api';
 
 interface Rol {
   id_rol: number;
@@ -26,20 +28,24 @@ const RoleSelection = () => {
           return;
         }
 
-        const response = await fetch('http://localhost:3000/api/user/roles', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const response = await api.get('/user/roles');
+        const data: Rol[] = response.data;
 
-        if (!response.ok) {
-          throw new Error('No se pudieron obtener los roles');
+        // Deduplicar estrictamente por nombre canónico de rol
+        const seen = new Set<string>();
+        const uniqueRoles: Rol[] = [];
+        for (const r of data) {
+          const key = (r.nombre_rol || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueRoles.push(r);
+          }
         }
 
-        const data = await response.json();
-
-        if (data.length === 1) {
-          handleRoleSelection(data[0]);
+        if (uniqueRoles.length === 1) {
+          handleRoleSelection(uniqueRoles[0]);
         } else {
-          setRoles(data);
+          setRoles(uniqueRoles);
           setIsLoading(false);
         }
       } catch (error) {

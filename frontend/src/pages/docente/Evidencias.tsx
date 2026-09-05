@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
+import api, { getArchivoUrl } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
 import { FileText, FileImage, FileArchive, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, AlertCircle, Calendar, Target, X, Eye, FileSpreadsheet } from 'lucide-react';
 
 interface Evidencia {
@@ -137,7 +137,7 @@ const Evidencias: React.FC = () => {
 
     const getFileUrl = (ev: Evidencia) => {
         if (ev.tipo_archivo === 'enlace') return ev.ruta_archivo;
-        return `http://localhost:3000${ev.ruta_archivo}`;
+        return getArchivoUrl(ev.ruta_archivo);
     };
 
     const isImage = (type: string) => type && type.startsWith('image/');

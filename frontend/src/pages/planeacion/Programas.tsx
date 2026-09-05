@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
+import { usePermisosPagina } from '../../hooks/usePermisos'
 import { 
     GraduationCap, 
     Library, 
@@ -39,6 +40,8 @@ interface Programa {
 }
 
 export default function Programas() {
+    const { puedeCrear, puedeEditar, puedeEliminar } = usePermisosPagina('Programas')
+
     const [programas, setProgramas] = useState<Programa[]>([])
     const [facultades, setFacultades] = useState<Facultad[]>([])
     const [cargando, setCargando] = useState<boolean>(true)
@@ -271,6 +274,7 @@ export default function Programas() {
                             Administra los programas académicos vinculados a cada facultad de UNICESMAG.
                         </p>
                     </div>
+                    {puedeCrear && (
                     <button
                         onClick={() => { limpiarFormulario(); setModalCrearOpen(true); }}
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-[#00a896] hover:bg-[#029081] text-white rounded-xl shadow-sm text-sm font-medium transition-all transform hover:scale-[1.02]"
@@ -278,6 +282,7 @@ export default function Programas() {
                         <Plus className="w-4 h-4" />
                         Agregar Programa
                     </button>
+                    )}
                 </div>
 
                 {/* Filtros e interacciones */}
@@ -380,6 +385,7 @@ export default function Programas() {
                                             </td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className="flex items-center justify-end gap-2">
+                                                    {puedeEditar && (
                                                     <button
                                                         onClick={() => abrirEditarModal(p)}
                                                         className="p-1.5 hover:bg-sky-50 text-[#063759] hover:text-sky-600 rounded-lg transition-colors"
@@ -387,6 +393,8 @@ export default function Programas() {
                                                     >
                                                         <Edit className="w-4 h-4" />
                                                     </button>
+                                                    )}
+                                                    {puedeEliminar && (
                                                     <button
                                                         onClick={() => abrirEliminarModal(p)}
                                                         className="p-1.5 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-lg transition-colors"
@@ -394,6 +402,7 @@ export default function Programas() {
                                                     >
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
