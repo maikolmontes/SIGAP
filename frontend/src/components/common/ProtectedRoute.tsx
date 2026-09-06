@@ -78,26 +78,6 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
     const [tienePermiso, setTienePermiso] = useState<boolean | null>(null);
     const [nombrePaginaActual, setNombrePaginaActual] = useState('');
 
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div>
-            </div>
-        );
-    }
-
-    if (!isAuthenticated) {
-        return <Navigate to="/login" state={{ from: location }} replace />;
-    }
-
-    // Si se especificaron roles permitidos, verificar que el usuario tenga al menos uno
-    if (allowedRoles && user?.roles) {
-        const hasRole = allowedRoles.some(role => user.roles.includes(role));
-        if (!hasRole) {
-            return <Navigate to="/login" replace />;
-        }
-    }
-
     // Para proteger las rutas del docente si su perfil está incompleto
     const activeRole = (() => {
         try {
@@ -113,6 +93,10 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
 
     useEffect(() => {
         const checkProfile = async () => {
+            if (isLoading || !isAuthenticated || !user) {
+                return;
+            }
+
             if (!isDocenteRoute) {
                 setIsCheckingProfile(false);
                 return;
@@ -134,11 +118,15 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
         };
 
         checkProfile();
-    }, [isDocenteRoute, user]);
+    }, [isDocenteRoute, user, isLoading, isAuthenticated]);
 
     // Verificar permiso de "Ver" para la página actual
     useEffect(() => {
         const verificarPermisoPagina = async () => {
+            if (isLoading || !isAuthenticated || !user) {
+                return;
+            }
+
             // Determinar nombre de página desde la ruta actual
             const pathname = location.pathname;
             
@@ -216,7 +204,27 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
         };
 
         verificarPermisoPagina();
-    }, [location.pathname]);
+    }, [location.pathname, isLoading, isAuthenticated, user]);
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div>
+            </div>
+        );
+    }
+
+    if (!isAuthenticated) {
+        return <Navigate to="/login" state={{ from: location }} replace />;
+    }
+
+    // Si se especificaron roles permitidos, verificar que el usuario tenga al menos uno
+    if (allowedRoles && user?.roles) {
+        const hasRole = allowedRoles.some(role => user.roles.includes(role));
+        if (!hasRole) {
+            return <Navigate to="/login" replace />;
+        }
+    }
 
     // Loading para verificación de perfil docente
     if (isDocenteRoute && isCheckingProfile) {
