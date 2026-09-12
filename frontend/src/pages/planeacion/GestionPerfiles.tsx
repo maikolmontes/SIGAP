@@ -56,8 +56,8 @@ export default function GestionPerfiles() {
 
             // Inicializar estado local de selección
             const localMap: Record<number, Set<number>> = {}
-            for (const r of (rolesData || [])) {
-                const arr = (asignaciones && asignaciones[r.id_rol]) || []
+            for (const r of rolesData) {
+                const arr = asignaciones[r.id_rol] || []
                 localMap[r.id_rol] = new Set(arr)
             }
             setPermisosLocales(localMap)

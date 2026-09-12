@@ -106,10 +106,11 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
             }
 
             const userId = user?.id || (user as any)?.id_usuario;
-            if (userId) {
+            const token = localStorage.getItem('sigap_token');
+            if (userId && token) {
                 try {
                     const response = await api.get(`/usuarios/${userId}/perfil-completo`);
-                    setIsProfileComplete(response.data?.perfil_completo ?? false);
+                    setIsProfileComplete(response.data.perfil_completo);
                 } catch (error) {
                     setIsProfileComplete(false);
                 }
@@ -222,11 +223,7 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
 
     // Si se especificaron roles permitidos, verificar que el usuario tenga al menos uno
     if (allowedRoles && user?.roles) {
-        const normUserRoles = user.roles.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const hasRole = allowedRoles.some(role => {
-            const normRole = role.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            return normUserRoles.includes(normRole);
-        });
+        const hasRole = allowedRoles.some(role => user.roles.includes(role));
         if (!hasRole) {
             return <Navigate to="/login" replace />;
         }

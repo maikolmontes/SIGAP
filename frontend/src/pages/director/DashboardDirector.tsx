@@ -6,7 +6,8 @@ import {
   Upload, UploadCloud, X, BookOpen, Calendar, Lock,
   FileBarChart2, ChevronRight, RefreshCw, Trash2, ChevronDown, ChevronUp, UserX, Info
 } from 'lucide-react';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+
 const PIE_COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ef4444'];
 
 const getEstadoDocente = (d: any) => {
@@ -379,10 +380,11 @@ export default function DashboardDirector() {
                   disabled={uploading || importacionRealizada}
                   onClick={() => fileInputRef.current?.click()}
                   title={importacionRealizada ? 'Ya se importó para este periodo. Use Actualizar.' : 'Importar desde cero para el periodo activo'}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md ${importacionRealizada
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md ${
+                    importacionRealizada
                       ? 'bg-gray-500/40 text-gray-400 cursor-not-allowed border border-gray-600/30'
                       : uploading ? 'bg-indigo-400 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                    }`}
+                  }`}
                 >
                   {uploading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <UploadCloud className="w-4 h-4" />}
                   {importacionRealizada ? 'Ya Importado ✓' : uploading ? 'Procesando...' : 'Importar (Nuevo)'}
@@ -473,10 +475,11 @@ export default function DashboardDirector() {
                         setModoSeleccion(v => !v);
                         setDocentesParaEliminar(new Set());
                       }}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${modoSeleccion
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                        modoSeleccion
                           ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
                           : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                        }`}
+                      }`}
                       title={modoSeleccion ? 'Cancelar selección' : 'Seleccionar docentes para eliminar agenda'}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -550,14 +553,15 @@ export default function DashboardDirector() {
                         <tr
                           key={d.id_usuario}
                           onClick={() => modoSeleccion ? toggleSeleccionDocente(d.id_usuario) : cargarDistribucionDocente(d)}
-                          className={`transition-colors cursor-pointer group ${modoSeleccion
+                          className={`transition-colors cursor-pointer group ${
+                            modoSeleccion
                               ? isChecked
                                 ? 'bg-rose-50 border-l-4 border-rose-500'
                                 : 'hover:bg-rose-50/40 border-l-4 border-transparent'
                               : isSelected
                                 ? 'bg-blue-50 border-l-4 border-blue-500'
                                 : 'hover:bg-blue-50/40 border-l-4 border-transparent'
-                            }`}
+                          }`}
                         >
                           {modoSeleccion && (
                             <td className="px-3 py-3.5 text-center" onClick={e => e.stopPropagation()}>
@@ -583,9 +587,9 @@ export default function DashboardDirector() {
                           <td className="px-5 py-3.5">
                             <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-100">{d.tipo_contrato}</span>
                             <div className="mt-1.5">
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${d.perfil_docente === 'INCONSISTENCIAS EN AGENDA AC 30' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
-                                {d.perfil_docente || 'Calculando...'}
-                              </span>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${d.perfil_docente === 'INCONSISTENCIAS EN AGENDA AC 30' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
+                                    {d.perfil_docente || 'Calculando...'}
+                                </span>
                             </div>
                           </td>
                           <td className="px-5 py-3.5 text-center font-bold text-gray-700">

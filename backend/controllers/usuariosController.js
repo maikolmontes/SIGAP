@@ -97,52 +97,9 @@ const getById = async (req, res) => {
     }
 };
 
-let esquemaUsuariosVerificado = false;
-
-async function asegurarEsquemaUsuarios(clientOrPool) {
-    if (esquemaUsuariosVerificado) return;
-    try {
-        // 1. Limpiar duplicados en usuario_rol
-        await clientOrPool.query(`
-            DELETE FROM usuario_rol a
-            USING usuario_rol b
-            WHERE a.id_usuariorol > b.id_usuariorol
-              AND a.id_usuario = b.id_usuario
-              AND a.id_rol = b.id_rol
-        `);
-
-        // 2. Asegurar que la restricción UNIQUE existe en usuario_rol(id_usuario, id_rol)
-        await clientOrPool.query(`
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'usuario_rol_user_rol_unique'
-                ) THEN
-                    ALTER TABLE usuario_rol ADD CONSTRAINT usuario_rol_user_rol_unique UNIQUE (id_usuario, id_rol);
-                END IF;
-            END $$;
-        `);
-
-        // 3. Asegurar los 4 roles básicos
-        await clientOrPool.query(`
-            INSERT INTO roles (id_rol, nombre_rol, descripcion_rol)
-            VALUES 
-                (1, 'Planeacion', 'Crea usuarios, activa semanas 8/16 y gestiona funciones'),
-                (2, 'Docente', 'Elige funciones, asigna horas y sube evidencias por indicador'),
-                (3, 'Director', 'Revisa agendas, deja observaciones y notifica docentes'),
-                (4, 'Consultor', 'Visualiza agendas, actividades, avances e indicadores en modo solo lectura')
-            ON CONFLICT (id_rol) DO NOTHING;
-        `);
-
-        esquemaUsuariosVerificado = true;
-    } catch (err) {
-        console.warn('Aviso al verificar esquema de usuarios y roles:', err.message);
-    }
-}
-
 const normalizeRolName = (rName) => {
     if (!rName) return 'docente';
-    const low = String(rName).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const low = rName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (low.includes('planea') || low.includes('admin')) return 'planeacion';
     if (low.includes('decano')) return 'decano';
     if (low.includes('direct')) return 'director';
@@ -181,10 +138,6 @@ const parseRoles = (roles, rol) => {
     let rawList = [];
     if (Array.isArray(roles) && roles.length > 0) {
         rawList = roles;
-    } else if (Array.isArray(rol) && rol.length > 0) {
-        rawList = rol;
-    } else if (typeof roles === 'string' && roles.trim() !== '') {
-        rawList = roles.split(',').map(r => r.trim()).filter(Boolean);
     } else if (typeof rol === 'string' && rol.trim() !== '') {
         rawList = rol.split(',').map(r => r.trim()).filter(Boolean);
     } else {
@@ -201,21 +154,9 @@ const parseRoles = (roles, rol) => {
 
     const uniqueSet = new Set();
     for (const r of rawList) {
-        if (r === undefined || r === null) continue;
-        let str = '';
-        if (typeof r === 'string') {
-            str = r;
-        } else if (typeof r === 'object') {
-            str = r.nombre_rol || r.rol || r.name || '';
-        } else if (typeof r === 'number') {
-            if (r === 1) str = 'Planeacion';
-            else if (r === 2) str = 'Docente';
-            else if (r === 3) str = 'Director';
-            else if (r === 4) str = 'Consultor';
-        }
-        if (!str || !str.trim()) continue;
-        const norm = normalizeRolName(str);
-        const canon = canonicalMap[norm] || str.trim();
+        if (!r) continue;
+        const norm = normalizeRolName(r);
+        const canon = canonicalMap[norm] || r.trim();
         if (canon) uniqueSet.add(canon);
     }
 
@@ -311,19 +252,14 @@ const create = async (req, res) => {
     const docNum = numero_documento ? String(numero_documento).trim() : '';
     const emailStr = correo ? String(correo).trim().toLowerCase() : '';
 
-    const client = await pool.connect();
-
     try {
-        await asegurarEsquemaUsuarios(client);
-
         // 1. Validar Identificación duplicada
         if (docNum) {
-            const dupDoc = await client.query(
+            const dupDoc = await pool.query(
                 'SELECT id_usuario FROM usuarios WHERE numero_documento = $1',
                 [docNum]
             );
             if (dupDoc.rows.length > 0) {
-                client.release();
                 return res.status(409).json({
                     error: `Ya existe un docente/usuario registrado con la identificación ${docNum}.`,
                     campo: 'numero_documento'
@@ -333,12 +269,11 @@ const create = async (req, res) => {
 
         // 2. Validar Correo duplicado
         if (emailStr) {
-            const dupEmail = await client.query(
+            const dupEmail = await pool.query(
                 'SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1)',
                 [emailStr]
             );
             if (dupEmail.rows.length > 0) {
-                client.release();
                 return res.status(409).json({
                     error: `Ya existe un docente/usuario registrado con el correo institucional ${emailStr}.`,
                     campo: 'correo'
@@ -349,7 +284,7 @@ const create = async (req, res) => {
         // 3. Verificar coincidencia por Nombre (Advertencia)
         let advertencia = null;
         if (nombres && apellidos) {
-            const dupName = await client.query(
+            const dupName = await pool.query(
                 'SELECT id_usuario FROM usuarios WHERE LOWER(TRIM(nombres)) = LOWER(TRIM($1)) AND LOWER(TRIM(apellidos)) = LOWER(TRIM($2))',
                 [nombres.trim(), apellidos.trim()]
             );
@@ -358,13 +293,13 @@ const create = async (req, res) => {
             }
         }
 
-        await client.query('BEGIN');
+        await pool.query('BEGIN'); // Iniciar transacción
 
         // Buscar periodo activo
-        const periodRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
         const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
 
-        const result = await client.query(`
+        const result = await pool.query(`
             INSERT INTO usuarios
                 (nombres, apellidos, tipo_documento,
                  numero_documento, correo,
@@ -384,24 +319,14 @@ const create = async (req, res) => {
 
         const nuevoUsuario = result.rows[0];
 
-        // Cargar roles en memoria para mapeo exacto
-        const rolesDb = await client.query('SELECT id_rol, nombre_rol FROM roles');
-        const roleMap = new Map();
-        for (const r of rolesDb.rows) {
-            const norm = normalizeRolName(r.nombre_rol);
-            roleMap.set(norm, r.id_rol);
-            roleMap.set(r.nombre_rol.toLowerCase(), r.id_rol);
-        }
-
         // Insertar múltiples roles
         for (const rName of rolesList) {
-            const idRol = await resolverIdRol(rName) || roleMap.get(normalizeRolName(rName)) || roleMap.get(rName.toLowerCase());
+            const idRol = await resolverIdRol(rName);
             if (idRol) {
-                await client.query(`
-                    INSERT INTO usuario_rol (id_usuario, id_rol)
-                    VALUES ($1, $2)
-                    ON CONFLICT (id_usuario, id_rol) DO NOTHING
-                `, [nuevoUsuario.id_usuario, idRol]);
+                await pool.query(
+                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
+                    [nuevoUsuario.id_usuario, idRol]
+                );
             } else {
                 console.warn(`No se encontró el rol: ${rName}`);
             }
@@ -414,58 +339,42 @@ const create = async (req, res) => {
         });
 
         if (idPeriodoActivo && tieneRolAcademico) {
-            await client.query(`
+            await pool.query(`
                 INSERT INTO docente_periodo (id_usuario, id_periodo)
                 VALUES ($1, $2)
-                ON CONFLICT (id_usuario, id_periodo) DO NOTHING
+                ON CONFLICT DO NOTHING
             `, [nuevoUsuario.id_usuario, idPeriodoActivo]);
 
             // Asegurar programa_periodo para el programa seleccionado
             if (progId) {
-                const existeProgPer = await client.query(
+                const existeProgPer = await pool.query(
                     'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
                     [progId, idPeriodoActivo]
                 );
                 if (existeProgPer.rows.length === 0) {
-                    const pensul = await client.query(
+                    const pensul = await pool.query(
                         'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
                     );
                     const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-                    await client.query(`
+                    await pool.query(`
                         INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
                         VALUES ($1, $2, $3)
-                        ON CONFLICT DO NOTHING
                     `, [idPeriodoActivo, progId, id_pensulaca]);
                 }
             }
         }
 
-        // Obtener roles finales guardados
-        const rolesGuardadosRes = await client.query(`
-            SELECT STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
-            FROM usuario_rol ur
-            JOIN roles r ON ur.id_rol = r.id_rol
-            WHERE ur.id_usuario = $1
-        `, [nuevoUsuario.id_usuario]);
-
-        await client.query('COMMIT');
-
-        const rolesFinales = rolesGuardadosRes.rows[0]?.roles || rolesList.join(', ');
-
+        await pool.query('COMMIT');
         res.status(201).json({
             ...nuevoUsuario,
-            roles: rolesFinales,
+            roles: rolesList.join(', '),
             advertencia
         });
 
     } catch (error) {
-        try {
-            await client.query('ROLLBACK');
-        } catch (_) {}
+        await pool.query('ROLLBACK');
         console.error('Error en create usuario:', error);
-        res.status(500).json({ error: 'Error al crear el usuario en la base de datos: ' + error.message });
-    } finally {
-        client.release();
+        res.status(500).json({ error: 'Error al crear el usuario en la base de datos.' });
     }
 };
 
@@ -476,12 +385,8 @@ const createBulk = async (req, res) => {
         return res.status(400).json({ error: 'No se enviaron usuarios para importar.' });
     }
 
-    const client = await pool.connect();
-
     try {
-        await asegurarEsquemaUsuarios(client);
-        await client.query('BEGIN');
-
+        await pool.query('BEGIN');
         let insertados = 0;
         let errores = [];
         const programasInsertados = new Set();
@@ -489,20 +394,18 @@ const createBulk = async (req, res) => {
         const correosProcesadosEnLote = new Set();
 
         // Buscar periodo activo
-        const periodRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
         const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
 
         // Cargar todos los roles para no consultar repetidamente
-        const rolesResult = await client.query('SELECT id_rol, nombre_rol FROM roles');
+        const rolesResult = await pool.query('SELECT id_rol, nombre_rol FROM roles');
         const rolesMap = {};
         rolesResult.rows.forEach(r => {
             rolesMap[r.nombre_rol.toLowerCase()] = r.id_rol;
-            // also map by normalized name
-            rolesMap[normalizeRolName(r.nombre_rol)] = r.id_rol;
         });
 
         // Cargar programas académicos válidos existentes en la base de datos
-        const progResult = await client.query('SELECT id_programa, nombre_programa FROM programa_academico');
+        const progResult = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico');
         const programasValidos = progResult.rows;
         const defaultProgId = programasValidos.length > 0 ? programasValidos[0].id_programa : 1;
 
@@ -590,7 +493,7 @@ const createBulk = async (req, res) => {
                 continue;
             }
 
-            const dupDoc = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [docStr]);
+            const dupDoc = await pool.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [docStr]);
             if (dupDoc.rows.length > 0) {
                 errores.push({
                     fila: filaIdx,
@@ -612,7 +515,7 @@ const createBulk = async (req, res) => {
                 continue;
             }
 
-            const dupEmail = await client.query('SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1)', [correoStr]);
+            const dupEmail = await pool.query('SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1)', [correoStr]);
             if (dupEmail.rows.length > 0) {
                 errores.push({
                     fila: filaIdx,
@@ -644,7 +547,7 @@ const createBulk = async (req, res) => {
 
             try {
                 // Insertar usuario
-                const userRes = await client.query(`
+                const userRes = await pool.query(`
                     INSERT INTO usuarios (nombres, apellidos, tipo_documento, numero_documento, correo, id_contrato, id_programa, activo)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
                     RETURNING id_usuario
@@ -662,13 +565,7 @@ const createBulk = async (req, res) => {
                 for (const rName of rolesList) {
                     const idRol = await resolverIdRol(rName);
                     if (idRol) {
-                        await client.query(`
-                            INSERT INTO usuario_rol (id_usuario, id_rol)
-                            SELECT $1, $2
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM usuario_rol WHERE id_usuario = $1 AND id_rol = $2
-                            )
-                        `, [idUsuario, idRol]);
+                        await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT DO NOTHING', [idUsuario, idRol]);
                     }
                 }
 
@@ -679,10 +576,10 @@ const createBulk = async (req, res) => {
                 });
 
                 if (idPeriodoActivo && tieneRolAcademico) {
-                    await client.query(`
+                    await pool.query(`
                         INSERT INTO docente_periodo (id_usuario, id_periodo)
                         VALUES ($1, $2)
-                        ON CONFLICT (id_usuario, id_periodo) DO NOTHING
+                        ON CONFLICT DO NOTHING
                     `, [idUsuario, idPeriodoActivo]);
                 }
 
@@ -700,25 +597,24 @@ const createBulk = async (req, res) => {
         // Asegurar programa_periodo para cada programa insertado
         if (idPeriodoActivo && insertados > 0) {
             for (const pid of programasInsertados) {
-                const existeProgPer = await client.query(
+                const existeProgPer = await pool.query(
                     'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
                     [pid, idPeriodoActivo]
                 );
                 if (existeProgPer.rows.length === 0) {
-                    const pensul = await client.query(
+                    const pensul = await pool.query(
                         'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
                     );
                     const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-                    await client.query(`
+                    await pool.query(`
                         INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
                         VALUES ($1, $2, $3)
-                        ON CONFLICT DO NOTHING
                     `, [idPeriodoActivo, pid, id_pensulaca]);
                 }
             }
         }
 
-        await client.query('COMMIT');
+        await pool.query('COMMIT');
         res.status(201).json({
             mensaje: `Proceso completado. Se importaron ${insertados} usuarios exitosamente.`,
             insertados,
@@ -726,13 +622,9 @@ const createBulk = async (req, res) => {
         });
 
     } catch (error) {
-        try {
-            await client.query('ROLLBACK');
-        } catch (_) {}
+        await pool.query('ROLLBACK');
         console.error('Error en createBulk:', error);
         res.status(500).json({ error: 'Fallo crítico al realizar la carga masiva.' });
-    } finally {
-        client.release();
     }
 };
 
@@ -781,19 +673,14 @@ const update = async (req, res) => {
     const docNum = numero_documento ? String(numero_documento).trim() : '';
     const emailStr = correo ? String(correo).trim().toLowerCase() : '';
 
-    const client = await pool.connect();
-
     try {
-        await asegurarEsquemaUsuarios(client);
-
         // 1. Validar Identificación duplicada (excluyendo el usuario actual)
         if (docNum) {
-            const dupDoc = await client.query(
+            const dupDoc = await pool.query(
                 'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND id_usuario != $2',
                 [docNum, id]
             );
             if (dupDoc.rows.length > 0) {
-                client.release();
                 return res.status(409).json({
                     error: `Ya existe un docente/usuario registrado con la identificación ${docNum}.`,
                     campo: 'numero_documento'
@@ -803,12 +690,11 @@ const update = async (req, res) => {
 
         // 2. Validar Correo duplicado (excluyendo el usuario actual)
         if (emailStr) {
-            const dupEmail = await client.query(
+            const dupEmail = await pool.query(
                 'SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1) AND id_usuario != $2',
                 [emailStr, id]
             );
             if (dupEmail.rows.length > 0) {
-                client.release();
                 return res.status(409).json({
                     error: `Ya existe un docente/usuario registrado con el correo institucional ${emailStr}.`,
                     campo: 'correo'
@@ -819,7 +705,7 @@ const update = async (req, res) => {
         // 3. Verificar coincidencia por Nombre (Advertencia)
         let advertencia = null;
         if (nombres && apellidos) {
-            const dupName = await client.query(
+            const dupName = await pool.query(
                 'SELECT id_usuario FROM usuarios WHERE LOWER(TRIM(nombres)) = LOWER(TRIM($1)) AND LOWER(TRIM(apellidos)) = LOWER(TRIM($2)) AND id_usuario != $3',
                 [nombres.trim(), apellidos.trim(), id]
             );
@@ -828,14 +714,14 @@ const update = async (req, res) => {
             }
         }
 
-        await client.query('BEGIN');
+        await pool.query('BEGIN');
 
         // Buscar periodo activo
-        const periodRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
         const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
 
         // Actualizar datos del usuario
-        const result = await client.query(`
+        const result = await pool.query(`
             UPDATE usuarios
             SET nombres = $1,
                 apellidos = $2,
@@ -858,33 +744,21 @@ const update = async (req, res) => {
         ]);
 
         if (result.rows.length === 0) {
-            await client.query('ROLLBACK');
+            await pool.query('ROLLBACK');
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
         const usuarioActualizado = result.rows[0];
 
-        // Sincronizar Roles: Cargar roles disponibles en memoria para mapeo exacto y rápido
-        const rolesDb = await client.query('SELECT id_rol, nombre_rol FROM roles');
-        const roleMap = new Map();
-        for (const r of rolesDb.rows) {
-            const norm = normalizeRolName(r.nombre_rol);
-            roleMap.set(norm, r.id_rol);
-            roleMap.set(r.nombre_rol.toLowerCase(), r.id_rol);
-        }
-
-        // Eliminar roles anteriores de este usuario
-        await client.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
-
-        // Insertar los nuevos roles
+        // Sincronizar Roles (Eliminar antiguos e insertar nuevos)
+        await pool.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
         for (const rName of rolesList) {
-            const idRol = await resolverIdRol(rName) || roleMap.get(normalizeRolName(rName)) || roleMap.get(rName.toLowerCase());
+            const idRol = await resolverIdRol(rName);
             if (idRol) {
-                await client.query(`
-                    INSERT INTO usuario_rol (id_usuario, id_rol)
-                    VALUES ($1, $2)
-                    ON CONFLICT (id_usuario, id_rol) DO NOTHING
-                `, [id, idRol]);
+                await pool.query(
+                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
+                    [id, idRol]
+                );
             } else {
                 console.warn(`No se encontró el rol: ${rName}`);
             }
@@ -897,57 +771,41 @@ const update = async (req, res) => {
         });
 
         if (idPeriodoActivo && tieneRolAcademico) {
-            await client.query(`
+            await pool.query(`
                 INSERT INTO docente_periodo (id_usuario, id_periodo)
                 VALUES ($1, $2)
-                ON CONFLICT (id_usuario, id_periodo) DO NOTHING
+                ON CONFLICT DO NOTHING
             `, [id, idPeriodoActivo]);
 
             if (progId) {
-                const existeProgPer = await client.query(
+                const existeProgPer = await pool.query(
                     'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
                     [progId, idPeriodoActivo]
                 );
                 if (existeProgPer.rows.length === 0) {
-                    const pensul = await client.query(
+                    const pensul = await pool.query(
                         'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
                     );
                     const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-                    await client.query(`
+                    await pool.query(`
                         INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
                         VALUES ($1, $2, $3)
-                        ON CONFLICT DO NOTHING
                     `, [idPeriodoActivo, progId, id_pensulaca]);
                 }
             }
         }
 
-        // Leer los roles guardados directamente de la base de datos
-        const rolesGuardadosRes = await client.query(`
-            SELECT STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
-            FROM usuario_rol ur
-            JOIN roles r ON ur.id_rol = r.id_rol
-            WHERE ur.id_usuario = $1
-        `, [id]);
-
-        await client.query('COMMIT');
-
-        const rolesFinales = rolesGuardadosRes.rows[0]?.roles || rolesList.join(', ');
-
+        await pool.query('COMMIT');
         res.json({
             ...usuarioActualizado,
-            roles: rolesFinales,
+            roles: rolesList.join(', '),
             advertencia
         });
 
     } catch (error) {
-        try {
-            await client.query('ROLLBACK');
-        } catch (_) {}
+        await pool.query('ROLLBACK');
         console.error('Error en update usuario:', error);
-        res.status(500).json({ error: 'Error al actualizar el usuario en la base de datos: ' + error.message });
-    } finally {
-        client.release();
+        res.status(500).json({ error: 'Error al actualizar el usuario en la base de datos.' });
     }
 };
 
@@ -1155,48 +1013,43 @@ const updatePerfil = async (req, res) => {
 
 const deleteUsuario = async (req, res) => {
     const { id } = req.params;
-    const client = await pool.connect();
 
     try {
-        await client.query('BEGIN');
+        await pool.query('BEGIN');
 
         // 1. Eliminar relaciones de rol
-        await client.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
+        await pool.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
 
         // 2. Eliminar relaciones de periodos
-        await client.query('DELETE FROM docente_periodo WHERE id_usuario = $1', [id]);
+        await pool.query('DELETE FROM docente_periodo WHERE id_usuario = $1', [id]);
 
         // 3. Eliminar relaciones de nivel académico
-        await client.query('DELETE FROM usuario_nivel WHERE id_usuario = $1', [id]);
+        await pool.query('DELETE FROM usuario_nivel WHERE id_usuario = $1', [id]);
 
         // 4. Eliminar asignaciones de agenda
-        await client.query('DELETE FROM usuario_asignacion WHERE id_usuario = $1', [id]);
+        await pool.query('DELETE FROM usuario_asignacion WHERE id_usuario = $1', [id]);
 
         // 5. Eliminar observaciones de director creadas por el usuario si era Director
-        await client.query('DELETE FROM observaciones_director WHERE director_id = $1', [id]);
+        await pool.query('DELETE FROM observaciones_director WHERE director_id = $1', [id]);
 
         // 6. Desvincular revisión en asignacion_funciones
-        await client.query('UPDATE asignacion_funciones SET revisado_por = NULL WHERE revisado_por = $1', [id]);
+        await pool.query('UPDATE asignacion_funciones SET revisado_por = NULL WHERE revisado_por = $1', [id]);
 
         // 7. Eliminar finalmente el usuario
-        const result = await client.query('DELETE FROM usuarios WHERE id_usuario = $1 RETURNING id_usuario', [id]);
+        const result = await pool.query('DELETE FROM usuarios WHERE id_usuario = $1 RETURNING id_usuario', [id]);
 
         if (result.rows.length === 0) {
-            await client.query('ROLLBACK');
+            await pool.query('ROLLBACK');
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
-        await client.query('COMMIT');
+        await pool.query('COMMIT');
         res.json({ message: 'Usuario eliminado exitosamente' });
 
     } catch (error) {
-        try {
-            await client.query('ROLLBACK');
-        } catch (_) {}
+        await pool.query('ROLLBACK');
         console.error('Error en deleteUsuario:', error.message);
         res.status(500).json({ error: 'Error al eliminar el usuario' });
-    } finally {
-        client.release();
     }
 };
 

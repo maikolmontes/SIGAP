@@ -201,7 +201,7 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
 
         // 1. Filtrar los items normales según los permisos de Ver
         const itemsValidos = menu.map(item => {
-            if (item.isHeader || !item.path || item.path.includes('/dashboard') || item.path.includes('/perfiles') || item.path.includes('/permisos')) {
+            if (item.isHeader || !item.path || item.path.includes('/dashboard')) {
                 return item;
             }
             const paginaRequerida = PATH_TO_PAGINA[item.path];

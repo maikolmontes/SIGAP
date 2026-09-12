@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
 import api, { getArchivoUrl } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-
 import { FileText, FileImage, FileArchive, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, AlertCircle, Calendar, Target, X, Eye, FileSpreadsheet } from 'lucide-react';
 
 interface Evidencia {
