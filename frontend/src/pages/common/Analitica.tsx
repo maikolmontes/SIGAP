@@ -53,7 +53,7 @@ const getEstadoDocente = (d: any) => {
 };
 
 export default function Analitica({ rol }: AnaliticaProps) {
-  const [tabActiva, setTabActiva] = useState<'nativa' | 'powerbi'>('nativa');
+  const [tabActiva, setTabActiva] = useState<'nativa' | 'powerbi'>('powerbi');
   const [periodoActivo, setPeriodoActivo] = useState<any>(null);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [resumenData, setResumenData] = useState<any>(null);
@@ -61,7 +61,9 @@ export default function Analitica({ rol }: AnaliticaProps) {
   const [error, setError] = useState<string | null>(null);
 
   // Power BI State
-  const defaultPowerBiUrl = import.meta.env.VITE_POWERBI_EMBED_URL || localStorage.getItem('sigap_powerbi_url') || '';
+  const POWERBI_DEFAULT_URL = 'https://app.powerbi.com/reportEmbed?reportId=482c6439-3243-40bb-89c6-8aa444d90d35&autoAuth=true&embeddedDemo=true';
+  const storedUrl = localStorage.getItem('sigap_powerbi_url');
+  const defaultPowerBiUrl = import.meta.env.VITE_POWERBI_EMBED_URL || (storedUrl && storedUrl.trim() !== '' ? storedUrl : null) || POWERBI_DEFAULT_URL;
   const [powerbiUrl, setPowerbiUrl] = useState<string>(defaultPowerBiUrl);
   const [tempUrlInput, setTempUrlInput] = useState<string>(defaultPowerBiUrl);
   const [urlGuardada, setUrlGuardada] = useState(false);
@@ -282,13 +284,16 @@ export default function Analitica({ rol }: AnaliticaProps) {
             className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col min-h-[700px]"
           >
             {powerbiUrl ? (
-              <div className="w-full flex-1 relative bg-gray-900">
+              <div className="w-full flex-1 relative bg-gray-50" style={{ minHeight: '700px' }}>
                 <iframe
                   key={iframeKey}
-                  title="SIGAP Power BI Report"
+                  title="powerbiagenda"
+                  width="100%"
+                  height="100%"
                   src={powerbiUrl}
-                  className="w-full h-full min-h-[700px] border-0"
+                  frameBorder="0"
                   allowFullScreen={true}
+                  style={{ position: 'absolute', top: 0, left: 0, border: 'none' }}
                 ></iframe>
               </div>
             ) : (
