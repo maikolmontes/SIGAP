@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Users, Settings, Eye, ChevronRight, LogOut, Check, ArrowRight } from 'lucide-react';
+import { BookOpen, Users, Settings, Eye, ChevronRight, LogOut, Check, ArrowRight, Award } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 // @ts-ignore
 import api from '../../services/api';
@@ -59,6 +59,7 @@ const RoleSelection = () => {
 
   const getRoleIcon = (nombreRol: string) => {
     const rolLower = nombreRol.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (rolLower.includes('decano')) return <Award className="w-6 h-6" />;
     if (rolLower.includes('docente')) return <BookOpen className="w-6 h-6" />;
     if (rolLower.includes('director')) return <Users className="w-6 h-6" />;
     if (rolLower.includes('planeacion') || rolLower.includes('admin')) return <Settings className="w-6 h-6" />;
@@ -68,6 +69,18 @@ const RoleSelection = () => {
 
   const getRoleStyling = (nombreRol: string) => {
     const rolLower = nombreRol.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (rolLower.includes('decano')) {
+      return {
+        iconBg: 'bg-amber-50',
+        iconColor: 'text-amber-600',
+        borderActive: 'border-amber-500',
+        badgeBg: 'bg-amber-100',
+        badgeText: 'text-amber-800',
+        buttonBg: 'bg-amber-600 hover:bg-amber-700',
+        moduleName: 'Módulo Decanatura',
+        defaultDesc: 'Supervisa las agendas y avance docente de todos los programas de tu facultad, y gestiona observaciones.',
+      };
+    }
     if (rolLower.includes('docente')) {
       return {
         iconBg: 'bg-blue-50',
@@ -135,7 +148,8 @@ const RoleSelection = () => {
     localStorage.setItem('sigap_active_role', JSON.stringify(finalRole));
 
     const nombreNormalizado = finalRole.nombre_rol.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    if (nombreNormalizado.includes('docente')) navigate('/docente/dashboard');
+    if (nombreNormalizado.includes('decano')) navigate('/decano/dashboard');
+    else if (nombreNormalizado.includes('docente')) navigate('/docente/dashboard');
     else if (nombreNormalizado.includes('director')) navigate('/director/dashboard');
     else if (nombreNormalizado.includes('planeacion') || nombreNormalizado.includes('admin')) navigate('/planeacion/dashboard');
     else if (nombreNormalizado.includes('consultor') || nombreNormalizado.includes('auditor')) navigate('/consultor/dashboard');

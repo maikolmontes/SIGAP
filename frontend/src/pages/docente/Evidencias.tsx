@@ -260,12 +260,12 @@ const Evidencias: React.FC = () => {
                         <div className="flex flex-wrap gap-6 items-center w-full md:w-auto">
                             {/* Periodo Dropdown */}
                             <div className="w-full sm:w-60">
-                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Periodo Académico</label>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Período Académico</label>
                                 <div className="w-full bg-gray-100 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-600 flex items-center justify-between cursor-not-allowed">
                                     <span>
                                         {periodos.find(p => p.id_periodo === activePeriodId)
-                                            ? `Periodo ${periodos.find(p => p.id_periodo === activePeriodId)?.anio} - ${periodos.find(p => p.id_periodo === activePeriodId)?.semestre === 1 ? 'I' : 'II'} (Activo)`
-                                            : 'No hay periodo activo'}
+                                            ? `Período ${periodos.find(p => p.id_periodo === activePeriodId)?.anio} - ${periodos.find(p => p.id_periodo === activePeriodId)?.semestre === 1 ? 'I' : 'II'} (Activo)`
+                                            : 'No hay período activo'}
                                     </span>
                                 </div>
                             </div>
@@ -301,14 +301,14 @@ const Evidencias: React.FC = () => {
                                 <div className="w-full bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3.5 flex items-center gap-3">
                                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                                     <div className="text-xs">
-                                        <span className="font-bold">Periodo y semana habilitados.</span> Puedes administrar tus evidencias libremente.
+                                        <span className="font-bold">Período y semana habilitados.</span> Puedes administrar tus evidencias libremente.
                                     </div>
                                 </div>
                             ) : (
                                 <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3.5 flex items-center gap-3">
                                     <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
                                     <div className="text-xs">
-                                        <span className="font-bold">Modo de solo lectura.</span> La semana seleccionada no está habilitada o pertenece a un periodo cerrado.
+                                        <span className="font-bold">Modo de solo lectura.</span> La semana seleccionada no está habilitada o pertenece a un período cerrado.
                                     </div>
                                 </div>
                             )}

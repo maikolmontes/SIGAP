@@ -38,7 +38,13 @@ import {
   getDocentesPeriodo
 } from '../../services/periodosService';
 import { getProgramas } from '../../services/programasService';
+import { getFacultades } from '../../services/facultadesService';
 import { exportarDocentesExcel } from '../../utils/exportExcelDocentes';
+
+interface FacultadItem {
+  id_facultad: number;
+  nombre_facultad: string;
+}
 
 interface ProgramaItem {
   id_programa: number;
@@ -59,6 +65,8 @@ interface Usuario {
   horas_contrato: number;
   programa: string;
   facultad?: string;
+  id_facultad?: number;
+  id_programa?: number;
   roles: string;
 }
 
@@ -85,12 +93,14 @@ export default function Docentes() {
 
   // Formulario de Creación Individual (Multirrol)
   const [programas, setProgramas] = useState<ProgramaItem[]>([]);
+  const [facultades, setFacultades] = useState<FacultadItem[]>([]);
   const [nombres, setNombres] = useState('');
   const [apellidos, setApellidos] = useState('');
   const [tipoDocumento, setTipoDocumento] = useState('CC');
   const [numeroDocumento, setNumeroDocumento] = useState('');
   const [correo, setCorreo] = useState('');
   const [idPrograma, setIdPrograma] = useState(1);
+  const [idFacultad, setIdFacultad] = useState(1);
   const [rolesSeleccionados, setRolesSeleccionados] = useState<string[]>(['Docente']);
   const [formError, setFormError] = useState<string | null>(null);
   const [formWarning, setFormWarning] = useState<string | null>(null);
@@ -104,6 +114,7 @@ export default function Docentes() {
   const [editNumeroDocumento, setEditNumeroDocumento] = useState('');
   const [editCorreo, setEditCorreo] = useState('');
   const [editIdPrograma, setEditIdPrograma] = useState(1);
+  const [editIdFacultad, setEditIdFacultad] = useState(1);
   const [editRolesSeleccionados, setEditRolesSeleccionados] = useState<string[]>(['Docente']);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [editWarning, setEditWarning] = useState<string | null>(null);
@@ -129,9 +140,10 @@ export default function Docentes() {
   const cargarUsuarios = async () => {
     try {
       setLoading(true);
-      const [activePeriodRes, progsRes] = await Promise.all([
+      const [activePeriodRes, progsRes, facsRes] = await Promise.all([
         getPeriodoActivo().catch(() => ({ data: null })),
-        getProgramas().catch(() => ({ data: [] }))
+        getProgramas().catch(() => ({ data: [] })),
+        getFacultades().catch(() => ({ data: [] }))
       ]);
 
       const pActivo = activePeriodRes.data;
@@ -141,6 +153,12 @@ export default function Docentes() {
       setProgramas(listaProgs);
       if (listaProgs.length > 0) {
         setIdPrograma(listaProgs[0].id_programa);
+      }
+
+      const listaFacs = facsRes.data || [];
+      setFacultades(listaFacs);
+      if (listaFacs.length > 0) {
+        setIdFacultad(listaFacs[0].id_facultad);
       }
 
       if (pActivo) {
@@ -159,10 +177,16 @@ export default function Docentes() {
 
   const normalizarRol = (r: string) => {
     const low = (r || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (low.includes('decano')) return 'decano';
     if (low.includes('planea') || low.includes('admin')) return 'planeacion';
     if (low.includes('direct')) return 'director';
     if (low.includes('consult')) return 'consultor';
     return 'docente';
+  };
+
+  const tieneRolDecano = (list: string[]) => {
+    if (!list || list.length === 0) return false;
+    return list.some(r => normalizarRol(r) === 'decano');
   };
 
   const rolEstaSeleccionado = (lista: string[], rolName: string) => {
@@ -174,7 +198,7 @@ export default function Docentes() {
     if (!list || list.length === 0) return false;
     return list.every(r => {
       const norm = normalizarRol(r);
-      return norm === 'consultor' || norm === 'planeacion';
+      return norm === 'consultor' || norm === 'planeacion' || norm === 'decano';
     });
   };
 
@@ -215,11 +239,17 @@ export default function Docentes() {
     setEditNumeroDocumento(u.numero_documento || '');
     setEditCorreo(u.correo || '');
     setEditIdPrograma(mapProgramaToId(u.programa));
+    if (u.id_facultad) {
+      setEditIdFacultad(u.id_facultad);
+    } else if (facultades.length > 0) {
+      setEditIdFacultad(facultades[0].id_facultad);
+    }
 
     const parsedRoles = (u.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean);
     // Normalizar a los nombres estándar de la interfaz
     const mappedRoles = parsedRoles.map(r => {
       const norm = normalizarRol(r);
+      if (norm === 'decano') return 'Decano';
       if (norm === 'planeacion') return 'Planeación';
       if (norm === 'director') return 'Director';
       if (norm === 'consultor') return 'Consultor';
@@ -253,7 +283,12 @@ export default function Docentes() {
     setTipoDocumento('CC');
     setNumeroDocumento('');
     setCorreo('');
-    setIdPrograma(1);
+    if (programas.length > 0) {
+      setIdPrograma(programas[0].id_programa);
+    }
+    if (facultades.length > 0) {
+      setIdFacultad(facultades[0].id_facultad);
+    }
     setRolesSeleccionados(['Docente']);
     setFormError(null);
     setFormWarning(null);
@@ -286,6 +321,7 @@ export default function Docentes() {
         correo: correo.trim().toLowerCase(),
         id_contrato: 4,
         id_programa: soloConsultaOPl ? null : idPrograma,
+        id_facultad: tieneRolDecano(rolesSeleccionados) ? idFacultad : null,
         roles: rolesSeleccionados
       });
 
@@ -342,6 +378,7 @@ export default function Docentes() {
         numero_documento: editNumeroDocumento.trim(),
         correo: editCorreo.trim().toLowerCase(),
         id_programa: soloConsultaOPl ? null : editIdPrograma,
+        id_facultad: tieneRolDecano(editRolesSeleccionados) ? editIdFacultad : null,
         roles: editRolesSeleccionados
       });
 
@@ -667,6 +704,7 @@ export default function Docentes() {
               <option value="todos">Todos los Roles</option>
               <option value="Docente">Docente</option>
               <option value="Director">Director</option>
+              <option value="Decano">Decano</option>
               <option value="Consultor">Consultor</option>
               <option value="Planeacion">Planeación</option>
             </select>
@@ -743,18 +781,21 @@ export default function Docentes() {
                           {userRolesList.map((rName, i) => {
                             const isPl = rName.toLowerCase().includes('plane');
                             const isDir = rName.toLowerCase().includes('dire');
+                            const isDec = rName.toLowerCase().includes('decano');
                             const isCons = rName.toLowerCase().includes('consult');
                             return (
                               <span 
                                 key={i} 
                                 className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                                  isPl 
-                                    ? 'bg-blue-50 text-blue-700 border border-blue-100' 
-                                    : isDir 
-                                      ? 'bg-purple-50 text-purple-700 border border-purple-100' 
-                                      : isCons
-                                        ? 'bg-amber-50 text-amber-700 border border-amber-100'
-                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                  isDec
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    : isPl 
+                                      ? 'bg-blue-50 text-blue-700 border border-blue-100' 
+                                      : isDir 
+                                        ? 'bg-purple-50 text-purple-700 border border-purple-100' 
+                                        : isCons
+                                          ? 'bg-amber-50 text-amber-700 border border-amber-100'
+                                          : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                                 }`}
                               >
                                 {rName}
@@ -882,7 +923,7 @@ export default function Docentes() {
                     type="text"
                     required
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    placeholder="Ej. Perez Gomez"
+                    placeholder="Ej. Pérez Gómez"
                     value={apellidos}
                     onChange={(e) => setApellidos(e.target.value)}
                   />
@@ -915,7 +956,7 @@ export default function Docentes() {
                   </select>
                 </div>
                 <div className="col-span-2">
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número Documento *</label>
+                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
                   <input
                     type="text"
                     required
@@ -932,8 +973,8 @@ export default function Docentes() {
                 <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
                   Roles de Acceso (Selecciona uno o varios) *
                 </label>
-                <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                  {['Docente', 'Director', 'Decano', 'Consultor', 'Planeación'].map((rItem) => {
                     const isChecked = rolEstaSeleccionado(rolesSeleccionados, rItem);
                     return (
                       <label
@@ -961,14 +1002,28 @@ export default function Docentes() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Facultad
+                    Facultad {tieneRolDecano(rolesSeleccionados) ? '*' : ''}
                   </label>
-                  <input
-                    type="text"
-                    disabled
-                    value={esSoloConsultorOPlaneacion(rolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
-                  />
+                  {tieneRolDecano(rolesSeleccionados) ? (
+                    <select
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold"
+                      value={idFacultad}
+                      onChange={(e) => setIdFacultad(Number(e.target.value))}
+                    >
+                      {facultades.map((f) => (
+                        <option key={f.id_facultad} value={f.id_facultad}>
+                          {f.nombre_facultad}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      disabled
+                      value={esSoloConsultorOPlaneacion(rolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
@@ -981,7 +1036,7 @@ export default function Docentes() {
                     onChange={(e) => setIdPrograma(Number(e.target.value))}
                   >
                     {esSoloConsultorOPlaneacion(rolesSeleccionados) ? (
-                      <option value="">Deshabilitado (Sin asignación académica)</option>
+                      <option value="">{tieneRolDecano(rolesSeleccionados) ? 'Supervisión a nivel Facultad' : 'Deshabilitado (Sin asignación)'}</option>
                     ) : (
                       programas.map((p) => (
                         <option key={p.id_programa} value={p.id_programa}>
@@ -1109,7 +1164,7 @@ export default function Docentes() {
                   </select>
                 </div>
                 <div className="col-span-2">
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número Documento *</label>
+                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
                   <input
                     type="text"
                     required
@@ -1125,8 +1180,8 @@ export default function Docentes() {
                 <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
                   Roles de Acceso (Selecciona uno o varios) *
                 </label>
-                <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                  {['Docente', 'Director', 'Decano', 'Consultor', 'Planeación'].map((rItem) => {
                     const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
                     return (
                       <label
@@ -1154,14 +1209,28 @@ export default function Docentes() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Facultad
+                    Facultad {tieneRolDecano(editRolesSeleccionados) ? '*' : ''}
                   </label>
-                  <input
-                    type="text"
-                    disabled
-                    value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
-                  />
+                  {tieneRolDecano(editRolesSeleccionados) ? (
+                    <select
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold"
+                      value={editIdFacultad}
+                      onChange={(e) => setEditIdFacultad(Number(e.target.value))}
+                    >
+                      {facultades.map((f) => (
+                        <option key={f.id_facultad} value={f.id_facultad}>
+                          {f.nombre_facultad}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      disabled
+                      value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
@@ -1174,7 +1243,7 @@ export default function Docentes() {
                     onChange={(e) => setEditIdPrograma(Number(e.target.value))}
                   >
                     {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? (
-                      <option value="">Deshabilitado (Sin asignación académica)</option>
+                      <option value="">{tieneRolDecano(editRolesSeleccionados) ? 'Supervisión a nivel Facultad' : 'Deshabilitado (Sin asignación)'}</option>
                     ) : (
                       programas.map((p) => (
                         <option key={p.id_programa} value={p.id_programa}>

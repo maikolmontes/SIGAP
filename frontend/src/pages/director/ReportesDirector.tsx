@@ -44,8 +44,8 @@ export default function ReportesDirector() {
             <Layout rol="director" path="Reportes">
                 <div className="text-center py-16 text-gray-400">
                     <BarChart3 className="w-16 h-16 mx-auto mb-4 opacity-30" />
-                    <p className="text-lg font-medium">No hay periodo activo</p>
-                    <p className="text-sm mt-1">Se requiere un periodo activo para generar reportes.</p>
+                    <p className="text-lg font-medium">No hay período activo</p>
+                    <p className="text-sm mt-1">Se requiere un período activo para generar reportes.</p>
                 </div>
             </Layout>
         );

@@ -11,23 +11,27 @@ const getAll = async (req, res) => {
                 u.tipo_documento,
                 u.numero_documento,
                 u.activo,
+                u.id_programa,
+                u.id_facultad,
                 tc.tipo            AS tipo_contrato,
                 tc.horas_contrato,
                 pa.nombre_programa AS programa,
-                f.nombre_facultad  AS facultad,
+                COALESCE(f.nombre_facultad, f_user.nombre_facultad) AS facultad,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
             LEFT JOIN programa_academico pa  ON u.id_programa  = pa.id_programa
             LEFT JOIN facultad f             ON pa.id_facultad = f.id_facultad
+            LEFT JOIN facultad f_user        ON u.id_facultad  = f_user.id_facultad
             LEFT JOIN usuario_rol ur ON u.id_usuario = ur.id_usuario
             LEFT JOIN roles r ON ur.id_rol = r.id_rol
             
             GROUP BY
                 u.id_usuario, u.nombres, u.apellidos,
                 u.correo, u.tipo_documento, u.numero_documento, u.activo,
+                u.id_programa, u.id_facultad,
                 tc.tipo, tc.horas_contrato,
-                pa.nombre_programa, f.nombre_facultad
+                pa.nombre_programa, f.nombre_facultad, f_user.nombre_facultad
             ORDER BY u.apellidos
         `);
 
@@ -53,16 +57,19 @@ const getById = async (req, res) => {
                 u.tipo_documento,
                 u.correo,
                 u.activo,
+                u.id_programa,
+                u.id_facultad,
                 tc.tipo            AS tipo_contrato,
                 tc.horas_contrato,
                 pa.nombre_programa AS programa,
-                f.nombre_facultad  AS facultad,
+                COALESCE(f.nombre_facultad, f_user.nombre_facultad) AS facultad,
                 na.nombre_titulo   AS nivel_academico,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato   = tc.id_contrato
             LEFT JOIN programa_academico pa  ON u.id_programa   = pa.id_programa
             LEFT JOIN facultad f             ON pa.id_facultad  = f.id_facultad
+            LEFT JOIN facultad f_user        ON u.id_facultad   = f_user.id_facultad
             LEFT JOIN usuario_rol ur         ON u.id_usuario    = ur.id_usuario
             LEFT JOIN roles r                ON ur.id_rol       = r.id_rol
             LEFT JOIN usuario_nivel un       ON u.id_usuario    = un.id_usuario
@@ -72,9 +79,10 @@ const getById = async (req, res) => {
                 u.id_usuario, u.nombres, u.apellidos,
                 u.numero_documento, u.tipo_documento,
                 u.correo, u.activo,
+                u.id_programa, u.id_facultad,
                 tc.tipo, tc.horas_contrato,
-                pa.nombre_programa, f.nombre_facultad,
-                na.nivel
+                pa.nombre_programa, f.nombre_facultad, f_user.nombre_facultad,
+                na.nombre_titulo
         `, [id]);
 
         if (result.rows.length === 0) {
@@ -136,10 +144,37 @@ const normalizeRolName = (rName) => {
     if (!rName) return 'docente';
     const low = String(rName).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (low.includes('planea') || low.includes('admin')) return 'planeacion';
+    if (low.includes('decano')) return 'decano';
     if (low.includes('direct')) return 'director';
     if (low.includes('consult') || low.includes('auditor')) return 'consultor';
     if (low.includes('docent')) return 'docente';
     return low;
+};
+
+// Mapa canónico: nombre normalizado -> nombre en BD (según diagnóstico)
+const CANONICAL_ROL_MAP = {
+    'docente':    { nombre: 'Docente',    id: 2 },
+    'director':   { nombre: 'Director',   id: 3 },
+    'consultor':  { nombre: 'Consultor',  id: 4 },
+    'planeacion': { nombre: 'Planeacion', id: 1 },
+    'decano':     { nombre: 'Decano',     id: 5 },
+};
+
+/**
+ * Busca el id_rol de forma robusta: primero intenta el mapa canónico,
+ * luego hace consulta a la BD como respaldo.
+ */
+const resolverIdRol = async (rName) => {
+    const norm = normalizeRolName(rName);
+    if (CANONICAL_ROL_MAP[norm]) {
+        return CANONICAL_ROL_MAP[norm].id;
+    }
+    // Respaldo: consultar en la BD
+    const result = await pool.query(
+        'SELECT id_rol FROM roles WHERE LOWER(nombre_rol) = $1 LIMIT 1',
+        [norm]
+    );
+    return result.rows.length > 0 ? result.rows[0].id_rol : null;
 };
 
 const parseRoles = (roles, rol) => {
@@ -160,7 +195,8 @@ const parseRoles = (roles, rol) => {
         'docente': 'Docente',
         'director': 'Director',
         'consultor': 'Consultor',
-        'planeacion': 'Planeacion'
+        'planeacion': 'Planeacion',
+        'decano': 'Decano'
     };
 
     const uniqueSet = new Set();
@@ -190,7 +226,7 @@ const isOnlyConsultorOrPlaneacion = (rolesList) => {
     if (!rolesList || rolesList.length === 0) return false;
     return rolesList.every(r => {
         const norm = normalizeRolName(r);
-        return norm === 'consultor' || norm === 'planeacion';
+        return norm === 'consultor' || norm === 'planeacion' || norm === 'decano';
     });
 };
 
@@ -262,6 +298,7 @@ const create = async (req, res) => {
         correo,
         id_contrato,
         id_programa,
+        id_facultad,
         rol,
         roles
     } = req.body;
@@ -269,6 +306,7 @@ const create = async (req, res) => {
     const rolesList = parseRoles(roles, rol);
     const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
     const progId = soloConsultorOPlaneacion ? null : (id_programa || 1);
+    const facId = id_facultad ? parseInt(id_facultad, 10) : null;
 
     const docNum = numero_documento ? String(numero_documento).trim() : '';
     const emailStr = correo ? String(correo).trim().toLowerCase() : '';
@@ -330,9 +368,9 @@ const create = async (req, res) => {
             INSERT INTO usuarios
                 (nombres, apellidos, tipo_documento,
                  numero_documento, correo,
-                 id_contrato, id_programa, activo)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
-            RETURNING id_usuario, nombres, apellidos, correo
+                 id_contrato, id_programa, id_facultad, activo)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
+            RETURNING id_usuario, nombres, apellidos, correo, id_facultad, id_programa
         `, [
             nombres ? nombres.trim() : '',
             apellidos ? apellidos.trim() : '',
@@ -340,7 +378,8 @@ const create = async (req, res) => {
             docNum || '0000000000',
             emailStr,
             id_contrato || resolverIdContrato(req.body.tipo_contrato) || 4,
-            progId
+            progId,
+            facId
         ]);
 
         const nuevoUsuario = result.rows[0];
@@ -356,6 +395,7 @@ const create = async (req, res) => {
 
         // Insertar múltiples roles
         for (const rName of rolesList) {
+<<<<<<< HEAD
             const norm = normalizeRolName(rName);
             const idRol = roleMap.get(norm) || roleMap.get(rName.toLowerCase());
             if (idRol) {
@@ -366,6 +406,16 @@ const create = async (req, res) => {
                         SELECT 1 FROM usuario_rol WHERE id_usuario = $1 AND id_rol = $2
                     )
                 `, [nuevoUsuario.id_usuario, idRol]);
+=======
+            const idRol = await resolverIdRol(rName);
+            if (idRol) {
+                await pool.query(
+                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
+                    [nuevoUsuario.id_usuario, idRol]
+                );
+            } else {
+                console.warn(`No se encontró el rol: ${rName}`);
+>>>>>>> dev
             }
         }
 
@@ -622,8 +672,7 @@ const createBulk = async (req, res) => {
 
                 // Insertar múltiples roles
                 for (const rName of rolesList) {
-                    const norm = normalizeRolName(rName);
-                    const idRol = rolesMap[norm] || rolesMap['docente'];
+                    const idRol = await resolverIdRol(rName);
                     if (idRol) {
                         await client.query(`
                             INSERT INTO usuario_rol (id_usuario, id_rol)
@@ -731,6 +780,7 @@ const update = async (req, res) => {
         numero_documento,
         correo,
         id_programa,
+        id_facultad,
         rol,
         roles
     } = req.body;
@@ -738,6 +788,7 @@ const update = async (req, res) => {
     const rolesList = parseRoles(roles, rol);
     const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
     const progId = soloConsultorOPlaneacion ? null : (id_programa || 1);
+    const facId = id_facultad ? parseInt(id_facultad, 10) : null;
 
     const docNum = numero_documento ? String(numero_documento).trim() : '';
     const emailStr = correo ? String(correo).trim().toLowerCase() : '';
@@ -803,9 +854,10 @@ const update = async (req, res) => {
                 tipo_documento = $3,
                 numero_documento = $4,
                 correo = $5,
-                id_programa = $6
-            WHERE id_usuario = $7
-            RETURNING id_usuario, nombres, apellidos, correo, id_programa
+                id_programa = $6,
+                id_facultad = $7
+            WHERE id_usuario = $8
+            RETURNING id_usuario, nombres, apellidos, correo, id_programa, id_facultad
         `, [
             nombres ? nombres.trim() : '',
             apellidos ? apellidos.trim() : '',
@@ -813,6 +865,7 @@ const update = async (req, res) => {
             docNum || '0000000000',
             emailStr,
             progId,
+            facId,
             id
         ]);
 
@@ -837,6 +890,7 @@ const update = async (req, res) => {
 
         // Insertar los nuevos roles
         for (const rName of rolesList) {
+<<<<<<< HEAD
             const norm = normalizeRolName(rName);
             const idRol = roleMap.get(norm) || roleMap.get(rName.toLowerCase());
             if (idRol) {
@@ -847,6 +901,16 @@ const update = async (req, res) => {
                         SELECT 1 FROM usuario_rol WHERE id_usuario = $1 AND id_rol = $2
                     )
                 `, [id, idRol]);
+=======
+            const idRol = await resolverIdRol(rName);
+            if (idRol) {
+                await pool.query(
+                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
+                    [id, idRol]
+                );
+            } else {
+                console.warn(`No se encontró el rol: ${rName}`);
+>>>>>>> dev
             }
         }
 

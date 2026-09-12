@@ -22,7 +22,16 @@ async function asegurarEsquemaYDatos() {
       `);
     }
 
+<<<<<<< HEAD
     // 2. Verificar si hay datos matriciales
+=======
+    // 2. Asegurar id_facultad en usuarios para Neon
+    await pool.query(`
+      ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS id_facultad INTEGER REFERENCES facultad(id_facultad) ON DELETE SET NULL;
+    `);
+
+    // 3. Verificar si hay datos matriciales
+>>>>>>> dev
     const countRes = await pool.query(`SELECT COUNT(*) as count FROM permisos WHERE pagina IS NOT NULL`);
     if (parseInt(countRes.rows[0].count, 10) === 0) {
       console.log('Base de datos sin matriz de permisos detectada. Ejecutando auto-seed...');

@@ -246,7 +246,7 @@ const importarAsignaciones = async (req, res) => {
 
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         if (periodoRes.rows.length === 0) {
-            return res.status(400).json({ error: 'No hay un periodo académico activo para asignar las funciones.' });
+            return res.status(400).json({ error: 'No hay un período académico activo para asignar las funciones.' });
         }
         const idPeriodoActivo = periodoRes.rows[0].id_periodo;
 
@@ -552,7 +552,7 @@ const actualizarImportacion = async (req, res) => {
 
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         if (periodoRes.rows.length === 0) {
-            return res.status(400).json({ error: 'No hay un periodo académico activo para actualizar las funciones.' });
+            return res.status(400).json({ error: 'No hay un período académico activo para actualizar las funciones.' });
         }
         const idPeriodoActivo = periodoRes.rows[0].id_periodo;
 
@@ -812,9 +812,29 @@ const getDashboardDirector = async (req, res) => {
         let metricas = { total: 0, aceptadas: 0, pendientes: 0, total_horas: 0 };
         let distribucion = [];
         let importacionRealizada = false;
+        let nombreFacultad = null;
+        let programasFacultad = [];
 
         if (idPeriodo) {
-            const docentesRes = await pool.query(`
+            const userRoles = (req.user?.roles || '').toLowerCase();
+            const isDecano = userRoles.includes('decano');
+            const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
+            let facultadId = req.user?.id_facultad || null;
+
+            if (isDecano && !facultadId && req.user?.id) {
+                const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
+                facultadId = facQ.rows[0]?.id_facultad || null;
+            }
+
+            if (isDecano && facultadId) {
+                const facInfo = await pool.query('SELECT nombre_facultad FROM facultad WHERE id_facultad = $1', [facultadId]);
+                nombreFacultad = facInfo.rows[0]?.nombre_facultad || null;
+
+                const progsInfo = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico WHERE id_facultad = $1 AND activo = true ORDER BY nombre_programa', [facultadId]);
+                programasFacultad = progsInfo.rows;
+            }
+
+            let docentesQuery = `
                 SELECT
                     u.id_usuario,
                     u.nombres || ' ' || u.apellidos AS nombre,
@@ -836,10 +856,21 @@ const getDashboardDirector = async (req, res) => {
                 LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
                 LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
                 WHERE u.activo = TRUE
+            `;
+            const docParams = [idPeriodo];
+
+            if (isDecano && facultadId) {
+                docentesQuery += ` AND pa.id_facultad = $2`;
+                docParams.push(facultadId);
+            }
+
+            docentesQuery += `
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
                          pa.nombre_programa, tc.tipo, tc.horas_contrato
                 ORDER BY u.apellidos, u.nombres
-            `, [idPeriodo]);
+            `;
+
+            const docentesRes = await pool.query(docentesQuery, docParams);
             docentes = docentesRes.rows.map(d => {
                 const hDirectas = parseFloat(d.horas_directas) || 0;
                 const hInvestigacion = parseFloat(d.horas_investigacion) || 0;
@@ -877,7 +908,7 @@ const getDashboardDirector = async (req, res) => {
             );
 
             // Distribución de horas por función sustantiva
-            const distRes = await pool.query(`
+            let distQuery = `
                 SELECT
                     af.funcion_sustantiva,
                     COALESCE(SUM(af.horas_funcion), 0) AS horas
@@ -885,10 +916,20 @@ const getDashboardDirector = async (req, res) => {
                 JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
                 JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
                 JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
+                JOIN programa_academico pa ON pa.id_programa = u.id_programa
                 WHERE af.id_periodo = $1
+            `;
+            const distParams = [idPeriodo];
+            if (isDecano && facultadId) {
+                distQuery += ` AND pa.id_facultad = $2`;
+                distParams.push(facultadId);
+            }
+            distQuery += `
                 GROUP BY af.funcion_sustantiva
                 ORDER BY horas DESC
-            `, [idPeriodo]);
+            `;
+
+            const distRes = await pool.query(distQuery, distParams);
             distribucion = distRes.rows;
         }
 
@@ -897,7 +938,9 @@ const getDashboardDirector = async (req, res) => {
             docentes,
             metricas,
             distribucion,
-            importacionRealizada
+            importacionRealizada,
+            facultad: nombreFacultad,
+            programas_facultad: programasFacultad
         });
     } catch (error) {
         console.error('Error en getDashboardDirector:', error);
@@ -919,7 +962,7 @@ const getDistribucionDocente = async (req, res) => {
         // Periodo activo
         const periodoRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         const periodo = periodoRes.rows[0];
-        if (!periodo) return res.status(404).json({ error: 'No hay periodo activo.' });
+        if (!periodo) return res.status(404).json({ error: 'No hay período activo.' });
         const idPeriodo = periodo.id_periodo;
 
         // Distribución de horas por función sustantiva del docente
@@ -969,7 +1012,7 @@ const eliminarAgendas = async (req, res) => {
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         if (periodoRes.rows.length === 0) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'No hay un periodo académico activo.' });
+            return res.status(400).json({ error: 'No hay un período académico activo.' });
         }
         const idPeriodoActivo = periodoRes.rows[0].id_periodo;
 
@@ -1017,7 +1060,7 @@ const eliminarAgendas = async (req, res) => {
         }
 
         await client.query('COMMIT');
-        res.status(200).json({ mensaje: 'Todas las agendas del periodo activo fueron eliminadas correctamente.' });
+        res.status(200).json({ mensaje: 'Todas las agendas del período activo fueron eliminadas correctamente.' });
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -1052,7 +1095,7 @@ const eliminarAgendasDocentes = async (req, res) => {
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         if (periodoRes.rows.length === 0) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'No hay un periodo académico activo.' });
+            return res.status(400).json({ error: 'No hay un período académico activo.' });
         }
         const idPeriodoActivo = periodoRes.rows[0].id_periodo;
 

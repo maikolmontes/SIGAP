@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -9,6 +9,10 @@ interface User {
   nombres?: string;
   apellidos?: string;
   imagen_perfil?: string;
+  facultad?: string;
+  id_facultad?: number;
+  programa?: string;
+  id_programa?: number;
 }
 
 interface AuthContextType {
@@ -18,16 +22,98 @@ interface AuthContextType {
   logout: () => void;
   isAuthenticated: boolean;
   isLoading: boolean;
+  // Modal de sesión por expirar
+  showTimeoutModal: boolean;
+  timeoutSeconds: number;
+  extendSession: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+<<<<<<< HEAD
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [token, setToken] = useState<string | null>(() => {
     try {
       return localStorage.getItem('sigap_token');
     } catch {
       return null;
+=======
+// Configuración de tiempos
+const INACTIVITY_LIMIT_MS  = 4 * 60 * 1000;  // 4 minutos total de inactividad
+const WARNING_BEFORE_MS    = 60 * 1000;        // Mostrar modal 60 s antes de expirar
+const WARNING_SECONDS      = 60;               // Cuenta regresiva en el modal
+
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [user, setUser]           = useState<User | null>(null);
+  const [token, setToken]         = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [showTimeoutModal, setShowTimeoutModal] = useState<boolean>(false);
+  const [timeoutSeconds, setTimeoutSeconds]     = useState<number>(WARNING_SECONDS);
+
+  const navigate    = useNavigate();
+  const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastActivity = useRef<number>(Date.now());
+
+  // ──────────────────────────────────────────────
+  // Ejecutar cierre de sesión definitivo
+  // ──────────────────────────────────────────────
+  const performLogout = useCallback((motivo = 'inactividad') => {
+    setToken(null);
+    setUser(null);
+    setShowTimeoutModal(false);
+    localStorage.removeItem('sigap_token');
+    localStorage.removeItem('sigap_user');
+    localStorage.removeItem('sigap_active_role');
+    navigate('/login', {
+      replace: true,
+      state: motivo === 'inactividad'
+        ? { mensajeInactividad: 'Tu sesión ha expirado por inactividad (4 minutos).' }
+        : undefined,
+    });
+  }, [navigate]);
+
+  // ──────────────────────────────────────────────
+  // Limpiar todos los timers
+  // ──────────────────────────────────────────────
+  const clearAllTimers = useCallback(() => {
+    if (timerRef.current)   clearTimeout(timerRef.current);
+    if (warningRef.current) clearTimeout(warningRef.current);
+    timerRef.current   = null;
+    warningRef.current = null;
+  }, []);
+
+  // ──────────────────────────────────────────────
+  // Reiniciar el ciclo de timers
+  // ──────────────────────────────────────────────
+  const resetTimers = useCallback(() => {
+    clearAllTimers();
+    setShowTimeoutModal(false);
+    setTimeoutSeconds(WARNING_SECONDS);
+
+    // Timer de advertencia: se dispara (INACTIVITY_LIMIT - WARNING_BEFORE) ms después
+    warningRef.current = setTimeout(() => {
+      setShowTimeoutModal(true);
+      setTimeoutSeconds(WARNING_SECONDS);
+    }, INACTIVITY_LIMIT_MS - WARNING_BEFORE_MS);
+
+    // Timer de expiración definitiva
+    timerRef.current = setTimeout(() => {
+      performLogout('inactividad');
+    }, INACTIVITY_LIMIT_MS);
+  }, [clearAllTimers, performLogout]);
+
+  // ──────────────────────────────────────────────
+  // Restaurar sesión al cargar
+  // ──────────────────────────────────────────────
+  useEffect(() => {
+    const storedToken = localStorage.getItem('sigap_token');
+    const storedUser  = localStorage.getItem('sigap_user');
+
+    if (storedToken && storedUser) {
+      setToken(storedToken);
+      setUser(JSON.parse(storedUser));
+>>>>>>> dev
     }
   });
 
@@ -43,68 +129,64 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const navigate = useNavigate();
 
-  // Control de inactividad de sesión (3 minutos = 180,000 ms)
+  // ──────────────────────────────────────────────
+  // Listener de actividad del usuario
+  // ──────────────────────────────────────────────
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      clearAllTimers();
+      setShowTimeoutModal(false);
+      return;
+    }
 
-    const INACTIVITY_LIMIT_MS = 3 * 60 * 1000; // 3 minutos
-    let timer: any = null;
-
-    const resetTimer = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        // Expirar sesión
-        setToken(null);
-        setUser(null);
-        localStorage.removeItem('sigap_token');
-        localStorage.removeItem('sigap_user');
-        localStorage.removeItem('sigap_active_role');
-        navigate('/login', { 
-          replace: true, 
-          state: { mensajeInactividad: 'Tu sesión ha expirado por inactividad (3 minutos).' } 
-        });
-      }, INACTIVITY_LIMIT_MS);
-    };
-
-    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
-    
-    // Throttle de eventos para no reiniciar el timer en cada milisegundo de movimiento
-    let lastActivity = Date.now();
-    const handleUserActivity = () => {
+    const handleActivity = () => {
       const now = Date.now();
-      if (now - lastActivity > 1000) {
-        lastActivity = now;
-        resetTimer();
+      // Throttle: solo reiniciar si pasó más de 1 segundo desde la última actividad
+      // y el modal NO está visible (si ya apareció el modal, la actividad no lo oculta)
+      if (now - lastActivity.current > 1000 && !showTimeoutModal) {
+        lastActivity.current = now;
+        resetTimers();
       }
     };
 
-    events.forEach(evt => window.addEventListener(evt, handleUserActivity, { passive: true }));
-    resetTimer();
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+    events.forEach(evt => window.addEventListener(evt, handleActivity, { passive: true }));
+
+    // Iniciar al montar / cuando el token cambia
+    resetTimers();
 
     return () => {
-      if (timer) clearTimeout(timer);
-      events.forEach(evt => window.removeEventListener(evt, handleUserActivity));
+      clearAllTimers();
+      events.forEach(evt => window.removeEventListener(evt, handleActivity));
     };
-  }, [token, navigate]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
+  // ──────────────────────────────────────────────
+  // Extender sesión (botón "Continuar" del modal)
+  // ──────────────────────────────────────────────
+  const extendSession = useCallback(() => {
+    lastActivity.current = Date.now();
+    resetTimers();
+  }, [resetTimers]);
+
+  // ──────────────────────────────────────────────
+  // Login
+  // ──────────────────────────────────────────────
   const login = (newToken: string, newUser: User) => {
     setToken(newToken);
     setUser(newUser);
     localStorage.setItem('sigap_token', newToken);
     localStorage.setItem('sigap_user', JSON.stringify(newUser));
-
-    // Dirigir al usuario al gestor de roles para evaluar si tiene uno o múltiples perfiles
     navigate('/role-selection', { replace: true });
   };
 
-  const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem('sigap_token');
-    localStorage.removeItem('sigap_user');
-    localStorage.removeItem('sigap_active_role');
-    navigate('/login', { replace: true });
-  };
+  // ──────────────────────────────────────────────
+  // Logout manual
+  // ──────────────────────────────────────────────
+  const logout = useCallback(() => {
+    performLogout('manual');
+  }, [performLogout]);
 
   return (
     <AuthContext.Provider value={{
@@ -113,7 +195,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       login,
       logout,
       isAuthenticated: !!token,
-      isLoading
+      isLoading,
+      showTimeoutModal,
+      timeoutSeconds,
+      extendSession,
     }}>
       {children}
     </AuthContext.Provider>

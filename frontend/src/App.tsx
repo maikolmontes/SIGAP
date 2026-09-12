@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ProtectedRoute } from './components/common/ProtectedRoute'
+import { useAuth } from './context/AuthContext'
+import SessionTimeoutModal from './components/common/SessionTimeoutModal'
 import Login from './pages/auth/Login'
 import RoleSelection from './pages/auth/RoleSelection'
 import DashboardPlaneacion from './pages/planeacion/DashboardPlaneacion'
@@ -28,60 +30,88 @@ import DashboardConsultor from './pages/consultor/DashboardConsultor'
 import DetalleAgendaConsultor from './pages/consultor/DetalleAgendaConsultor'
 import ObservacionesConsultor from './pages/consultor/ObservacionesConsultor'
 
+// Decano Pages
+import DashboardDecano from './pages/decano/DashboardDecano'
+import AgendasDecano from './pages/decano/AgendasDecano'
+import DetalleAgendaDecano from './pages/decano/DetalleAgendaDecano'
+import ObservacionesDecano from './pages/decano/ObservacionesDecano'
+
 function App() {
+  const { showTimeoutModal, timeoutSeconds, extendSession, logout } = useAuth();
+
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/role-selection" element={<RoleSelection />} />
-      <Route path="/" element={<Navigate to="/login" replace />} />
+    <>
+      {/* Modal de sesión por expirar — visible en cualquier página */}
+      {showTimeoutModal && (
+        <SessionTimeoutModal
+          secondsRemaining={timeoutSeconds}
+          onStayLoggedIn={extendSession}
+          onLogout={logout}
+        />
+      )}
 
-      {/* Planeación */}
-      <Route element={<ProtectedRoute allowedRoles={['Planeacion', 'Admin']} />}>
-        <Route path="/planeacion/dashboard" element={<DashboardPlaneacion />} />
-        <Route path="/planeacion/docentes" element={<Docentes />} />
-        <Route path="/planeacion/periodos" element={<Periodos />} /> {/* 👈 TU APORTE */}
-        <Route path="/planeacion/semanas" element={<Semanas />} />
-        <Route path="/planeacion/facultades" element={<Facultades />} />
-        <Route path="/planeacion/programas" element={<Programas />} />
-        <Route path="/planeacion/perfiles" element={<GestionPerfiles />} />
-        <Route path="/planeacion/permisos" element={<GestionPerfiles />} />
-        <Route path="/planeacion/analitica" element={<Analitica rol="planeacion" />} />
-      </Route>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/role-selection" element={<RoleSelection />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
 
-      {/* Director */}
-      <Route element={<ProtectedRoute allowedRoles={['Director']} />}>
-        <Route path="/director/dashboard" element={<DashboardDirector />} />
-        <Route path="/director/agendas" element={<AgendasPorRevisar />} />
-        <Route path="/director/agendas/:id" element={<DetalleAgenda />} />
-        <Route path="/director/historial" element={<HistorialAgendas />} />
-        <Route path="/director/reportes" element={<ReportesDirector />} />
-        <Route path="/director/observaciones" element={<ObservacionesDirector />} />
-        <Route path="/director/analitica" element={<Analitica rol="director" />} />
-      </Route>
+        {/* Planeación */}
+        <Route element={<ProtectedRoute allowedRoles={['Planeacion', 'Admin']} />}>
+          <Route path="/planeacion/dashboard" element={<DashboardPlaneacion />} />
+          <Route path="/planeacion/docentes" element={<Docentes />} />
+          <Route path="/planeacion/periodos" element={<Periodos />} />
+          <Route path="/planeacion/semanas" element={<Semanas />} />
+          <Route path="/planeacion/facultades" element={<Facultades />} />
+          <Route path="/planeacion/programas" element={<Programas />} />
+          <Route path="/planeacion/perfiles" element={<GestionPerfiles />} />
+          <Route path="/planeacion/permisos" element={<GestionPerfiles />} />
+          <Route path="/planeacion/analitica" element={<Analitica rol="planeacion" />} />
+        </Route>
 
-      {/* Docente */}
-      <Route element={<ProtectedRoute allowedRoles={['Docente']} />}>
-        <Route path="/docente/dashboard" element={<DashboardDocente />} />
-        <Route path="/docente/agenda" element={<AgendaDocente />} />
-        <Route path="/docente/avance-semana-8" element={<AvanceSemana semana="8" />} />
-        <Route path="/docente/avance-semana-16" element={<AvanceSemana semana="16" />} />
-        <Route path="/docente/evidencias" element={<Evidencias />} />
-      </Route>
+        {/* Director */}
+        <Route element={<ProtectedRoute allowedRoles={['Director']} />}>
+          <Route path="/director/dashboard" element={<DashboardDirector />} />
+          <Route path="/director/agendas" element={<AgendasPorRevisar />} />
+          <Route path="/director/agendas/:id" element={<DetalleAgenda />} />
+          <Route path="/director/historial" element={<HistorialAgendas />} />
+          <Route path="/director/reportes" element={<ReportesDirector />} />
+          <Route path="/director/observaciones" element={<ObservacionesDirector />} />
+          <Route path="/director/analitica" element={<Analitica rol="director" />} />
+        </Route>
 
-      {/* Consultor */}
-      <Route element={<ProtectedRoute allowedRoles={['Consultor']} />}>
-        <Route path="/consultor/dashboard" element={<DashboardConsultor />} />
-        <Route path="/consultor/agendas/:id" element={<DetalleAgendaConsultor />} />
-        <Route path="/consultor/observaciones" element={<ObservacionesConsultor />} />
-        <Route path="/consultor/analitica" element={<Analitica rol="consultor" />} />
-      </Route>
+        {/* Docente */}
+        <Route element={<ProtectedRoute allowedRoles={['Docente']} />}>
+          <Route path="/docente/dashboard" element={<DashboardDocente />} />
+          <Route path="/docente/agenda" element={<AgendaDocente />} />
+          <Route path="/docente/avance-semana-8" element={<AvanceSemana semana="8" />} />
+          <Route path="/docente/avance-semana-16" element={<AvanceSemana semana="16" />} />
+          <Route path="/docente/evidencias" element={<Evidencias />} />
+        </Route>
 
-      {/* Comunes */}
-      <Route element={<ProtectedRoute />}>
-        <Route path="/perfil" element={<Perfil />} />
-        <Route path="/configuracion" element={<Configuracion />} />
-      </Route>
-    </Routes>
+        {/* Consultor */}
+        <Route element={<ProtectedRoute allowedRoles={['Consultor']} />}>
+          <Route path="/consultor/dashboard" element={<DashboardConsultor />} />
+          <Route path="/consultor/agendas/:id" element={<DetalleAgendaConsultor />} />
+          <Route path="/consultor/observaciones" element={<ObservacionesConsultor />} />
+          <Route path="/consultor/analitica" element={<Analitica rol="consultor" />} />
+        </Route>
+
+        {/* Decano */}
+        <Route element={<ProtectedRoute allowedRoles={['Decano']} />}>
+          <Route path="/decano/dashboard" element={<DashboardDecano />} />
+          <Route path="/decano/agendas" element={<AgendasDecano />} />
+          <Route path="/decano/agendas/:id" element={<DetalleAgendaDecano />} />
+          <Route path="/decano/observaciones" element={<ObservacionesDecano />} />
+          <Route path="/decano/analitica" element={<Analitica rol="decano" />} />
+        </Route>
+
+        {/* Comunes */}
+        <Route element={<ProtectedRoute />}>
+          <Route path="/perfil" element={<Perfil />} />
+          <Route path="/configuracion" element={<Configuracion />} />
+        </Route>
+      </Routes>
+    </>
   )
 }
 
