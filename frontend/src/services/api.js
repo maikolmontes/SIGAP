@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -8,7 +8,7 @@ export const API_BASE_URL = API_URL.endsWith('/api')
 
 export const SERVER_URL = API_BASE_URL.replace(/\/api\/?$/, '');
 
-export const getArchivoUrl = (ruta: string) => {
+export const getArchivoUrl = (ruta) => {
     if (!ruta) return '';
     if (ruta.startsWith('http://') || ruta.startsWith('https://')) return ruta;
     const cleanRuta = ruta.startsWith('/') ? ruta : `/${ruta}`;
