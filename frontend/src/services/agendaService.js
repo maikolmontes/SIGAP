@@ -1,4 +1,4 @@
-﻿import api from './api'
+import api from './api'
 
 export const getAgenda = (id_usuario) => {
     return api.get(`/agenda/${id_usuario}`)

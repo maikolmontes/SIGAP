@@ -1,4 +1,4 @@
-﻿import api from './api'
+import api from './api'
 
 export const getPeriodos = () => api.get('/periodos')
 export const getPeriodoById = (id) => api.get(`/periodos/${id}`)
