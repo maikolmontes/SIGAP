@@ -26,12 +26,17 @@ const loginGoogle = async (req, res) => {
         const result = await pool.query(`
             SELECT 
                 u.id_usuario, u.nombres, u.apellidos, u.correo, u.activo,
+                u.id_facultad, u.id_programa,
+                COALESCE(f.nombre_facultad, f_prog.nombre_facultad) AS facultad,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
+            LEFT JOIN facultad f ON u.id_facultad = f.id_facultad
+            LEFT JOIN programa_academico pa ON u.id_programa = pa.id_programa
+            LEFT JOIN facultad f_prog ON pa.id_facultad = f_prog.id_facultad
             LEFT JOIN usuario_rol ur ON u.id_usuario = ur.id_usuario
             LEFT JOIN roles r ON ur.id_rol = r.id_rol
             WHERE u.correo = $1 AND u.activo = TRUE
-            GROUP BY u.id_usuario
+            GROUP BY u.id_usuario, f.nombre_facultad, f_prog.nombre_facultad
         `, [correo]);
 
         if (result.rows.length === 0) {
@@ -46,7 +51,15 @@ const loginGoogle = async (req, res) => {
 
         // Generar JWT propio
         const token = jwt.sign(
-            { id: user.id_usuario, correo: user.correo, roles: user.roles, imagen_perfil: user.imagen_perfil },
+            { 
+                id: user.id_usuario, 
+                correo: user.correo, 
+                roles: user.roles, 
+                id_facultad: user.id_facultad, 
+                id_programa: user.id_programa, 
+                facultad: user.facultad,
+                imagen_perfil: user.imagen_perfil 
+            },
             process.env.JWT_SECRET || 'jwt_secret_key_sigap_2026',
             { expiresIn: '8h' } // El token expirará en 8 horas
         );

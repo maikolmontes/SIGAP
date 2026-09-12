@@ -41,7 +41,24 @@ const getAgendas = async (req, res) => {
 
         const periodoInfo = await pool.query('SELECT * FROM periodo WHERE id_periodo = $1', [idPeriodo]);
 
-        // Traer docentes con sus funciones agrupadas (filtrado por programa Ingeniería de Sistemas)
+        // Determinar rol y restricciones
+        const userRoles = (req.user?.roles || '').toLowerCase();
+        const isDecano = userRoles.includes('decano');
+        const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
+
+        let facultadId = req.user?.id_facultad || null;
+        if (isDecano && !facultadId && req.user?.id) {
+            const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
+            facultadId = facQ.rows[0]?.id_facultad || null;
+        }
+
+        let userProgId = req.user?.id_programa || null;
+        if (isDirector && !userProgId && req.user?.id) {
+            const progQ = await pool.query('SELECT id_programa FROM usuarios WHERE id_usuario = $1', [req.user.id]);
+            userProgId = progQ.rows[0]?.id_programa || 1;
+        }
+
+        // Traer docentes con sus funciones agrupadas
         let query = `
             SELECT
                 u.id_usuario,
@@ -67,10 +84,19 @@ const getAgendas = async (req, res) => {
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
             LEFT JOIN usuarios rev ON rev.id_usuario = af.revisado_por
             WHERE u.activo = TRUE
-              AND u.id_programa = 1
         `;
         const params = [idPeriodo];
         let paramIdx = 2;
+
+        if (isDecano && facultadId) {
+            query += ` AND pa.id_facultad = $${paramIdx}`;
+            params.push(facultadId);
+            paramIdx++;
+        } else if (isDirector) {
+            query += ` AND u.id_programa = $${paramIdx}`;
+            params.push(userProgId || 1);
+            paramIdx++;
+        }
 
         if (estado) {
             query += ` AND af.estado_agenda = $${paramIdx}`;
@@ -142,9 +168,21 @@ const getAgendas = async (req, res) => {
             return d;
         });
 
+        let nombreFacultad = null;
+        let programasFacultad = [];
+        if (isDecano && facultadId) {
+            const facInfo = await pool.query('SELECT nombre_facultad FROM facultad WHERE id_facultad = $1', [facultadId]);
+            nombreFacultad = facInfo.rows[0]?.nombre_facultad || null;
+
+            const progsInfo = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico WHERE id_facultad = $1 AND activo = true ORDER BY nombre_programa', [facultadId]);
+            programasFacultad = progsInfo.rows;
+        }
+
         res.json({
             agendas,
-            periodo: periodoInfo.rows[0] || null
+            periodo: periodoInfo.rows[0] || null,
+            facultad: nombreFacultad,
+            programas_facultad: programasFacultad
         });
 
     } catch (error) {
@@ -166,7 +204,7 @@ const getAgendaDetalle = async (req, res) => {
         const periodoRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         const idPeriodo = periodoRes.rows.length > 0 ? periodoRes.rows[0].id_periodo : null;
         if (!idPeriodo) {
-            return res.status(404).json({ error: 'No hay periodo activo.' });
+            return res.status(404).json({ error: 'No hay período activo.' });
         }
 
         // Info del docente
@@ -319,7 +357,7 @@ const aprobarAgenda = async (req, res) => {
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         if (periodoRes.rows.length === 0) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'No hay periodo activo.' });
+            return res.status(400).json({ error: 'No hay período activo.' });
         }
         const idPeriodo = periodoRes.rows[0].id_periodo;
 
@@ -373,7 +411,7 @@ const devolverAgenda = async (req, res) => {
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         if (periodoRes.rows.length === 0) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'No hay periodo activo.' });
+            return res.status(400).json({ error: 'No hay período activo.' });
         }
         const idPeriodo = periodoRes.rows[0].id_periodo;
 
@@ -502,8 +540,16 @@ const getReportesResumen = async (req, res) => {
         const periodo = periodoRes.rows[0];
         const idPeriodo = periodo.id_periodo;
 
+        const userRoles = (req.user?.roles || '').toLowerCase();
+        const isDecano = userRoles.includes('decano');
+        let facultadId = req.user?.id_facultad || null;
+        if (isDecano && !facultadId && req.user?.id) {
+            const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
+            facultadId = facQ.rows[0]?.id_facultad || null;
+        }
+
         // 1. Estadísticas por programa
-        const progRes = await pool.query(`
+        let progQuery = `
             SELECT
                 pa.nombre_programa,
                 COUNT(DISTINCT u.id_usuario) AS total_docentes,
@@ -527,12 +573,20 @@ const getReportesResumen = async (req, res) => {
                 WHERE ua2.id_usuario = u.id_usuario
             ) sub ON TRUE
             WHERE u.activo = TRUE
+        `;
+        const progParams = [idPeriodo];
+        if (isDecano && facultadId) {
+            progQuery += ` AND pa.id_facultad = $2`;
+            progParams.push(facultadId);
+        }
+        progQuery += `
             GROUP BY pa.nombre_programa
             ORDER BY pa.nombre_programa
-        `, [idPeriodo]);
+        `;
+        const progRes = await pool.query(progQuery, progParams);
 
         // 2. Distribución de perfiles docentes
-        const perfilesRes = await pool.query(`
+        let perfilesQuery = `
             SELECT
                 u.id_usuario,
                 tc.tipo AS tipo_contrato,
@@ -542,14 +596,23 @@ const getReportesResumen = async (req, res) => {
                 COALESCE(SUM(CASE WHEN af.funcion_sustantiva ILIKE '%investigación%' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
             FROM usuarios u
             JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
+            JOIN programa_academico pa ON pa.id_programa = u.id_programa
             JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
             JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
             JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
             LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
             LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
             WHERE u.activo = TRUE
+        `;
+        const perfilesParams = [idPeriodo];
+        if (isDecano && facultadId) {
+            perfilesQuery += ` AND pa.id_facultad = $2`;
+            perfilesParams.push(facultadId);
+        }
+        perfilesQuery += `
             GROUP BY u.id_usuario, tc.tipo, tc.horas_contrato
-        `, [idPeriodo]);
+        `;
+        const perfilesRes = await pool.query(perfilesQuery, perfilesParams);
 
         // Contar perfiles
         const perfilCount = {};
@@ -639,6 +702,22 @@ const getTodasObservaciones = async (req, res) => {
             return res.json({ observaciones: [], periodo: null, total: 0 });
         }
 
+        const userRoles = (req.user?.roles || '').toLowerCase();
+        const isDecano = userRoles.includes('decano');
+        const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
+
+        let facultadId = req.user?.id_facultad || null;
+        if (isDecano && !facultadId && req.user?.id) {
+            const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
+            facultadId = facQ.rows[0]?.id_facultad || null;
+        }
+
+        let userProgId = req.user?.id_programa || null;
+        if (isDirector && !userProgId && req.user?.id) {
+            const progQ = await pool.query('SELECT id_programa FROM usuarios WHERE id_usuario = $1', [req.user.id]);
+            userProgId = progQ.rows[0]?.id_programa || 1;
+        }
+
         let queryText = `
             SELECT 
                 od.id, od.semana, od.texto, od.fecha, od.ultima_edicion,
@@ -658,10 +737,19 @@ const getTodasObservaciones = async (req, res) => {
             LEFT JOIN programa_academico pa ON pa.id_programa = u.id_programa
             LEFT JOIN usuarios dir ON dir.id_usuario = od.director_id
             WHERE af.id_periodo = $1
-              AND u.id_programa = 1
         `;
         const params = [idPeriodo];
         let paramIdx = 2;
+
+        if (isDecano && facultadId) {
+            queryText += ` AND pa.id_facultad = $${paramIdx}`;
+            params.push(facultadId);
+            paramIdx++;
+        } else if (isDirector) {
+            queryText += ` AND u.id_programa = $${paramIdx}`;
+            params.push(userProgId || 1);
+            paramIdx++;
+        }
 
         if (semana && [8, 16].includes(parseInt(semana))) {
             queryText += ` AND od.semana = $${paramIdx}`;
@@ -673,10 +761,17 @@ const getTodasObservaciones = async (req, res) => {
 
         const result = await pool.query(queryText, params);
 
+        let nombreFacultad = null;
+        if (isDecano && facultadId) {
+            const facInfo = await pool.query('SELECT nombre_facultad FROM facultad WHERE id_facultad = $1', [facultadId]);
+            nombreFacultad = facInfo.rows[0]?.nombre_facultad || null;
+        }
+
         res.json({
             observaciones: result.rows,
             periodo,
-            total: result.rowCount
+            total: result.rowCount,
+            facultad: nombreFacultad
         });
 
     } catch (error) {

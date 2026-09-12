@@ -38,7 +38,7 @@ import {
 } from 'recharts';
 
 interface AnaliticaProps {
-  rol: 'planeacion' | 'director' | 'consultor';
+  rol: 'planeacion' | 'director' | 'consultor' | 'decano';
 }
 
 const COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6'];

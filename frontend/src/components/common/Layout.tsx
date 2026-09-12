@@ -4,7 +4,7 @@ import Topbar from './Topbar'
 
 interface LayoutProps {
     children: React.ReactNode
-    rol: 'planeacion' | 'director' | 'docente' | 'consultor'
+    rol: 'planeacion' | 'director' | 'docente' | 'consultor' | 'decano'
     path: string
 }
 

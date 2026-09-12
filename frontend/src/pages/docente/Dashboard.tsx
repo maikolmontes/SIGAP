@@ -308,7 +308,7 @@ export default function DashboardDocente() {
         <div className="p-4 mb-6 rounded-xl flex items-start gap-3 bg-amber-50 border border-amber-200 text-amber-800 shadow-sm">
           <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
           <div>
-            <p className="font-bold text-sm">El periodo académico actual está cerrado.</p>
+            <p className="font-bold text-sm">El período académico actual está cerrado.</p>
             <p className="text-xs mt-0.5">Puedes visualizar tu información, pero no se permiten modificaciones en la agenda o reportes.</p>
           </div>
         </div>
@@ -548,7 +548,7 @@ export default function DashboardDocente() {
               return (
                 <div key={item.idPeriodo} className="bg-gray-50 border border-gray-200 hover:border-indigo-100 hover:bg-indigo-50/10 rounded-xl p-4 transition-all">
                   <div className="flex justify-between items-center mb-2">
-                    <span className="font-bold text-gray-800 text-sm">Periodo {item.label}</span>
+                    <span className="font-bold text-gray-800 text-sm">Período {item.label}</span>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pct === 100 ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
                       {pct}% al día
                     </span>
@@ -604,13 +604,13 @@ export default function DashboardDocente() {
         <div className="mt-6">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-indigo-600" />
-            Historial de Agendas por Periodo
+            Historial de Agendas por Período
           </h2>
           <div className="space-y-6">
             {historicalAgendas.map((agenda, index) => (
               <div key={index} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="bg-gray-50 px-6 py-3 border-b border-gray-100 flex justify-between items-center">
-                  <span className="font-bold text-blue-900">Periodo {agenda.periodo.anio}-{agenda.periodo.semestre}</span>
+                  <span className="font-bold text-blue-900">Período {agenda.periodo.anio}-{agenda.periodo.semestre}</span>
                   <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded font-bold uppercase">Cerrado (Solo Lectura)</span>
                 </div>
                 <div className="p-6">

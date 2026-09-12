@@ -21,3 +21,73 @@
     animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 }
+
+/* ==========================================================================
+   MÓDULO DE USABILIDAD Y ACCESIBILIDAD UNIVERSAL (WCAG 2.1)
+   ========================================================================== */
+
+/* 1. Filtros de Confort Visual y Color */
+html[data-color-filter="grayscale"] {
+  filter: grayscale(100%) !important;
+}
+
+html[data-color-filter="warm"] {
+  filter: sepia(32%) brightness(96%) contrast(97%) !important;
+}
+
+html[data-color-filter="high-contrast"] {
+  filter: contrast(135%) brightness(102%) !important;
+}
+
+html[data-color-filter="inverted"] {
+  filter: invert(90%) hue-rotate(180%) !important;
+}
+
+html[data-color-filter="inverted"] img,
+html[data-color-filter="inverted"] video {
+  filter: invert(100%) hue-rotate(180%) !important;
+}
+
+/* 2. Escalado Tipográfico Accesible */
+html[data-font-size="normal"] {
+  font-size: 16px;
+}
+
+html[data-font-size="large"] {
+  font-size: 18px;
+}
+
+html[data-font-size="xlarge"] {
+  font-size: 20px;
+}
+
+/* 3. Modo Lectura Amigable / Espaciado Adaptado */
+html[data-dyslexia="true"] body,
+html[data-dyslexia="true"] p,
+html[data-dyslexia="true"] span,
+html[data-dyslexia="true"] td,
+html[data-dyslexia="true"] th,
+html[data-dyslexia="true"] label,
+html[data-dyslexia="true"] button,
+html[data-dyslexia="true"] input {
+  letter-spacing: 0.035em !important;
+  word-spacing: 0.05em !important;
+  line-height: 1.65 !important;
+}
+
+/* 4. Reducción de Movimiento (Sensibilidad Vestibular) */
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] *::before,
+html[data-reduced-motion="true"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* 5. Resaltado de Enfoque y Foco Visible (Navegación por Teclado) */
+html[data-focus-highlight="true"] :focus-visible {
+  outline: 3px solid #2563eb !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.3) !important;
+}

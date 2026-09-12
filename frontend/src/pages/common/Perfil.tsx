@@ -47,6 +47,7 @@ export default function Perfil() {
     const [loading, setLoading] = useState<boolean>(true);
     const [saving, setSaving] = useState<boolean>(false);
     const [mensaje, setMensaje] = useState<{ tipo: string; texto: string } | null>(null);
+    const [docBloqueado, setDocBloqueado] = useState<boolean>(false);
 
     // Form state
     const [form, setForm] = useState({
@@ -90,17 +91,22 @@ export default function Perfil() {
             const response = await api.get(`/usuarios/${userId}/perfil-completo`);
             const data = response.data;
             setProfile(data);
+            // Si el documento fue asignado por planeación, mostrarlo tal cual
+            const docAsignadoPorPlaneacion = data.numero_documento && 
+                data.numero_documento !== '0000000000' && 
+                data.numero_documento.trim() !== '';
             setForm({
                 nombres: data.nombres || '',
                 apellidos: data.apellidos || '',
                 tipo_documento: data.tipo_documento || 'CC',
-                numero_documento: data.numero_documento === '0000000000' ? '' : (data.numero_documento || ''),
+                numero_documento: docAsignadoPorPlaneacion ? data.numero_documento : (data.numero_documento === '0000000000' ? '' : (data.numero_documento || '')),
                 id_contrato: data.id_contrato || 0,
                 id_programa: data.id_programa || 0,
                 titulo_pregrado: data.titulo_pregrado?.nombre_titulo || '',
                 titulo_posgrado: data.titulo_posgrado?.nombre_titulo || '',
                 titulo_convalidado: data.titulo_convalidado?.nombre_titulo || ''
             });
+            setDocBloqueado(docAsignadoPorPlaneacion);
         } catch (err: any) {
             console.error('Error fetching profile:', err);
             setMensaje({ tipo: 'error', texto: 'No se pudo cargar la información del perfil.' });
@@ -325,18 +331,27 @@ export default function Perfil() {
                                     <select
                                         value={form.tipo_documento}
                                         onChange={(e) => handleChange('tipo_documento', e.target.value)}
-                                        className="w-28 bg-white text-gray-800 font-medium rounded-lg border border-gray-200 py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-sm transition-colors"
+                                        disabled={docBloqueado}
+                                        className={`w-28 font-medium rounded-lg border py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-sm transition-colors ${docBloqueado ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : 'bg-white text-gray-800 border-gray-200'}`}
                                     >
                                         <option value="CC">CC</option>
                                         <option value="CE">CE</option>
                                     </select>
-                                    <input
-                                        type="text"
-                                        value={form.numero_documento}
-                                        onChange={(e) => handleChange('numero_documento', e.target.value.replace(/\D/g, ''))}
-                                        placeholder="Número de documento"
-                                        className="flex-1 bg-white text-gray-800 font-medium rounded-lg border border-gray-200 py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-sm transition-colors"
-                                    />
+                                    <div className="flex-1 relative">
+                                        <input
+                                            type="text"
+                                            value={form.numero_documento}
+                                            onChange={(e) => !docBloqueado && handleChange('numero_documento', e.target.value.replace(/\D/g, ''))}
+                                            readOnly={docBloqueado}
+                                            placeholder="Número de documento"
+                                            className={`w-full font-medium rounded-lg border py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-sm transition-colors ${docBloqueado ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200 pr-28' : 'bg-white text-gray-800 border-gray-200'}`}
+                                        />
+                                        {docBloqueado && (
+                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                                                Asignado
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 

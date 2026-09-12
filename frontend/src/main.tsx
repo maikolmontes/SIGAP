@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { AuthProvider } from './context/AuthContext'
+import { AccessibilityProvider } from './context/AccessibilityContext'
 import './index.css'
 import App from './App.tsx'
 
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || ''}>
         <AuthProvider>
-          <App />
+          <AccessibilityProvider>
+            <App />
+          </AccessibilityProvider>
         </AuthProvider>
       </GoogleOAuthProvider>
     </BrowserRouter>
