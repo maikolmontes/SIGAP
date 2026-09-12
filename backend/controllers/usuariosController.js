@@ -395,27 +395,15 @@ const create = async (req, res) => {
 
         // Insertar múltiples roles
         for (const rName of rolesList) {
-<<<<<<< HEAD
-            const norm = normalizeRolName(rName);
-            const idRol = roleMap.get(norm) || roleMap.get(rName.toLowerCase());
+            const idRol = await resolverIdRol(rName) || roleMap.get(normalizeRolName(rName)) || roleMap.get(rName.toLowerCase());
             if (idRol) {
                 await client.query(`
                     INSERT INTO usuario_rol (id_usuario, id_rol)
-                    SELECT $1, $2
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM usuario_rol WHERE id_usuario = $1 AND id_rol = $2
-                    )
+                    VALUES ($1, $2)
+                    ON CONFLICT (id_usuario, id_rol) DO NOTHING
                 `, [nuevoUsuario.id_usuario, idRol]);
-=======
-            const idRol = await resolverIdRol(rName);
-            if (idRol) {
-                await pool.query(
-                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
-                    [nuevoUsuario.id_usuario, idRol]
-                );
             } else {
                 console.warn(`No se encontró el rol: ${rName}`);
->>>>>>> dev
             }
         }
 
@@ -890,27 +878,15 @@ const update = async (req, res) => {
 
         // Insertar los nuevos roles
         for (const rName of rolesList) {
-<<<<<<< HEAD
-            const norm = normalizeRolName(rName);
-            const idRol = roleMap.get(norm) || roleMap.get(rName.toLowerCase());
+            const idRol = await resolverIdRol(rName) || roleMap.get(normalizeRolName(rName)) || roleMap.get(rName.toLowerCase());
             if (idRol) {
                 await client.query(`
                     INSERT INTO usuario_rol (id_usuario, id_rol)
-                    SELECT $1, $2
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM usuario_rol WHERE id_usuario = $1 AND id_rol = $2
-                    )
+                    VALUES ($1, $2)
+                    ON CONFLICT (id_usuario, id_rol) DO NOTHING
                 `, [id, idRol]);
-=======
-            const idRol = await resolverIdRol(rName);
-            if (idRol) {
-                await pool.query(
-                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
-                    [id, idRol]
-                );
             } else {
                 console.warn(`No se encontró el rol: ${rName}`);
->>>>>>> dev
             }
         }
 

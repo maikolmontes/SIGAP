@@ -163,10 +163,7 @@ async function runSeed(poolInstance = pool) {
       }
     }
 
-<<<<<<< HEAD
-=======
     // 3. Asignar permisos iniciales por defecto a los roles:
->>>>>>> dev
     console.log('Configurando permisos iniciales por rol...');
     const allPermisosRes = await client.query('SELECT id_permisos, modulo, pagina, accion FROM permisos WHERE pagina IS NOT NULL');
     const allPermisos = allPermisosRes.rows;

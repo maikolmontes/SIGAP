@@ -30,29 +30,37 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-<<<<<<< HEAD
+// Configuración de tiempos
+const INACTIVITY_LIMIT_MS = 4 * 60 * 1000;  // 4 minutos total de inactividad
+const WARNING_BEFORE_MS   = 60 * 1000;        // Mostrar modal 60 s antes de expirar
+const WARNING_SECONDS     = 60;               // Cuenta regresiva en el modal
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  // Inicialización síncrona desde localStorage para evitar parpadeo en Vercel
   const [token, setToken] = useState<string | null>(() => {
     try {
       return localStorage.getItem('sigap_token');
     } catch {
       return null;
-=======
-// Configuración de tiempos
-const INACTIVITY_LIMIT_MS  = 4 * 60 * 1000;  // 4 minutos total de inactividad
-const WARNING_BEFORE_MS    = 60 * 1000;        // Mostrar modal 60 s antes de expirar
-const WARNING_SECONDS      = 60;               // Cuenta regresiva en el modal
+    }
+  });
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser]           = useState<User | null>(null);
-  const [token, setToken]         = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [showTimeoutModal, setShowTimeoutModal] = useState<boolean>(false);
-  const [timeoutSeconds, setTimeoutSeconds]     = useState<number>(WARNING_SECONDS);
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const stored = localStorage.getItem('sigap_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
 
-  const navigate    = useNavigate();
-  const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const warningRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isLoading, setIsLoading]               = useState<boolean>(false);
+  const [showTimeoutModal, setShowTimeoutModal]  = useState<boolean>(false);
+  const [timeoutSeconds, setTimeoutSeconds]      = useState<number>(WARNING_SECONDS);
+
+  const navigate     = useNavigate();
+  const timerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivity = useRef<number>(Date.now());
 
   // ──────────────────────────────────────────────
@@ -102,32 +110,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       performLogout('inactividad');
     }, INACTIVITY_LIMIT_MS);
   }, [clearAllTimers, performLogout]);
-
-  // ──────────────────────────────────────────────
-  // Restaurar sesión al cargar
-  // ──────────────────────────────────────────────
-  useEffect(() => {
-    const storedToken = localStorage.getItem('sigap_token');
-    const storedUser  = localStorage.getItem('sigap_user');
-
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
->>>>>>> dev
-    }
-  });
-
-  const [user, setUser] = useState<User | null>(() => {
-    try {
-      const stored = localStorage.getItem('sigap_user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const navigate = useNavigate();
 
   // ──────────────────────────────────────────────
   // Listener de actividad del usuario
