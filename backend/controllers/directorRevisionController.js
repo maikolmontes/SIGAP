@@ -3,6 +3,8 @@
  * Endpoints de supervisión: listar agendas, aprobar, devolver, observaciones, reportes
  */
 const pool = require('../db/connection');
+const notificaciones = require('../services/notificacionesService');
+const { calcularAlcance } = require('../utils/rolActivo');
 
 // ================================================================
 // Helper: Calcular perfil docente según Acuerdo 030/2024
@@ -41,16 +43,8 @@ const getAgendas = async (req, res) => {
 
         const periodoInfo = await pool.query('SELECT * FROM periodo WHERE id_periodo = $1', [idPeriodo]);
 
-        // Determinar rol y restricciones
-        const userRoles = (req.user?.roles || '').toLowerCase();
-        const isDecano = userRoles.includes('decano');
-        const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
-
-        let facultadId = req.user?.id_facultad || null;
-        if (isDecano && !facultadId && req.user?.id) {
-            const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
-            facultadId = facQ.rows[0]?.id_facultad || null;
-        }
+        // Determinar restricciones a partir del ROL ACTIVO elegido en la interfaz
+        const { limitadoPorPrograma: isDirector } = calcularAlcance(req);
 
         let userProgId = req.user?.id_programa || null;
         if (isDirector && !userProgId && req.user?.id) {
@@ -88,11 +82,7 @@ const getAgendas = async (req, res) => {
         const params = [idPeriodo];
         let paramIdx = 2;
 
-        if (isDecano && facultadId) {
-            query += ` AND pa.id_facultad = $${paramIdx}`;
-            params.push(facultadId);
-            paramIdx++;
-        } else if (isDirector) {
+        if (isDirector) {
             query += ` AND u.id_programa = $${paramIdx}`;
             params.push(userProgId || 1);
             paramIdx++;
@@ -168,21 +158,9 @@ const getAgendas = async (req, res) => {
             return d;
         });
 
-        let nombreFacultad = null;
-        let programasFacultad = [];
-        if (isDecano && facultadId) {
-            const facInfo = await pool.query('SELECT nombre_facultad FROM facultad WHERE id_facultad = $1', [facultadId]);
-            nombreFacultad = facInfo.rows[0]?.nombre_facultad || null;
-
-            const progsInfo = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico WHERE id_facultad = $1 AND activo = true ORDER BY nombre_programa', [facultadId]);
-            programasFacultad = progsInfo.rows;
-        }
-
         res.json({
             agendas,
-            periodo: periodoInfo.rows[0] || null,
-            facultad: nombreFacultad,
-            programas_facultad: programasFacultad
+            periodo: periodoInfo.rows[0] || null
         });
 
     } catch (error) {
@@ -261,9 +239,12 @@ const getAgendaDetalle = async (req, res) => {
             const actividades = [];
             for (const act of actRes.rows) {
                 // Descripciones
+                // 'activo' se dejó nulo en los registros que crea el docente y la
+                // columna no tiene DEFAULT, así que NULL debe tratarse como activo.
+                // Con 'activo = TRUE' se descartaban todas las descripciones.
                 const descRes = await pool.query(`
                     SELECT * FROM descripcion
-                    WHERE id_asignacionact = $1 AND activo = TRUE
+                    WHERE id_asignacionact = $1 AND activo IS NOT FALSE
                     ORDER BY id_descripcion
                 `, [act.id_asignacionact]);
 
@@ -272,7 +253,7 @@ const getAgendaDetalle = async (req, res) => {
                     // Indicadores
                     const indRes = await pool.query(`
                         SELECT * FROM indicadores
-                        WHERE id_descripcion = $1 AND activo = TRUE
+                        WHERE id_descripcion = $1 AND activo IS NOT FALSE
                         ORDER BY id_indicadores
                     `, [desc.id_descripcion]);
 
@@ -376,6 +357,11 @@ const aprobarAgenda = async (req, res) => {
 
         await client.query('COMMIT');
 
+        // Avisar al docente que su agenda quedó aprobada (en segundo plano)
+        if (result.rowCount > 0) {
+            notificaciones.background.agendaAprobada(idUsuario, directorId);
+        }
+
         res.json({
             mensaje: 'Agenda aprobada exitosamente.',
             funciones_aprobadas: result.rowCount
@@ -430,6 +416,11 @@ const devolverAgenda = async (req, res) => {
         `, [observacion_general.trim(), directorId, idUsuario, idPeriodo]);
 
         await client.query('COMMIT');
+
+        // Avisar al docente con el detalle de las observaciones (en segundo plano)
+        if (result.rowCount > 0) {
+            notificaciones.background.agendaDevuelta(idUsuario, directorId, observacion_general.trim());
+        }
 
         res.json({
             mensaje: 'Agenda devuelta con observaciones.',
@@ -540,13 +531,6 @@ const getReportesResumen = async (req, res) => {
         const periodo = periodoRes.rows[0];
         const idPeriodo = periodo.id_periodo;
 
-        const userRoles = (req.user?.roles || '').toLowerCase();
-        const isDecano = userRoles.includes('decano');
-        let facultadId = req.user?.id_facultad || null;
-        if (isDecano && !facultadId && req.user?.id) {
-            const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
-            facultadId = facQ.rows[0]?.id_facultad || null;
-        }
 
         // 1. Estadísticas por programa
         let progQuery = `
@@ -575,10 +559,6 @@ const getReportesResumen = async (req, res) => {
             WHERE u.activo = TRUE
         `;
         const progParams = [idPeriodo];
-        if (isDecano && facultadId) {
-            progQuery += ` AND pa.id_facultad = $2`;
-            progParams.push(facultadId);
-        }
         progQuery += `
             GROUP BY pa.nombre_programa
             ORDER BY pa.nombre_programa
@@ -605,10 +585,6 @@ const getReportesResumen = async (req, res) => {
             WHERE u.activo = TRUE
         `;
         const perfilesParams = [idPeriodo];
-        if (isDecano && facultadId) {
-            perfilesQuery += ` AND pa.id_facultad = $2`;
-            perfilesParams.push(facultadId);
-        }
         perfilesQuery += `
             GROUP BY u.id_usuario, tc.tipo, tc.horas_contrato
         `;
@@ -634,8 +610,8 @@ const getReportesResumen = async (req, res) => {
             JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
             JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
             JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones
-            JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo = TRUE
-            LEFT JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo = TRUE
+            JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo IS NOT FALSE
+            LEFT JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
             WHERE af.id_periodo = $1
             GROUP BY af.funcion_sustantiva
             ORDER BY af.funcion_sustantiva
@@ -702,15 +678,7 @@ const getTodasObservaciones = async (req, res) => {
             return res.json({ observaciones: [], periodo: null, total: 0 });
         }
 
-        const userRoles = (req.user?.roles || '').toLowerCase();
-        const isDecano = userRoles.includes('decano');
-        const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
-
-        let facultadId = req.user?.id_facultad || null;
-        if (isDecano && !facultadId && req.user?.id) {
-            const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
-            facultadId = facQ.rows[0]?.id_facultad || null;
-        }
+        const { limitadoPorPrograma: isDirector } = calcularAlcance(req);
 
         let userProgId = req.user?.id_programa || null;
         if (isDirector && !userProgId && req.user?.id) {
@@ -741,11 +709,7 @@ const getTodasObservaciones = async (req, res) => {
         const params = [idPeriodo];
         let paramIdx = 2;
 
-        if (isDecano && facultadId) {
-            queryText += ` AND pa.id_facultad = $${paramIdx}`;
-            params.push(facultadId);
-            paramIdx++;
-        } else if (isDirector) {
+        if (isDirector) {
             queryText += ` AND u.id_programa = $${paramIdx}`;
             params.push(userProgId || 1);
             paramIdx++;
@@ -761,17 +725,10 @@ const getTodasObservaciones = async (req, res) => {
 
         const result = await pool.query(queryText, params);
 
-        let nombreFacultad = null;
-        if (isDecano && facultadId) {
-            const facInfo = await pool.query('SELECT nombre_facultad FROM facultad WHERE id_facultad = $1', [facultadId]);
-            nombreFacultad = facInfo.rows[0]?.nombre_facultad || null;
-        }
-
         res.json({
             observaciones: result.rows,
             periodo,
-            total: result.rowCount,
-            facultad: nombreFacultad
+            total: result.rowCount
         });
 
     } catch (error) {

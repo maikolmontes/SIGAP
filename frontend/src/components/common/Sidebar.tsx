@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { 
@@ -21,7 +21,8 @@ import {
     ChevronRight,
     Plus,
     ShieldCheck,
-    Crown
+    Crown,
+    Mail
 } from 'lucide-react'
 
 type MenuItem = {
@@ -38,13 +39,16 @@ const menuPlaneacion: MenuItem[] = [
     { label: 'Principal', isHeader: true },
     { label: 'Dashboard', path: '/planeacion/dashboard', icon: LayoutDashboard },
     { label: 'Gestión Institucional', isHeader: true },
-    { label: 'Docentes', path: '/planeacion/docentes', icon: Users },
+    // Orden según el flujo de configuración: primero la estructura académica,
+    // luego el periodo, después los docentes y por último los cortes.
     { label: 'Facultades', path: '/planeacion/facultades', icon: Library },
     { label: 'Programas', path: '/planeacion/programas', icon: GraduationCap },
     { label: 'Períodos', path: '/planeacion/periodos', icon: Calendar },
+    { label: 'Docentes', path: '/planeacion/docentes', icon: Users },
     { label: 'Semanas', path: '/planeacion/semanas', icon: Clock },
     { label: 'Seguridad y Accesos', isHeader: true },
     { label: 'Gestión de Perfiles', path: '/planeacion/perfiles', icon: ShieldCheck },
+    { label: 'Notificaciones', path: '/planeacion/notificaciones', icon: Mail },
     { label: 'Reportes', isHeader: true },
     { label: 'Analítica', path: '/planeacion/analitica', icon: BarChart3 },
 ]
@@ -54,7 +58,6 @@ const menuDirector: MenuItem[] = [
     { label: 'Dashboard', path: '/director/dashboard', icon: LayoutDashboard },
     { label: 'Supervisión', isHeader: true },
     { label: 'Agendas por revisar', path: '/director/agendas', icon: ClipboardList },
-    { label: 'Historial de agendas', path: '/director/historial', icon: History },
     { label: 'Observaciones', path: '/director/observaciones', icon: MessageSquare },
     { label: 'Reportes', isHeader: true },
     { label: 'Reportes', path: '/director/reportes', icon: FileSpreadsheet },
@@ -81,13 +84,7 @@ const menuConsultor: MenuItem[] = [
     { label: 'Analítica', path: '/consultor/analitica', icon: BarChart3 },
 ]
 
-const menuDecano: MenuItem[] = [
-    { label: 'Principal', isHeader: true },
-    { label: 'Dashboard', path: '/decano/dashboard', icon: LayoutDashboard },
-    { label: 'Supervisión Académica', isHeader: true },
-    { label: 'Agendas Docentes', path: '/decano/agendas', icon: ClipboardList },
-    { label: 'Observaciones', path: '/decano/observaciones', icon: MessageSquare },
-]
+
 
 const PATH_TO_PAGINA: Record<string, string> = {
     // Planeación
@@ -102,7 +99,6 @@ const PATH_TO_PAGINA: Record<string, string> = {
 
     // Director
     '/director/agendas': 'Agendas por Revisar',
-    '/director/historial': 'Historial de Agendas',
     '/director/observaciones': 'Observaciones Docentes',
     '/director/reportes': 'Reportes de Gestión',
     '/director/analitica': 'Reportes de Gestión',
@@ -117,13 +113,10 @@ const PATH_TO_PAGINA: Record<string, string> = {
     '/consultor/agendas': 'Seguimiento y Auditoría',
     '/consultor/observaciones': 'Observaciones de Control',
     '/consultor/analitica': 'Analítica Institucional',
-    // Decano
-    '/decano/agendas':      'Agendas por Revisar',
-    '/decano/observaciones':'Observaciones Docentes',
 };
 
 interface SidebarProps {
-    rol: 'planeacion' | 'director' | 'docente' | 'consultor' | 'decano'
+    rol: 'planeacion' | 'director' | 'docente' | 'consultor'
     onClose?: () => void
 }
 
@@ -141,18 +134,14 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
             ? menuDirector 
             : rol === 'consultor' 
                 ? menuConsultor 
-                : rol === 'decano'
-                    ? menuDecano
-                    : menuDocente
+                : menuDocente
     const rolLabel = rol === 'planeacion' 
         ? 'Planeación' 
         : rol === 'director' 
             ? 'Director' 
             : rol === 'consultor' 
                 ? 'Consultor' 
-                : rol === 'decano'
-                    ? 'Decanatura'
-                    : 'Docente'
+                : 'Docente'
 
     // Cargar permisos activos asignados al rol actual
     const cargarPermisos = async () => {
@@ -168,7 +157,6 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                 else if (rol === 'docente') roleId = 2;
                 else if (rol === 'director') roleId = 3;
                 else if (rol === 'consultor') roleId = 4;
-                else if (rol === 'decano') roleId = 5;
             }
             if (roleId) {
                 const res = await api.get(`/permisos/rol/${roleId}`);
@@ -309,14 +297,6 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                     <div className="text-white text-sm font-medium">{periodoEtiqueta}</div>
                 </div>
 
-                {rol === 'decano' && user?.facultad && (
-                    <div className="bg-emerald-500/15 border border-emerald-400/25 rounded-lg px-3 py-2">
-                        <div className="text-emerald-300 text-[10px] uppercase font-bold tracking-wider mb-0.5 flex items-center gap-1">
-                            <span>🏛️</span> Facultad
-                        </div>
-                        <div className="text-white text-xs font-semibold leading-snug">{user.facultad}</div>
-                    </div>
-                )}
             </div>
 
             <nav className="flex-1 px-3 pb-8">
@@ -398,36 +378,41 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                         )
                     }
 
+                    const isItemActive = (() => {
+                        if (!item.path) return false;
+                        if (item.path === '/director/agendas') {
+                            return location.pathname.startsWith('/director/agendas');
+                        }
+                        if (item.path === '/consultor/agendas') {
+                            return location.pathname.startsWith('/consultor/agendas');
+                        }
+                        return location.pathname === item.path;
+                    })();
+
                     return (
-                        <NavLink
+                        <Link
                             key={`link-${idx}`}
                             to={item.path!}
                             state={item.state}
-                            className={({ isActive }) =>
-                                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-1 transition-all group
-                                ${isActive && !item.isSubItem
-                                    ? 'bg-white/10 text-white border-l-[3px] border-[#4A9BE8] font-medium'
-                                    : item.isSubItem
-                                        ? 'text-white/60 hover:bg-white/5 hover:text-white pl-8 py-1.5 text-xs'
-                                        : 'text-white/60 hover:bg-white/5 hover:text-white border-l-[3px] border-transparent'
-                                }`
-                            }
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-1 transition-all group
+                            ${isItemActive && !item.isSubItem
+                                ? 'bg-white/10 text-white border-l-[3px] border-[#4A9BE8] font-medium'
+                                : item.isSubItem
+                                    ? 'text-white/60 hover:bg-white/5 hover:text-white pl-8 py-1.5 text-xs'
+                                    : 'text-white/60 hover:bg-white/5 hover:text-white border-l-[3px] border-transparent'
+                            }`}
                         >
-                            {({ isActive }) => (
-                                <>
-                                    {item.isSubItem && <span className="text-[10px] opacity-70">➕</span>}
-                                    {item.icon && (
-                                        <item.icon 
-                                            className={`w-4 h-4 transition-colors ${
-                                                isActive ? 'text-white' : 'text-white/60 group-hover:text-white'
-                                            }`} 
-                                        />
-                                    )}
-                                    <span>{item.label}</span>
-                                </>
+                            {item.isSubItem && <span className="text-[10px] opacity-70">➕</span>}
+                            {item.icon && (
+                                <item.icon 
+                                    className={`w-4 h-4 transition-colors ${
+                                        isItemActive ? 'text-white' : 'text-white/60 group-hover:text-white'
+                                    }`} 
+                                />
                             )}
-                        </NavLink>
-                    )
+                            <span>{item.label}</span>
+                        </Link>
+                    );
                 })}
             </nav>
 

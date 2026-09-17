@@ -11,10 +11,10 @@ import Semanas from './pages/planeacion/Semanas'
 import Facultades from './pages/planeacion/Facultades'
 import Programas from './pages/planeacion/Programas'
 import GestionPerfiles from './pages/planeacion/GestionPerfiles'
+import Notificaciones from './pages/planeacion/Notificaciones'
 import DashboardDirector from './pages/director/DashboardDirector'
 import AgendasPorRevisar from './pages/director/AgendasPorRevisar'
 import DetalleAgenda from './pages/director/DetalleAgenda'
-import HistorialAgendas from './pages/director/HistorialAgendas'
 import ReportesDirector from './pages/director/ReportesDirector'
 import ObservacionesDirector from './pages/director/ObservacionesDirector'
 import DashboardDocente from './pages/docente/Dashboard'
@@ -30,11 +30,7 @@ import DashboardConsultor from './pages/consultor/DashboardConsultor'
 import DetalleAgendaConsultor from './pages/consultor/DetalleAgendaConsultor'
 import ObservacionesConsultor from './pages/consultor/ObservacionesConsultor'
 
-// Decano Pages
-import DashboardDecano from './pages/decano/DashboardDecano'
-import AgendasDecano from './pages/decano/AgendasDecano'
-import DetalleAgendaDecano from './pages/decano/DetalleAgendaDecano'
-import ObservacionesDecano from './pages/decano/ObservacionesDecano'
+
 
 function App() {
   const { showTimeoutModal, timeoutSeconds, extendSession, logout } = useAuth();
@@ -65,6 +61,7 @@ function App() {
           <Route path="/planeacion/programas" element={<Programas />} />
           <Route path="/planeacion/perfiles" element={<GestionPerfiles />} />
           <Route path="/planeacion/permisos" element={<GestionPerfiles />} />
+          <Route path="/planeacion/notificaciones" element={<Notificaciones />} />
           <Route path="/planeacion/analitica" element={<Analitica rol="planeacion" />} />
         </Route>
 
@@ -73,7 +70,6 @@ function App() {
           <Route path="/director/dashboard" element={<DashboardDirector />} />
           <Route path="/director/agendas" element={<AgendasPorRevisar />} />
           <Route path="/director/agendas/:id" element={<DetalleAgenda />} />
-          <Route path="/director/historial" element={<HistorialAgendas />} />
           <Route path="/director/reportes" element={<ReportesDirector />} />
           <Route path="/director/observaciones" element={<ObservacionesDirector />} />
           <Route path="/director/analitica" element={<Analitica rol="director" />} />
@@ -96,14 +92,6 @@ function App() {
           <Route path="/consultor/analitica" element={<Analitica rol="consultor" />} />
         </Route>
 
-        {/* Decano */}
-        <Route element={<ProtectedRoute allowedRoles={['Decano']} />}>
-          <Route path="/decano/dashboard" element={<DashboardDecano />} />
-          <Route path="/decano/agendas" element={<AgendasDecano />} />
-          <Route path="/decano/agendas/:id" element={<DetalleAgendaDecano />} />
-          <Route path="/decano/observaciones" element={<ObservacionesDecano />} />
-          <Route path="/decano/analitica" element={<Analitica rol="decano" />} />
-        </Route>
 
         {/* Comunes */}
         <Route element={<ProtectedRoute />}>

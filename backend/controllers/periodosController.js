@@ -1,4 +1,12 @@
 const pool = require('../db/connection');
+const notificaciones = require('../services/notificacionesService');
+
+// El aviso de apertura llega a todos los docentes del período: solo se envía
+// automáticamente si EMAIL_AVISO_PERIODO=true en el .env, o si la petición lo
+// solicita con { notificar: true }.
+const debeAvisarApertura = (req) =>
+    String(process.env.EMAIL_AVISO_PERIODO).toLowerCase() === 'true' ||
+    (req.body && req.body.notificar === true);
 
 const getAll = async (req, res) => {
     try {
@@ -101,6 +109,13 @@ const create = async (req, res) => {
             RETURNING *
         `, [anio, semestre, fecha_inicio, fecha_fin]);
 
+        // Aviso masivo de apertura. Es un correo a TODOS los docentes, así que
+        // solo sale si está habilitado por configuración o si Planeación lo pide
+        // explícitamente con { notificar: true }.
+        if (debeAvisarApertura(req)) {
+            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo);
+        }
+
         res.status(201).json(result.rows[0]);
     } catch (error) {
         console.error('Error al crear período:', error);
@@ -145,6 +160,10 @@ const habilitar = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Período no encontrado.' });
         }
+        if (debeAvisarApertura(req)) {
+            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo);
+        }
+
         res.json({
             mensaje: 'Período habilitado exitosamente.',
             periodo: result.rows[0]

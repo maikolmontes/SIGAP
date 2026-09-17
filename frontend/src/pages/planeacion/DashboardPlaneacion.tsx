@@ -1,12 +1,14 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
-import api from '../../services/api'
 // @ts-ignore
 import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios, updateUsuario, deleteUsuario } from '../../services/usuariosService'
-import { getPeriodos } from '../../services/periodosService'
+import { getPeriodos, getDocentesPeriodo } from '../../services/periodosService'
 import { getProgramas } from '../../services/programasService'
+import { getFacultades } from '../../services/facultadesService'
 import { exportarDocentesExcel } from '../../utils/exportExcelDocentes'
+import PanelAgendasTiempoReal from '../../components/planeacion/PanelAgendasTiempoReal'
+import { usePermisosPagina } from '../../hooks/usePermisos'
 import * as XLSX from 'xlsx'
 import { 
     Library, 
@@ -17,7 +19,9 @@ import {
     Clock, 
     TrendingUp, 
     CheckCircle, 
-    AlertCircle 
+    AlertCircle,
+    Users,
+    UserPlus
 } from 'lucide-react'
 
 interface Periodo {
@@ -33,26 +37,17 @@ interface Docente {
     id_usuario: number
     nombres: string
     apellidos: string
+    nombre_completo?: string
     correo: string
     tipo_documento?: string
     numero_documento?: string
     activo: boolean
-    tipo_contrato: string
-    programa: string
+    tipo_contrato?: string
+    horas_contrato?: number
+    programa?: string
     facultad?: string
-    roles: string
-}
-
-interface AgendaStat {
-    id_usuario: number
-    nombre: string
-    tipo_contrato: string
-    horas_asignadas: number
-    horas_contrato: number
-    total_funciones: number
-    funciones_aceptadas: number
-    perfil_docente: string
-    docencia_indirecta: number
+    roles?: string
+    fecha_asignacion?: string
 }
 
 
@@ -60,11 +55,12 @@ interface AgendaStat {
 export default function DashboardPlaneacion() {
     const [docentes, setDocentes] = useState<Docente[]>([])
     const [programas, setProgramas] = useState<any[]>([])
-    const [agendaStats, setAgendaStats] = useState<AgendaStat[]>([])
-    const [agendaMetricas, setAgendaMetricas] = useState<any>(null)
-    const [ultimaActualizacionAgendas, setUltimaActualizacionAgendas] = useState<string>('')
-    const [cargandoAgendas, setCargandoAgendas] = useState(false)
+    const [facultades, setFacultades] = useState<any[]>([])
+    // Permisos dinámicos del rol activo sobre el panel de agendas
+    const permisosAgendas = usePermisosPagina('Dashboard Planeación')
     const [busqueda, setBusqueda] = useState('')
+    const [filtroFacultad, setFiltroFacultad] = useState<string>('Todas')
+    const [filtroPrograma, setFiltroPrograma] = useState<string>('Todos')
     const [filtroEstado, setFiltroEstado] = useState<'Todos' | 'Activos' | 'Inactivos'>('Todos')
     const [cargando, setCargando] = useState(true)
     const [error, setError] = useState('')
@@ -236,58 +232,71 @@ export default function DashboardPlaneacion() {
     const cargarDocentes = useCallback(async () => {
         try {
             setCargando(true)
-            const [res, resProgs] = await Promise.all([
-                getUsuarios(),
-                getProgramas().catch(() => ({ data: [] }))
+            const [resPeriodos, resProgs, resFacs] = await Promise.all([
+                getPeriodos(),
+                getProgramas().catch(() => ({ data: [] })),
+                getFacultades().catch(() => ({ data: [] }))
             ])
-            setDocentes(res.data)
+            const activo = resPeriodos.data.find((p: any) => p.activo)
+            setPeriodoActivo(activo || null)
             setProgramas(resProgs.data || [])
+            setFacultades(resFacs.data || [])
+
+            if (activo) {
+                const res = await getDocentesPeriodo(activo.id_periodo)
+                setDocentes(res.data || [])
+            } else {
+                setDocentes([])
+            }
         } catch {
-            setError('No se pudieron cargar los docentes')
+            setError('No se pudieron cargar los docentes del período activo')
         } finally {
             setCargando(false)
         }
     }, [])
 
-    const cargarAgendas = useCallback(async () => {
-        try {
-            setCargandoAgendas(true)
-            const res = await api.get('/director/dashboard')
-            setAgendaStats(res.data.docentes || [])
-            setAgendaMetricas(res.data.metricas || null)
-            setUltimaActualizacionAgendas(new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-        } catch { /* silently ignore */ }
-        finally {
-            setCargandoAgendas(false)
-        }
-    }, [])
-
     useEffect(() => {
         cargarDocentes()
-        cargarAgendas()
-        cargarPeriodoActivo()
         const interval = setInterval(() => {
-            cargarAgendas()
-            cargarPeriodoActivo()
+            cargarDocentes()
         }, 30000)
         return () => clearInterval(interval)
-    }, [cargarDocentes, cargarAgendas])
+    }, [cargarDocentes])
 
-    const cargarPeriodoActivo = async () => {
-        try {
-            const res = await getPeriodos()
-            const activo = res.data.find((p: any) => p.activo)
-            setPeriodoActivo(activo || null)
-        } catch (e) {
-            console.error('Error loading active period', e)
+    const programasDisponibles = useMemo(() => {
+        if (filtroFacultad === 'Todas') {
+            return programas
         }
+        const facSeleccionada = facultades.find((f: any) => (f.nombre_facultad || '').toLowerCase().trim() === filtroFacultad.toLowerCase().trim())
+        if (!facSeleccionada) {
+            return programas.filter((p: any) => (p.facultad || '').toLowerCase().trim() === filtroFacultad.toLowerCase().trim())
+        }
+        return programas.filter((p: any) => 
+            p.id_facultad === facSeleccionada.id_facultad || 
+            (p.facultad || '').toLowerCase().trim() === filtroFacultad.toLowerCase().trim()
+        )
+    }, [programas, facultades, filtroFacultad])
+
+    const handleFacultadChange = (nuevaFacultad: string) => {
+        setFiltroFacultad(nuevaFacultad)
+        setFiltroPrograma('Todos')
     }
 
     const docentesFiltrados = docentes.filter(d => {
-        const matchBusqueda = `${d.nombres} ${d.apellidos}`.toLowerCase().includes(busqueda.toLowerCase())
-        if (filtroEstado === 'Activos') return matchBusqueda && d.activo
-        if (filtroEstado === 'Inactivos') return matchBusqueda && !d.activo
-        return matchBusqueda
+        const textoCompleto = `${d.nombres} ${d.apellidos} ${d.correo} ${d.programa || ''} ${d.facultad || ''} ${d.tipo_contrato || ''}`.toLowerCase()
+        const matchBusqueda = textoCompleto.includes(busqueda.toLowerCase())
+        
+        const matchEstado = filtroEstado === 'Todos' ||
+            (filtroEstado === 'Activos' && d.activo) ||
+            (filtroEstado === 'Inactivos' && !d.activo)
+
+        const matchFacultad = filtroFacultad === 'Todas' ||
+            (d.facultad && d.facultad.toLowerCase().trim() === filtroFacultad.toLowerCase().trim())
+
+        const matchPrograma = filtroPrograma === 'Todos' ||
+            (d.programa && d.programa.toLowerCase().trim() === filtroPrograma.toLowerCase().trim())
+
+        return matchBusqueda && matchEstado && matchFacultad && matchPrograma
     })
 
     const handleToggle = async (id: number) => {
@@ -410,57 +419,6 @@ export default function DashboardPlaneacion() {
                 </div>
             )}
 
-            {/* ── Métricas (Cards) ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Total Docentes</p>
-                            <p className="text-2xl font-black text-gray-800">{docentes.length}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-green-50 text-green-600 rounded-lg">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Activos</p>
-                            <p className="text-2xl font-black text-gray-800">{docentes.filter(d => d.activo).length}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-red-50 text-red-600 rounded-lg">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Inactivos</p>
-                            <p className="text-2xl font-black text-gray-800">{docentes.filter(d => !d.activo).length}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-purple-50 text-purple-600 rounded-lg">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Período Activo</p>
-                            <p className="text-xl font-black text-gray-800 tracking-tight">{periodoActivo ? `${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : 'Cargando...'}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             {/* ── Navegación de Tabs ── */}
             <div className="flex gap-4 mb-6">
                 <button
@@ -469,7 +427,7 @@ export default function DashboardPlaneacion() {
                         ? 'bg-[#1a2744] text-white shadow-md' 
                         : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
                 >
-                    Gestión de Usuarios
+                    Docentes del Período Activo
                 </button>
                 <button
                     onClick={() => setTabActiva('agendas')}
@@ -477,12 +435,62 @@ export default function DashboardPlaneacion() {
                         ? 'bg-[#1a2744] text-white shadow-md' 
                         : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
                 >
-                    Agendas en Tiempo Real
+                    Importación de Asignaciones
                 </button>
             </div>
 
             {tabActiva === 'usuarios' ? (
                 <>
+                    {/* ── Métricas (Cards) del Período ── */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Total Docentes</p>
+                                    <p className="text-2xl font-black text-gray-800">{docentes.length}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-green-50 text-green-600 rounded-lg">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Activos</p>
+                                    <p className="text-2xl font-black text-gray-800">{docentes.filter(d => d.activo).length}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-red-50 text-red-600 rounded-lg">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Inactivos</p>
+                                    <p className="text-2xl font-black text-gray-800">{docentes.filter(d => !d.activo).length}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-purple-50 text-purple-600 rounded-lg">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Período Activo</p>
+                                    <p className="text-xl font-black text-gray-800 tracking-tight">{periodoActivo ? `${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : 'Cargando...'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     {/* ── Acciones Rápidas ── */}
                     <div className="mb-6">
                         <h3 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">Acciones Rápidas</h3>
@@ -552,49 +560,80 @@ export default function DashboardPlaneacion() {
                         </div>
                     )}
 
-                    {/* ── Barra de acciones ── */}
-                    <div className="flex flex-col sm:flex-row gap-3 mb-4">
-                        <div className="relative flex-1">
+                    {/* ── Barra de Filtros (Búsqueda, Facultad, Programa, Estado) ── */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                        {/* Buscador */}
+                        <div className="relative">
                             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                             </svg>
                             <input
                                 type="text"
-                                placeholder="Buscar por nombre o apellido..."
+                                placeholder="Buscar docente, correo..."
                                 value={busqueda}
                                 onChange={e => setBusqueda(e.target.value)}
                                 className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
                             />
                         </div>
 
-                        <div className="flex-shrink-0">
+                        {/* Filtro Facultad */}
+                        <div>
+                            <select
+                                value={filtroFacultad}
+                                onChange={e => handleFacultadChange(e.target.value)}
+                                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                            >
+                                <option value="Todas">Todas las Facultades</option>
+                                {facultades.map((f: any) => (
+                                    <option key={f.id_facultad || f.nombre_facultad} value={f.nombre_facultad}>
+                                        {f.nombre_facultad}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Filtro Programa */}
+                        <div>
+                            <select
+                                value={filtroPrograma}
+                                onChange={e => setFiltroPrograma(e.target.value)}
+                                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                            >
+                                <option value="Todos">Todos los Programas</option>
+                                {programasDisponibles.map((p: any) => (
+                                    <option key={p.id_programa || p.nombre_programa} value={p.nombre_programa}>
+                                        {p.nombre_programa}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Filtro Estado + Limpiar */}
+                        <div className="flex gap-2">
                             <select
                                 value={filtroEstado}
                                 onChange={e => setFiltroEstado(e.target.value as any)}
-                                className="h-full w-full sm:w-auto px-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
                             >
                                 <option value="Todos">Todos los Estados</option>
                                 <option value="Activos">Solo Activos</option>
                                 <option value="Inactivos">Solo Inactivos</option>
                             </select>
-                        </div>
 
-                        <div className="flex flex-wrap gap-2 flex-shrink-0 w-full sm:w-auto">
-                            <button
-                                onClick={() => setModalImportar(true)}
-                                className="flex items-center gap-2 px-4 py-2 text-sm border border-green-600 text-green-700 rounded-lg hover:bg-green-50 transition-colors font-medium"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                                Importar Excel
-                            </button>
-
-                            <button
-                                onClick={handleExportar}
-                                className="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                Exportar Excel
-                            </button>
+                            {(busqueda || filtroFacultad !== 'Todas' || filtroPrograma !== 'Todos' || filtroEstado !== 'Todos') && (
+                                <button
+                                    onClick={() => {
+                                        setBusqueda('')
+                                        setFiltroFacultad('Todas')
+                                        setFiltroPrograma('Todos')
+                                        setFiltroEstado('Todos')
+                                    }}
+                                    className="px-3 py-2 text-xs font-semibold text-gray-500 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 rounded-lg transition-colors whitespace-nowrap"
+                                    title="Restablecer filtros"
+                                >
+                                    Limpiar
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -603,24 +642,30 @@ export default function DashboardPlaneacion() {
                         {cargando ? (
                             <div className="flex items-center justify-center py-16 text-gray-400 text-sm">
                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mr-3"></div>
-                                Cargando docentes...
+                                Cargando docentes del período...
                             </div>
                         ) : docentesFiltrados.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                                 <svg className="w-10 h-10 mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                                 </svg>
-                                <p className="text-sm">No se encontraron docentes</p>
+                                <p className="text-sm font-medium text-gray-600">No se encontraron docentes con los criterios seleccionados</p>
+                                <p className="text-xs text-gray-400 mt-1 max-w-md text-center">
+                                    Intenta cambiando los filtros de facultad, programa, estado o el término de búsqueda.
+                                </p>
                             </div>
                         ) : (
                             <div className="overflow-x-auto">
-                                <table className="w-full text-sm min-w-[700px]">
+                                <table className="w-full text-sm min-w-[850px]">
                                     <thead>
                                         <tr className="bg-gray-50 border-b border-gray-200">
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/4">Nombres</th>
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/4">Apellidos</th>
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 w-1/3">Correo</th>
-                                            <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-20">Estado</th>
+                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Nombres</th>
+                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Apellidos</th>
+                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Correo</th>
+                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Facultad</th>
+                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Programa</th>
+                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Contrato / Horas</th>
+                                            <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-28">Estado</th>
                                             <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-20">Acciones</th>
                                         </tr>
                                     </thead>
@@ -630,6 +675,23 @@ export default function DashboardPlaneacion() {
                                                 <td className="px-4 py-3 font-medium text-gray-800">{d.nombres}</td>
                                                 <td className="px-4 py-3 text-gray-700">{d.apellidos}</td>
                                                 <td className="px-4 py-3 text-gray-500 text-xs">{d.correo}</td>
+                                                <td className="px-4 py-3 text-xs text-gray-600">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                                        {d.facultad || 'Sin facultad'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-xs text-gray-600">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                                                        {d.programa || 'Sin programa'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-xs text-gray-600">
+                                                    {d.tipo_contrato ? (
+                                                        <span>{d.tipo_contrato} · <strong className="text-gray-900">{d.horas_contrato ?? 0}h</strong></span>
+                                                    ) : (
+                                                        <span className="text-gray-400 italic">No asignado</span>
+                                                    )}
+                                                </td>
                                                 <td className="px-4 py-3 text-center">
                                                     <div className="flex items-center justify-center gap-2">
                                                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -674,116 +736,18 @@ export default function DashboardPlaneacion() {
                         )}
                         {!cargando && docentesFiltrados.length > 0 && (
                             <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-400 flex justify-between">
-                                <span>Mostrando {docentesFiltrados.length} docentes</span>
+                                <span>Mostrando {docentesFiltrados.length} docentes asignados</span>
                                 <span>{docentes.filter(d => d.activo).length} activos</span>
                             </div>
                         )}
                     </div>
                 </>
             ) : (
-                <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-                        <div>
-                            <h2 className="text-lg font-bold text-gray-800">Estado de Agendas (Tiempo Real)</h2>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                                Monitoreo y métricas de carga académica del período activo
-                                {ultimaActualizacionAgendas && (
-                                    <span className="ml-1 text-gray-400">· Actualizado: {ultimaActualizacionAgendas}</span>
-                                )}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={cargarAgendas}
-                                disabled={cargandoAgendas}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50"
-                            >
-                                <svg className={`w-3.5 h-3.5 ${cargandoAgendas ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                                {cargandoAgendas ? 'Actualizando...' : 'Actualizar ahora'}
-                            </button>
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 border border-green-200 rounded-full text-xs font-semibold">
-                                <span className="w-2 h-2 bg-green-500 rounded-full animate-ping"></span>
-                                Tiempo Real
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Resumen KPIs de Agendas */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Total Agendas</p>
-                            <p className="text-xl font-black text-gray-800 mt-0.5">{agendaMetricas.total}</p>
-                        </div>
-                        <div className="bg-green-50/70 border border-green-200 rounded-lg p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-green-700">Aceptadas</p>
-                            <p className="text-xl font-black text-green-800 mt-0.5">{agendaMetricas.aceptadas}</p>
-                        </div>
-                        <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pendientes / Revisión</p>
-                            <p className="text-xl font-black text-amber-800 mt-0.5">{agendaMetricas.pendientes}</p>
-                        </div>
-                        <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Total Horas Asignadas</p>
-                            <p className="text-xl font-black text-blue-800 mt-0.5">{agendaMetricas.total_horas}h</p>
-                        </div>
-                    </div>
-
-                    {agendaStats.length === 0 ? (
-                        <div className="text-center py-12 text-gray-400 italic">
-                            No hay agendas registradas en el período actual.
-                        </div>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="bg-gray-50 border-b border-gray-200">
-                                        <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Docente</th>
-                                        <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Contrato</th>
-                                        <th className="text-center px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Carga (Horas)</th>
-                                        <th className="text-center px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Perfil Docente</th>
-                                        <th className="text-center px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Docencia Indirecta</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {agendaStats.map((a) => (
-                                        <tr key={a.id_usuario} className="hover:bg-gray-50 transition-colors">
-                                            <td className="px-4 py-3 font-semibold text-gray-800">{a.nombre}</td>
-                                            <td className="px-4 py-3 text-gray-600">{a.tipo_contrato}</td>
-                                            <td className="px-4 py-3 text-center">
-                                                <div className="flex flex-col">
-                                                    <span className="font-bold">{a.horas_asignadas} / {a.horas_contrato}h</span>
-                                                    <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1 overflow-hidden">
-                                                        <div 
-                                                            className={`h-full rounded-full ${a.horas_asignadas === a.horas_contrato ? 'bg-green-500' : 'bg-blue-500'}`} 
-                                                            style={{ width: `${Math.min((a.horas_asignadas/a.horas_contrato)*100, 100)}%` }}
-                                                        ></div>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold
-                                                    ${a.perfil_docente.includes('INCONSISTENCIAS') 
-                                                        ? 'bg-red-100 text-red-700' 
-                                                        : 'bg-indigo-100 text-indigo-700'}`}
-                                                >
-                                                    {a.perfil_docente}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <div className="flex flex-col items-center">
-                                                    <span className="text-lg font-black text-blue-600 leading-none">{a.docencia_indirecta}</span>
-                                                    <span className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Horas (30%)</span>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
+                <PanelAgendasTiempoReal
+                    puedeCrear={permisosAgendas.puedeCrear}
+                    puedeEditar={permisosAgendas.puedeEditar}
+                    puedeEliminar={permisosAgendas.puedeEliminar}
+                />
             )}
 
 

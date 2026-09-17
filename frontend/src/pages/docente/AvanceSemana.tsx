@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
-import { FileText, CheckCircle, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye } from 'lucide-react';
+import { FileText, CheckCircle, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare } from 'lucide-react';
 import api, { getArchivoUrl } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
@@ -79,7 +79,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
              actividades: acts.filter((a: any) => a.id_funciones === f.id_funciones).reduce((acc: any[], curr: any) => {
                  let existing = acc.find(x => x.id_asignacionact === curr.id_asignacionact);
                  if (!existing) {
-                     existing = { ...curr, indicadores: [] };
+                     // observaciones_director viene por actividad (no por indicador)
+                     existing = { ...curr, observaciones_director: curr.observaciones_director || [], indicadores: [] };
                      acc.push(existing);
                  }
                  if (curr.id_indicador) {
@@ -445,13 +446,41 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3">
-                                                    <textarea 
-                                                        value={ind.observaciones || ''}
-                                                        onChange={(e) => handleIndicadorChange(selectedFunctionIndex, aIndex, iIndex, 'observaciones', e.target.value)}
-                                                        disabled={rolActual !== 'director'} 
-                                                        placeholder={rolActual === 'director' ? "Escribe una observación aquí..." : "El director agregará observaciones aquí..."}
-                                                        className={`w-full text-xs border rounded px-2 py-1.5 resize-none h-12 transition-colors ${rolActual === 'director' ? 'bg-white border-blue-300 focus:ring-2 focus:ring-blue-200 focus:outline-none' : 'bg-gray-50 border-gray-200 text-gray-600 cursor-not-allowed'}`}
-                                                    />
+                                                    {/* Observaciones que el Director dejó para ESTA semana sobre la
+                                                        actividad. Son de solo lectura: el docente responde con su
+                                                        ejecución y sus evidencias, no editando el texto. */}
+                                                    {(() => {
+                                                        const obsSemana = (actividad.observaciones_director || [])
+                                                            .filter((o: any) => String(o.semana) === semana);
+
+                                                        if (obsSemana.length === 0) {
+                                                            return (
+                                                                <p className="text-xs text-gray-400 italic">
+                                                                    Sin observaciones del director para la semana {semana}.
+                                                                </p>
+                                                            );
+                                                        }
+
+                                                        return (
+                                                            <div className="space-y-2">
+                                                                {obsSemana.map((o: any) => (
+                                                                    <div key={o.id} className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                                                                        <div className="flex items-center gap-1.5 mb-1">
+                                                                            <MessageSquare className="w-3 h-3 text-amber-600 shrink-0" />
+                                                                            <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wide">
+                                                                                Semana {o.semana}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="text-xs text-amber-900 leading-snug whitespace-pre-wrap">{o.texto}</p>
+                                                                        <p className="text-[10px] text-amber-600/80 mt-1">
+                                                                            {o.director_nombre}
+                                                                            {o.ultima_edicion && ` · ${new Date(o.ultima_edicion).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}`}
+                                                                        </p>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex flex-col gap-2">

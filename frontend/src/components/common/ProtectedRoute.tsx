@@ -35,11 +35,10 @@ const RUTA_PAGINA_MAP: Record<string, string> = {
     '/docente/agenda': 'Agenda Docente',
     '/docente/evidencias': 'Evidencias',
     '/director/dashboard': 'Dashboard Director',
-    '/director/agenda': 'Agenda Director',
+    '/director/agendas': 'Agendas por Revisar',
+    '/director/observaciones': 'Observaciones Docentes',
+    '/director/reportes': 'Reportes de Gestión',
     '/consultor/dashboard': 'Dashboard Consultor',
-    '/decano/dashboard': 'Dashboard Decano',
-    '/decano/agendas': 'Agendas Decano',
-    '/decano/observaciones': 'Observaciones Decano',
 };
 
 // Componente de Acceso Restringido

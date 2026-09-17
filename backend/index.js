@@ -5,6 +5,9 @@ const path = require('path');
 
 require('./db/connection');
 
+// Verifica las credenciales SMTP al arrancar (no bloquea el servidor)
+require('./services/emailService').verificarConexion();
+
 const usuariosRouter = require('./routes/usuarios');
 const agendaRouter = require('./routes/agenda');
 const funcionesRouter = require('./routes/funciones');
@@ -34,6 +37,7 @@ app.use('/api/semanas', require('./routes/semanas'));
 app.use('/api/evidencias', require('./routes/evidencias'));
 app.use('/api/observaciones', require('./routes/observaciones'));
 app.use('/api/permisos', require('./routes/permisos'));
+app.use('/api/notificaciones', require('./routes/notificaciones'));
 
 // Servir archivos estáticos de evidencias
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

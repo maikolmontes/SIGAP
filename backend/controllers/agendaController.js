@@ -1,4 +1,5 @@
 const pool = require('../db/connection');
+const notificaciones = require('../services/notificacionesService');
 
 const getAgenda = async (req, res) => {
     const { id_usuario } = req.params;
@@ -210,8 +211,24 @@ const getAgendaBase = async (req, res) => {
                     ) ORDER BY ev.fecha_carga DESC), '[]'::json)
                     FROM evidencias ev
                     WHERE ev.id_indicadores = i.id_indicadores
-                ) AS evidencias
-                
+                ) AS evidencias,
+
+                -- Observaciones que el Director dejó sobre esta actividad.
+                -- Viven en observaciones_director (por actividad + semana), no en
+                -- indicadores.observaciones, que es una columna sin uso real.
+                (
+                    SELECT COALESCE(json_agg(json_build_object(
+                        'id', od.id,
+                        'semana', od.semana,
+                        'texto', od.texto,
+                        'ultima_edicion', od.ultima_edicion,
+                        'director_nombre', COALESCE(ud.nombres || ' ' || ud.apellidos, 'Dirección de Programa')
+                    ) ORDER BY od.ultima_edicion DESC), '[]'::json)
+                    FROM observaciones_director od
+                    LEFT JOIN usuarios ud ON ud.id_usuario = od.director_id
+                    WHERE od.id_asignacionact = aa.id_asignacionact
+                ) AS observaciones_director
+
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af    ON ua.id_funciones     = af.id_funciones
             JOIN asignacion_actividades aa  ON af.id_funciones     = aa.id_funciones
@@ -298,7 +315,7 @@ const guardarFuncionDocente = async (req, res) => {
                     } else {
                         // Insertar nueva descripción
                         const descRes = await client.query(
-                            'INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta) VALUES ($1, $2, $3) RETURNING id_descripcion',
+                            'INSERT INTO descripcion (id_asignacionact, resultado_esperado, meta, activo) VALUES ($1, $2, $3, TRUE) RETURNING id_descripcion',
                             [idAct, descData.resultadoEsperado, descData.meta || null]
                         );
                         idDescripcion = descRes.rows[0].id_descripcion;
@@ -339,7 +356,7 @@ const guardarFuncionDocente = async (req, res) => {
                         } else {
                             // Insertar nuevo indicador
                             const indRes = await client.query(
-                                'INSERT INTO indicadores (id_descripcion, nombre_indicador) VALUES ($1, $2) RETURNING id_indicadores',
+                                'INSERT INTO indicadores (id_descripcion, nombre_indicador, activo) VALUES ($1, $2, TRUE) RETURNING id_indicadores',
                                 [idDescripcion, indData.nombre_indicador.trim()]
                             );
                             updatedOrInsertedIds.push(indRes.rows[0].id_indicadores);
@@ -383,7 +400,20 @@ const guardarFuncionDocente = async (req, res) => {
             [id_funciones]
         );
 
+        // Docente dueño de la función — se usa para la notificación al director
+        const duenioRes = await client.query(
+            'SELECT id_usuario FROM usuario_asignacion WHERE id_funciones = $1 LIMIT 1',
+            [id_funciones]
+        );
+
         await client.query('COMMIT');
+
+        // Notificación al director: el servicio solo envía el correo cuando
+        // TODAS las funciones del docente quedaron diligenciadas, así que
+        // llamarlo en cada guardado no genera correos repetidos.
+        if (duenioRes.rows.length > 0) {
+            notificaciones.background.agendaEnviada(duenioRes.rows[0].id_usuario);
+        }
 
         res.json({ mensaje: 'Función guardada y aceptada correctamente.' });
 
@@ -447,16 +477,17 @@ const guardarAvanceDocente = async (req, res) => {
                 }
             }
 
+            // El docente solo registra su ejecución. Las observaciones son del
+            // Director y viven en observaciones_director; antes esta consulta
+            // escribía indicadores.observaciones con cadena vacía en cada guardado.
             await client.query(`
-                UPDATE indicadores 
-                SET ejecucion_8 = $1, 
-                    ejecucion_16 = $2, 
-                    observaciones = $3
-                WHERE id_indicadores = $4
+                UPDATE indicadores
+                SET ejecucion_8 = $1,
+                    ejecucion_16 = $2
+                WHERE id_indicadores = $3
             `, [
                 ejec8,
                 ejec16,
-                ind.observaciones ?? '',
                 ind.id_indicador
             ]);
         }

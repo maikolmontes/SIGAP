@@ -1,5 +1,7 @@
 const pool = require('../db/connection');
 const xlsx = require('xlsx');
+const { calcularAlcance } = require('../utils/rolActivo');
+const notificaciones = require('../services/notificacionesService');
 
 const parseSemestre = (semestreStr) => {
     if (!semestreStr) return { numero: '1', grupo: 'A' };
@@ -240,6 +242,8 @@ const importarAsignaciones = async (req, res) => {
         let procesados = 0;
         let conservados = 0;
         let errores = [];
+        // Docentes tocados por la importación — se usa para avisarles por correo
+        const docentesAfectados = new Set();
 
         const pensulRes = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = true LIMIT 1');
         const idPensulAca = pensulRes.rows.length > 0 ? pensulRes.rows[0].id_pensulaca : 1;
@@ -355,6 +359,7 @@ const importarAsignaciones = async (req, res) => {
                 continue;
             }
             const idUsuario = userRes.rows[0].id_usuario;
+            docentesAfectados.add(idUsuario);
 
             // Actualizar tipo de vinculación / contrato automáticamente si se incluye en el Excel (MT: Medio Tiempo, TC: Tiempo Completo, HC: Hora Cátedra)
             const vinculacionRaw = row['vinculacion'] || row['tipovinculacion'] || row['vinculación'] || row['tipodevinculacion'] || row['contrato'] || row['tipocontrato'] || row['dedicacion'] || row['dedicaciondocente'];
@@ -492,14 +497,27 @@ const importarAsignaciones = async (req, res) => {
         `);
 
         await client.query('COMMIT');
-        
-        res.status(200).json({ 
+
+        // Aviso a los docentes de que ya tienen carga académica cargada.
+        // Es un correo masivo, así que solo sale si está habilitado por
+        // configuración (EMAIL_AVISO_ASIGNACIONES=true) o si se pide en la
+        // petición con ?notificar=true.
+        const notificarCarga =
+            String(process.env.EMAIL_AVISO_ASIGNACIONES).toLowerCase() === 'true' ||
+            String(req.query.notificar || req.body.notificar).toLowerCase() === 'true';
+
+        if (notificarCarga && docentesAfectados.size > 0) {
+            notificaciones.background.asignacionesCargadas([...docentesAfectados]);
+        }
+
+        res.status(200).json({
             mensaje: 'Importación procesada correctamente',
             resultados: {
                 procesados,
                 conservados,
                 erroresEncontrados: errores.length,
-                detallesErrores: errores
+                detallesErrores: errores,
+                docentesNotificados: notificarCarga ? docentesAfectados.size : 0
             }
         });
 
@@ -812,27 +830,7 @@ const getDashboardDirector = async (req, res) => {
         let metricas = { total: 0, aceptadas: 0, pendientes: 0, total_horas: 0 };
         let distribucion = [];
         let importacionRealizada = false;
-        let nombreFacultad = null;
-        let programasFacultad = [];
-
         if (idPeriodo) {
-            const userRoles = (req.user?.roles || '').toLowerCase();
-            const isDecano = userRoles.includes('decano');
-            const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
-            let facultadId = req.user?.id_facultad || null;
-
-            if (isDecano && !facultadId && req.user?.id) {
-                const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
-                facultadId = facQ.rows[0]?.id_facultad || null;
-            }
-
-            if (isDecano && facultadId) {
-                const facInfo = await pool.query('SELECT nombre_facultad FROM facultad WHERE id_facultad = $1', [facultadId]);
-                nombreFacultad = facInfo.rows[0]?.nombre_facultad || null;
-
-                const progsInfo = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico WHERE id_facultad = $1 AND activo = true ORDER BY nombre_programa', [facultadId]);
-                programasFacultad = progsInfo.rows;
-            }
 
             let docentesQuery = `
                 SELECT
@@ -844,6 +842,10 @@ const getDashboardDirector = async (req, res) => {
                     tc.horas_contrato,
                     COUNT(af.id_funciones) AS total_funciones,
                     COUNT(CASE WHEN af.estado_agenda = 'Aceptado' THEN af.id_funciones END) AS funciones_aceptadas,
+                    -- Una función aprobada por el Director también está diligenciada:
+                    -- sin estos conteos, aprobar una agenda la devolvía a "Pendiente".
+                    COUNT(CASE WHEN af.estado_agenda = 'Aprobada' THEN af.id_funciones END) AS funciones_aprobadas,
+                    COUNT(CASE WHEN af.estado_agenda = 'Devuelta' THEN af.id_funciones END) AS funciones_devueltas,
                     COALESCE(SUM(af.horas_funcion), 0) AS horas_asignadas,
                     COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
                     COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Investigación' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
@@ -858,11 +860,6 @@ const getDashboardDirector = async (req, res) => {
                 WHERE u.activo = TRUE
             `;
             const docParams = [idPeriodo];
-
-            if (isDecano && facultadId) {
-                docentesQuery += ` AND pa.id_facultad = $2`;
-                docParams.push(facultadId);
-            }
 
             docentesQuery += `
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
@@ -895,14 +892,21 @@ const getDashboardDirector = async (req, res) => {
             );
             importacionRealizada = parseInt(importCheck.rows[0].cnt) > 0;
 
-            // Metricas
+            // Metricas — "diligenciada" incluye tanto Aceptado (docente la llenó)
+            // como Aprobada (el Director ya le dio el visto bueno).
+            const diligenciadas = (d) => parseInt(d.funciones_aceptadas) + parseInt(d.funciones_aprobadas);
+
             metricas.total = docentes.length;
             metricas.aceptadas = docentes.filter(d =>
-                parseInt(d.total_funciones) > 0 && parseInt(d.funciones_aceptadas) >= parseInt(d.total_funciones)
+                parseInt(d.total_funciones) > 0 && diligenciadas(d) >= parseInt(d.total_funciones)
             ).length;
             metricas.pendientes = docentes.filter(d =>
-                parseInt(d.total_funciones) > 0 && parseInt(d.funciones_aceptadas) < parseInt(d.total_funciones)
+                parseInt(d.total_funciones) > 0 && diligenciadas(d) < parseInt(d.total_funciones)
             ).length;
+            metricas.aprobadas = docentes.filter(d =>
+                parseInt(d.total_funciones) > 0 && parseInt(d.funciones_aprobadas) >= parseInt(d.total_funciones)
+            ).length;
+            metricas.devueltas = docentes.filter(d => parseInt(d.funciones_devueltas) > 0).length;
             metricas.total_horas = docentes.reduce((sum, d) =>
                 sum + parseFloat(d.horas_asignadas || 0), 0
             );
@@ -920,10 +924,6 @@ const getDashboardDirector = async (req, res) => {
                 WHERE af.id_periodo = $1
             `;
             const distParams = [idPeriodo];
-            if (isDecano && facultadId) {
-                distQuery += ` AND pa.id_facultad = $2`;
-                distParams.push(facultadId);
-            }
             distQuery += `
                 GROUP BY af.funcion_sustantiva
                 ORDER BY horas DESC
@@ -938,9 +938,7 @@ const getDashboardDirector = async (req, res) => {
             docentes,
             metricas,
             distribucion,
-            importacionRealizada,
-            facultad: nombreFacultad,
-            programas_facultad: programasFacultad
+            importacionRealizada
         });
     } catch (error) {
         console.error('Error en getDashboardDirector:', error);

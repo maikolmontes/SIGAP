@@ -1,4 +1,5 @@
 const pool = require('../db/connection');
+const notificaciones = require('../services/notificacionesService');
 const getAll = async (req, res) => {
     try {
         const result = await pool.query(`
@@ -12,26 +13,24 @@ const getAll = async (req, res) => {
                 u.numero_documento,
                 u.activo,
                 u.id_programa,
-                u.id_facultad,
                 tc.tipo            AS tipo_contrato,
                 tc.horas_contrato,
                 pa.nombre_programa AS programa,
-                COALESCE(f.nombre_facultad, f_user.nombre_facultad) AS facultad,
+                f.nombre_facultad  AS facultad,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
             LEFT JOIN programa_academico pa  ON u.id_programa  = pa.id_programa
             LEFT JOIN facultad f             ON pa.id_facultad = f.id_facultad
-            LEFT JOIN facultad f_user        ON u.id_facultad  = f_user.id_facultad
             LEFT JOIN usuario_rol ur ON u.id_usuario = ur.id_usuario
             LEFT JOIN roles r ON ur.id_rol = r.id_rol
             
             GROUP BY
                 u.id_usuario, u.nombres, u.apellidos,
                 u.correo, u.tipo_documento, u.numero_documento, u.activo,
-                u.id_programa, u.id_facultad,
+                u.id_programa,
                 tc.tipo, tc.horas_contrato,
-                pa.nombre_programa, f.nombre_facultad, f_user.nombre_facultad
+                pa.nombre_programa, f.nombre_facultad
             ORDER BY u.apellidos
         `);
 
@@ -58,18 +57,16 @@ const getById = async (req, res) => {
                 u.correo,
                 u.activo,
                 u.id_programa,
-                u.id_facultad,
                 tc.tipo            AS tipo_contrato,
                 tc.horas_contrato,
                 pa.nombre_programa AS programa,
-                COALESCE(f.nombre_facultad, f_user.nombre_facultad) AS facultad,
+                f.nombre_facultad  AS facultad,
                 na.nombre_titulo   AS nivel_academico,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato   = tc.id_contrato
             LEFT JOIN programa_academico pa  ON u.id_programa   = pa.id_programa
             LEFT JOIN facultad f             ON pa.id_facultad  = f.id_facultad
-            LEFT JOIN facultad f_user        ON u.id_facultad   = f_user.id_facultad
             LEFT JOIN usuario_rol ur         ON u.id_usuario    = ur.id_usuario
             LEFT JOIN roles r                ON ur.id_rol       = r.id_rol
             LEFT JOIN usuario_nivel un       ON u.id_usuario    = un.id_usuario
@@ -79,9 +76,9 @@ const getById = async (req, res) => {
                 u.id_usuario, u.nombres, u.apellidos,
                 u.numero_documento, u.tipo_documento,
                 u.correo, u.activo,
-                u.id_programa, u.id_facultad,
+                u.id_programa,
                 tc.tipo, tc.horas_contrato,
-                pa.nombre_programa, f.nombre_facultad, f_user.nombre_facultad,
+                pa.nombre_programa, f.nombre_facultad,
                 na.nombre_titulo
         `, [id]);
 
@@ -101,7 +98,6 @@ const normalizeRolName = (rName) => {
     if (!rName) return 'docente';
     const low = rName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (low.includes('planea') || low.includes('admin')) return 'planeacion';
-    if (low.includes('decano')) return 'decano';
     if (low.includes('direct')) return 'director';
     if (low.includes('consult') || low.includes('auditor')) return 'consultor';
     if (low.includes('docent')) return 'docente';
@@ -114,7 +110,6 @@ const CANONICAL_ROL_MAP = {
     'director':   { nombre: 'Director',   id: 3 },
     'consultor':  { nombre: 'Consultor',  id: 4 },
     'planeacion': { nombre: 'Planeacion', id: 1 },
-    'decano':     { nombre: 'Decano',     id: 5 },
 };
 
 /**
@@ -148,8 +143,7 @@ const parseRoles = (roles, rol) => {
         'docente': 'Docente',
         'director': 'Director',
         'consultor': 'Consultor',
-        'planeacion': 'Planeacion',
-        'decano': 'Decano'
+        'planeacion': 'Planeacion'
     };
 
     const uniqueSet = new Set();
@@ -167,7 +161,7 @@ const isOnlyConsultorOrPlaneacion = (rolesList) => {
     if (!rolesList || rolesList.length === 0) return false;
     return rolesList.every(r => {
         const norm = normalizeRolName(r);
-        return norm === 'consultor' || norm === 'planeacion' || norm === 'decano';
+        return norm === 'consultor' || norm === 'planeacion';
     });
 };
 
@@ -239,7 +233,6 @@ const create = async (req, res) => {
         correo,
         id_contrato,
         id_programa,
-        id_facultad,
         rol,
         roles
     } = req.body;
@@ -247,7 +240,6 @@ const create = async (req, res) => {
     const rolesList = parseRoles(roles, rol);
     const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
     const progId = soloConsultorOPlaneacion ? null : (id_programa || 1);
-    const facId = id_facultad ? parseInt(id_facultad, 10) : null;
 
     const docNum = numero_documento ? String(numero_documento).trim() : '';
     const emailStr = correo ? String(correo).trim().toLowerCase() : '';
@@ -303,9 +295,9 @@ const create = async (req, res) => {
             INSERT INTO usuarios
                 (nombres, apellidos, tipo_documento,
                  numero_documento, correo,
-                 id_contrato, id_programa, id_facultad, activo)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
-            RETURNING id_usuario, nombres, apellidos, correo, id_facultad, id_programa
+                 id_contrato, id_programa, activo)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+            RETURNING id_usuario, nombres, apellidos, correo, id_programa
         `, [
             nombres ? nombres.trim() : '',
             apellidos ? apellidos.trim() : '',
@@ -313,8 +305,7 @@ const create = async (req, res) => {
             docNum || '0000000000',
             emailStr,
             id_contrato || resolverIdContrato(req.body.tipo_contrato) || 4,
-            progId,
-            facId
+            progId
         ]);
 
         const nuevoUsuario = result.rows[0];
@@ -365,6 +356,15 @@ const create = async (req, res) => {
         }
 
         await pool.query('COMMIT');
+
+        // Correo de bienvenida con instrucciones de acceso (en segundo plano)
+        notificaciones.background.bienvenida({
+            idUsuario: nuevoUsuario.id_usuario,
+            correo: nuevoUsuario.correo,
+            nombre: `${nuevoUsuario.nombres} ${nuevoUsuario.apellidos}`.trim(),
+            roles: rolesList
+        });
+
         res.status(201).json({
             ...nuevoUsuario,
             roles: rolesList.join(', '),
@@ -660,7 +660,6 @@ const update = async (req, res) => {
         numero_documento,
         correo,
         id_programa,
-        id_facultad,
         rol,
         roles
     } = req.body;
@@ -668,7 +667,6 @@ const update = async (req, res) => {
     const rolesList = parseRoles(roles, rol);
     const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
     const progId = soloConsultorOPlaneacion ? null : (id_programa || 1);
-    const facId = id_facultad ? parseInt(id_facultad, 10) : null;
 
     const docNum = numero_documento ? String(numero_documento).trim() : '';
     const emailStr = correo ? String(correo).trim().toLowerCase() : '';
@@ -728,10 +726,9 @@ const update = async (req, res) => {
                 tipo_documento = $3,
                 numero_documento = $4,
                 correo = $5,
-                id_programa = $6,
-                id_facultad = $7
-            WHERE id_usuario = $8
-            RETURNING id_usuario, nombres, apellidos, correo, id_programa, id_facultad
+                id_programa = $6
+            WHERE id_usuario = $7
+            RETURNING id_usuario, nombres, apellidos, correo, id_programa
         `, [
             nombres ? nombres.trim() : '',
             apellidos ? apellidos.trim() : '',
@@ -739,7 +736,6 @@ const update = async (req, res) => {
             docNum || '0000000000',
             emailStr,
             progId,
-            facId,
             id
         ]);
 

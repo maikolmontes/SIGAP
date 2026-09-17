@@ -39,10 +39,6 @@ const matrixData = [
         descripcion: 'Revisión y aprobación de cargas docentes enviadas'
       },
       {
-        nombre: 'Historial de Agendas',
-        descripcion: 'Consulta de agendas de períodos anteriores'
-      },
-      {
         nombre: 'Observaciones Docentes',
         descripcion: 'Retroalimentación y solicitudes de corrección'
       },
@@ -188,16 +184,6 @@ async function runSeed(poolInstance = pool) {
         permitidos = allPermisos.filter(p => 
           p.modulo === 'Gestión Docente' ||
           (p.pagina === 'Perfil de Usuario' && (p.accion === 'Ver' || p.accion === 'Editar'))
-        );
-      } else if (normRol.includes('decano')) {
-        const decanoTarget = [
-          'Agendas por Revisar', 'Observaciones Docentes', 'Reportes de Gestión',
-          'Seguimiento y Auditoría', 'Observaciones de Control', 'Analítica Institucional',
-          'Analítica y Reportes', 'Docentes y Usuarios', 'Perfil de Usuario'
-        ];
-        permitidos = allPermisos.filter(p => 
-          decanoTarget.includes(p.pagina) &&
-          (p.accion === 'Ver' || (p.pagina.includes('Observaciones') && (p.accion === 'Crear' || p.accion === 'Editar')) || (p.pagina === 'Perfil de Usuario' && p.accion === 'Editar'))
         );
       } else if (normRol.includes('consult')) {
         permitidos = allPermisos.filter(p => p.accion === 'Ver');
