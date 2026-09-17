@@ -81,13 +81,7 @@ const menuConsultor: MenuItem[] = [
     { label: 'Analítica', path: '/consultor/analitica', icon: BarChart3 },
 ]
 
-const menuDecano: MenuItem[] = [
-    { label: 'Principal', isHeader: true },
-    { label: 'Dashboard', path: '/decano/dashboard', icon: LayoutDashboard },
-    { label: 'Supervisión Académica', isHeader: true },
-    { label: 'Agendas Docentes', path: '/decano/agendas', icon: ClipboardList },
-    { label: 'Observaciones', path: '/decano/observaciones', icon: MessageSquare },
-]
+
 
 const PATH_TO_PAGINA: Record<string, string> = {
     // Planeación
@@ -117,13 +111,10 @@ const PATH_TO_PAGINA: Record<string, string> = {
     '/consultor/agendas': 'Seguimiento y Auditoría',
     '/consultor/observaciones': 'Observaciones de Control',
     '/consultor/analitica': 'Analítica Institucional',
-    // Decano
-    '/decano/agendas':      'Agendas por Revisar',
-    '/decano/observaciones':'Observaciones Docentes',
 };
 
 interface SidebarProps {
-    rol: 'planeacion' | 'director' | 'docente' | 'consultor' | 'decano'
+    rol: 'planeacion' | 'director' | 'docente' | 'consultor'
     onClose?: () => void
 }
 
@@ -141,18 +132,14 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
             ? menuDirector 
             : rol === 'consultor' 
                 ? menuConsultor 
-                : rol === 'decano'
-                    ? menuDecano
-                    : menuDocente
+                : menuDocente
     const rolLabel = rol === 'planeacion' 
         ? 'Planeación' 
         : rol === 'director' 
             ? 'Director' 
             : rol === 'consultor' 
                 ? 'Consultor' 
-                : rol === 'decano'
-                    ? 'Decanatura'
-                    : 'Docente'
+                : 'Docente'
 
     // Cargar permisos activos asignados al rol actual
     const cargarPermisos = async () => {
@@ -168,7 +155,6 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                 else if (rol === 'docente') roleId = 2;
                 else if (rol === 'director') roleId = 3;
                 else if (rol === 'consultor') roleId = 4;
-                else if (rol === 'decano') roleId = 5;
             }
             if (roleId) {
                 const res = await api.get(`/permisos/rol/${roleId}`);
@@ -309,14 +295,6 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                     <div className="text-white text-sm font-medium">{periodoEtiqueta}</div>
                 </div>
 
-                {rol === 'decano' && user?.facultad && (
-                    <div className="bg-emerald-500/15 border border-emerald-400/25 rounded-lg px-3 py-2">
-                        <div className="text-emerald-300 text-[10px] uppercase font-bold tracking-wider mb-0.5 flex items-center gap-1">
-                            <span>🏛️</span> Facultad
-                        </div>
-                        <div className="text-white text-xs font-semibold leading-snug">{user.facultad}</div>
-                    </div>
-                )}
             </div>
 
             <nav className="flex-1 px-3 pb-8">

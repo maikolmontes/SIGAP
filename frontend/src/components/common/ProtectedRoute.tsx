@@ -37,9 +37,6 @@ const RUTA_PAGINA_MAP: Record<string, string> = {
     '/director/dashboard': 'Dashboard Director',
     '/director/agenda': 'Agenda Director',
     '/consultor/dashboard': 'Dashboard Consultor',
-    '/decano/dashboard': 'Dashboard Decano',
-    '/decano/agendas': 'Agendas Decano',
-    '/decano/observaciones': 'Observaciones Decano',
 };
 
 // Componente de Acceso Restringido

@@ -812,27 +812,7 @@ const getDashboardDirector = async (req, res) => {
         let metricas = { total: 0, aceptadas: 0, pendientes: 0, total_horas: 0 };
         let distribucion = [];
         let importacionRealizada = false;
-        let nombreFacultad = null;
-        let programasFacultad = [];
-
         if (idPeriodo) {
-            const userRoles = (req.user?.roles || '').toLowerCase();
-            const isDecano = userRoles.includes('decano');
-            const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
-            let facultadId = req.user?.id_facultad || null;
-
-            if (isDecano && !facultadId && req.user?.id) {
-                const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
-                facultadId = facQ.rows[0]?.id_facultad || null;
-            }
-
-            if (isDecano && facultadId) {
-                const facInfo = await pool.query('SELECT nombre_facultad FROM facultad WHERE id_facultad = $1', [facultadId]);
-                nombreFacultad = facInfo.rows[0]?.nombre_facultad || null;
-
-                const progsInfo = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico WHERE id_facultad = $1 AND activo = true ORDER BY nombre_programa', [facultadId]);
-                programasFacultad = progsInfo.rows;
-            }
 
             let docentesQuery = `
                 SELECT
@@ -858,11 +838,6 @@ const getDashboardDirector = async (req, res) => {
                 WHERE u.activo = TRUE
             `;
             const docParams = [idPeriodo];
-
-            if (isDecano && facultadId) {
-                docentesQuery += ` AND pa.id_facultad = $2`;
-                docParams.push(facultadId);
-            }
 
             docentesQuery += `
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
@@ -920,10 +895,6 @@ const getDashboardDirector = async (req, res) => {
                 WHERE af.id_periodo = $1
             `;
             const distParams = [idPeriodo];
-            if (isDecano && facultadId) {
-                distQuery += ` AND pa.id_facultad = $2`;
-                distParams.push(facultadId);
-            }
             distQuery += `
                 GROUP BY af.funcion_sustantiva
                 ORDER BY horas DESC
@@ -938,9 +909,7 @@ const getDashboardDirector = async (req, res) => {
             docentes,
             metricas,
             distribucion,
-            importacionRealizada,
-            facultad: nombreFacultad,
-            programas_facultad: programasFacultad
+            importacionRealizada
         });
     } catch (error) {
         console.error('Error en getDashboardDirector:', error);

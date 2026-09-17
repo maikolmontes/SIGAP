@@ -30,11 +30,7 @@ import DashboardConsultor from './pages/consultor/DashboardConsultor'
 import DetalleAgendaConsultor from './pages/consultor/DetalleAgendaConsultor'
 import ObservacionesConsultor from './pages/consultor/ObservacionesConsultor'
 
-// Decano Pages
-import DashboardDecano from './pages/decano/DashboardDecano'
-import AgendasDecano from './pages/decano/AgendasDecano'
-import DetalleAgendaDecano from './pages/decano/DetalleAgendaDecano'
-import ObservacionesDecano from './pages/decano/ObservacionesDecano'
+
 
 function App() {
   const { showTimeoutModal, timeoutSeconds, extendSession, logout } = useAuth();
@@ -96,14 +92,6 @@ function App() {
           <Route path="/consultor/analitica" element={<Analitica rol="consultor" />} />
         </Route>
 
-        {/* Decano */}
-        <Route element={<ProtectedRoute allowedRoles={['Decano']} />}>
-          <Route path="/decano/dashboard" element={<DashboardDecano />} />
-          <Route path="/decano/agendas" element={<AgendasDecano />} />
-          <Route path="/decano/agendas/:id" element={<DetalleAgendaDecano />} />
-          <Route path="/decano/observaciones" element={<ObservacionesDecano />} />
-          <Route path="/decano/analitica" element={<Analitica rol="decano" />} />
-        </Route>
 
         {/* Comunes */}
         <Route element={<ProtectedRoute />}>

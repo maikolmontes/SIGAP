@@ -5,7 +5,7 @@ import { RefreshCw } from 'lucide-react';
 
 interface TopbarProps {
     path: string
-    rol: 'planeacion' | 'director' | 'docente' | 'consultor' | 'decano'
+    rol: 'planeacion' | 'director' | 'docente' | 'consultor'
     onOpenMenu?: () => void
     onToggleDesktop?: () => void
 }
@@ -24,18 +24,14 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
             ? 'Director' 
             : rol === 'consultor' 
                 ? 'Consultor' 
-                : rol === 'decano'
-                    ? 'Decanatura'
-                    : 'Docente'
+                : 'Docente'
     const iniciales = rol === 'planeacion' 
         ? 'PL' 
         : rol === 'director' 
             ? 'DI' 
             : rol === 'consultor' 
                 ? 'CO' 
-                : rol === 'decano'
-                    ? 'DE'
-                    : 'DO'
+                : 'DO'
 
     return (
         <header className="h-14 sm:h-11 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-5 flex-shrink-0 z-40 w-full relative">
@@ -66,19 +62,9 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
-                <span className={`hidden md:inline-block rounded px-2 py-0.5 text-xs font-medium border ${
-                    rol === 'decano' 
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
-                        : 'bg-yellow-50 text-yellow-800 border-yellow-300'
-                }`}>
+                <span className="hidden md:inline-block rounded px-2 py-0.5 text-xs font-medium border bg-yellow-50 text-yellow-800 border-yellow-300">
                     {rolLabel}
                 </span>
-
-                {user?.facultad && (
-                    <span className="hidden lg:inline-flex items-center gap-1 bg-slate-50 text-slate-700 border border-slate-200 rounded px-2 py-0.5 text-xs font-semibold max-w-[200px] truncate" title={user.facultad}>
-                        🏛️ {user.facultad}
-                    </span>
-                )}
 
                 {hasMultipleRoles && (
                     <button 
@@ -121,11 +107,6 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
                                 <div className="px-4 py-3 border-b border-gray-50 bg-gray-50/50 rounded-t-lg mb-1">
                                     <p className="text-sm font-bold text-gray-800 truncate">{user?.nombres || 'Usuario'} {user?.apellidos || ''}</p>
                                     <p className="text-xs text-gray-500 truncate">{user?.correo || 'correo@institucion.edu.co'}</p>
-                                    {user?.facultad && (
-                                        <p className="text-[11px] font-semibold text-emerald-700 truncate mt-1.5 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
-                                            🏛️ {user.facultad}
-                                        </p>
-                                    )}
                                 </div>
                                 <Link 
                                     to="/perfil" 

@@ -101,7 +101,6 @@ const normalizeRolName = (rName) => {
     if (!rName) return 'docente';
     const low = rName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (low.includes('planea') || low.includes('admin')) return 'planeacion';
-    if (low.includes('decano')) return 'decano';
     if (low.includes('direct')) return 'director';
     if (low.includes('consult') || low.includes('auditor')) return 'consultor';
     if (low.includes('docent')) return 'docente';
@@ -114,7 +113,6 @@ const CANONICAL_ROL_MAP = {
     'director':   { nombre: 'Director',   id: 3 },
     'consultor':  { nombre: 'Consultor',  id: 4 },
     'planeacion': { nombre: 'Planeacion', id: 1 },
-    'decano':     { nombre: 'Decano',     id: 5 },
 };
 
 /**
@@ -148,8 +146,7 @@ const parseRoles = (roles, rol) => {
         'docente': 'Docente',
         'director': 'Director',
         'consultor': 'Consultor',
-        'planeacion': 'Planeacion',
-        'decano': 'Decano'
+        'planeacion': 'Planeacion'
     };
 
     const uniqueSet = new Set();
@@ -167,7 +164,7 @@ const isOnlyConsultorOrPlaneacion = (rolesList) => {
     if (!rolesList || rolesList.length === 0) return false;
     return rolesList.every(r => {
         const norm = normalizeRolName(r);
-        return norm === 'consultor' || norm === 'planeacion' || norm === 'decano';
+        return norm === 'consultor' || norm === 'planeacion';
     });
 };
 
