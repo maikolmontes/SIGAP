@@ -1,4 +1,5 @@
 const pool = require('../db/connection');
+const notificaciones = require('../services/notificacionesService');
 const getAll = async (req, res) => {
     try {
         const result = await pool.query(`
@@ -355,6 +356,15 @@ const create = async (req, res) => {
         }
 
         await pool.query('COMMIT');
+
+        // Correo de bienvenida con instrucciones de acceso (en segundo plano)
+        notificaciones.background.bienvenida({
+            idUsuario: nuevoUsuario.id_usuario,
+            correo: nuevoUsuario.correo,
+            nombre: `${nuevoUsuario.nombres} ${nuevoUsuario.apellidos}`.trim(),
+            roles: rolesList
+        });
+
         res.status(201).json({
             ...nuevoUsuario,
             roles: rolesList.join(', '),

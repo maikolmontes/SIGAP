@@ -129,9 +129,10 @@ export default function Docentes() {
   const cargarUsuarios = async () => {
     try {
       setLoading(true);
-      const [activePeriodRes, progsRes] = await Promise.all([
+      const [activePeriodRes, progsRes, usuariosRes] = await Promise.all([
         getPeriodoActivo().catch(() => ({ data: null })),
-        getProgramas().catch(() => ({ data: [] }))
+        getProgramas().catch(() => ({ data: [] })),
+        getUsuarios().catch(() => ({ data: [] }))
       ]);
 
       const pActivo = activePeriodRes.data;
@@ -143,15 +144,10 @@ export default function Docentes() {
         setIdPrograma(listaProgs[0].id_programa);
       }
 
-      if (pActivo) {
-        const res = await getDocentesPeriodo(pActivo.id_periodo);
-        setUsuarios(res.data);
-      } else {
-        setUsuarios([]);
-      }
+      setUsuarios(usuariosRes.data || []);
     } catch (error) {
       console.error('Error al cargar usuarios:', error);
-      setMensaje({ tipo: 'error', texto: 'No se pudieron cargar los docentes del período activo.' });
+      setMensaje({ tipo: 'error', texto: 'No se pudieron cargar los docentes y usuarios.' });
     } finally {
       setLoading(false);
     }
@@ -538,10 +534,10 @@ export default function Docentes() {
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
               <Users className="w-7 h-7 text-blue-400" />
-              Gestión de Docentes y Usuarios
+              Gestión General de Docentes y Usuarios
             </h1>
             <p className="text-blue-100/80 text-sm mt-1 max-w-xl">
-              Administra el personal de la <strong>Facultad de Ingeniería</strong> para el período activo. Agrega usuarios, asigna múltiples roles e inhabilita accesos en tiempo real.
+              Directorio general institucional de docentes y usuarios de todos los programas académicos. Registra usuarios, asigna roles y gestiona accesos.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
@@ -691,10 +687,11 @@ export default function Docentes() {
               className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             >
               <option value="todos">Todos los Programas</option>
-              <option value="Ingeniería de Sistemas">Ingeniería de Sistemas</option>
-              <option value="Ingeniería Electrónica">Ingeniería Electrónica</option>
-              <option value="Ingeniería Industrial">Ingeniería Industrial</option>
-              <option value="Ingeniería Financiera">Ingeniería Financiera</option>
+              {programas.map((prog) => (
+                <option key={prog.id_programa} value={prog.nombre_programa}>
+                  {prog.nombre_programa}
+                </option>
+              ))}
               <option value="Ninguno">No Aplica / Sin Asignar</option>
             </select>
           </div>

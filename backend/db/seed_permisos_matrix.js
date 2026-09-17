@@ -39,10 +39,6 @@ const matrixData = [
         descripcion: 'Revisión y aprobación de cargas docentes enviadas'
       },
       {
-        nombre: 'Historial de Agendas',
-        descripcion: 'Consulta de agendas de períodos anteriores'
-      },
-      {
         nombre: 'Observaciones Docentes',
         descripcion: 'Retroalimentación y solicitudes de corrección'
       },

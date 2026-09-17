@@ -1,4 +1,5 @@
 const pool = require('../db/connection');
+const notificaciones = require('../services/notificacionesService');
 
 const getAgenda = async (req, res) => {
     const { id_usuario } = req.params;
@@ -399,7 +400,20 @@ const guardarFuncionDocente = async (req, res) => {
             [id_funciones]
         );
 
+        // Docente dueño de la función — se usa para la notificación al director
+        const duenioRes = await client.query(
+            'SELECT id_usuario FROM usuario_asignacion WHERE id_funciones = $1 LIMIT 1',
+            [id_funciones]
+        );
+
         await client.query('COMMIT');
+
+        // Notificación al director: el servicio solo envía el correo cuando
+        // TODAS las funciones del docente quedaron diligenciadas, así que
+        // llamarlo en cada guardado no genera correos repetidos.
+        if (duenioRes.rows.length > 0) {
+            notificaciones.background.agendaEnviada(duenioRes.rows[0].id_usuario);
+        }
 
         res.json({ mensaje: 'Función guardada y aceptada correctamente.' });
 

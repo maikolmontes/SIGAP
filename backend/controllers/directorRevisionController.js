@@ -3,6 +3,7 @@
  * Endpoints de supervisión: listar agendas, aprobar, devolver, observaciones, reportes
  */
 const pool = require('../db/connection');
+const notificaciones = require('../services/notificacionesService');
 const { calcularAlcance } = require('../utils/rolActivo');
 
 // ================================================================
@@ -356,6 +357,11 @@ const aprobarAgenda = async (req, res) => {
 
         await client.query('COMMIT');
 
+        // Avisar al docente que su agenda quedó aprobada (en segundo plano)
+        if (result.rowCount > 0) {
+            notificaciones.background.agendaAprobada(idUsuario, directorId);
+        }
+
         res.json({
             mensaje: 'Agenda aprobada exitosamente.',
             funciones_aprobadas: result.rowCount
@@ -410,6 +416,11 @@ const devolverAgenda = async (req, res) => {
         `, [observacion_general.trim(), directorId, idUsuario, idPeriodo]);
 
         await client.query('COMMIT');
+
+        // Avisar al docente con el detalle de las observaciones (en segundo plano)
+        if (result.rowCount > 0) {
+            notificaciones.background.agendaDevuelta(idUsuario, directorId, observacion_general.trim());
+        }
 
         res.json({
             mensaje: 'Agenda devuelta con observaciones.',

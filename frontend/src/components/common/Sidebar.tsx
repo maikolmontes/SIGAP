@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { 
@@ -21,7 +21,8 @@ import {
     ChevronRight,
     Plus,
     ShieldCheck,
-    Crown
+    Crown,
+    Mail
 } from 'lucide-react'
 
 type MenuItem = {
@@ -47,6 +48,7 @@ const menuPlaneacion: MenuItem[] = [
     { label: 'Semanas', path: '/planeacion/semanas', icon: Clock },
     { label: 'Seguridad y Accesos', isHeader: true },
     { label: 'Gestión de Perfiles', path: '/planeacion/perfiles', icon: ShieldCheck },
+    { label: 'Notificaciones', path: '/planeacion/notificaciones', icon: Mail },
     { label: 'Reportes', isHeader: true },
     { label: 'Analítica', path: '/planeacion/analitica', icon: BarChart3 },
 ]
@@ -56,7 +58,6 @@ const menuDirector: MenuItem[] = [
     { label: 'Dashboard', path: '/director/dashboard', icon: LayoutDashboard },
     { label: 'Supervisión', isHeader: true },
     { label: 'Agendas por revisar', path: '/director/agendas', icon: ClipboardList },
-    { label: 'Historial de agendas', path: '/director/historial', icon: History },
     { label: 'Observaciones', path: '/director/observaciones', icon: MessageSquare },
     { label: 'Reportes', isHeader: true },
     { label: 'Reportes', path: '/director/reportes', icon: FileSpreadsheet },
@@ -98,7 +99,6 @@ const PATH_TO_PAGINA: Record<string, string> = {
 
     // Director
     '/director/agendas': 'Agendas por Revisar',
-    '/director/historial': 'Historial de Agendas',
     '/director/observaciones': 'Observaciones Docentes',
     '/director/reportes': 'Reportes de Gestión',
     '/director/analitica': 'Reportes de Gestión',
@@ -378,36 +378,41 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                         )
                     }
 
+                    const isItemActive = (() => {
+                        if (!item.path) return false;
+                        if (item.path === '/director/agendas') {
+                            return location.pathname.startsWith('/director/agendas');
+                        }
+                        if (item.path === '/consultor/agendas') {
+                            return location.pathname.startsWith('/consultor/agendas');
+                        }
+                        return location.pathname === item.path;
+                    })();
+
                     return (
-                        <NavLink
+                        <Link
                             key={`link-${idx}`}
                             to={item.path!}
                             state={item.state}
-                            className={({ isActive }) =>
-                                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-1 transition-all group
-                                ${isActive && !item.isSubItem
-                                    ? 'bg-white/10 text-white border-l-[3px] border-[#4A9BE8] font-medium'
-                                    : item.isSubItem
-                                        ? 'text-white/60 hover:bg-white/5 hover:text-white pl-8 py-1.5 text-xs'
-                                        : 'text-white/60 hover:bg-white/5 hover:text-white border-l-[3px] border-transparent'
-                                }`
-                            }
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-1 transition-all group
+                            ${isItemActive && !item.isSubItem
+                                ? 'bg-white/10 text-white border-l-[3px] border-[#4A9BE8] font-medium'
+                                : item.isSubItem
+                                    ? 'text-white/60 hover:bg-white/5 hover:text-white pl-8 py-1.5 text-xs'
+                                    : 'text-white/60 hover:bg-white/5 hover:text-white border-l-[3px] border-transparent'
+                            }`}
                         >
-                            {({ isActive }) => (
-                                <>
-                                    {item.isSubItem && <span className="text-[10px] opacity-70">➕</span>}
-                                    {item.icon && (
-                                        <item.icon 
-                                            className={`w-4 h-4 transition-colors ${
-                                                isActive ? 'text-white' : 'text-white/60 group-hover:text-white'
-                                            }`} 
-                                        />
-                                    )}
-                                    <span>{item.label}</span>
-                                </>
+                            {item.isSubItem && <span className="text-[10px] opacity-70">➕</span>}
+                            {item.icon && (
+                                <item.icon 
+                                    className={`w-4 h-4 transition-colors ${
+                                        isItemActive ? 'text-white' : 'text-white/60 group-hover:text-white'
+                                    }`} 
+                                />
                             )}
-                        </NavLink>
-                    )
+                            <span>{item.label}</span>
+                        </Link>
+                    );
                 })}
             </nav>
 

@@ -107,3 +107,16 @@ Lo que NO hacer
 No editar porcentaje_avance directamente en la BD — es calculado por el sistema
 No modificar tablas N:N directamente sin pasar por los endpoints correspondientes
 Power BI usa DirectQuery — no cargar datos en caché ni duplicar tablas para reportes
+Notificaciones por correo (Gmail / Nodemailer)
+
+Servicio central: backend/services/emailService.js (transporte SMTP, sendEmail, sendEmailAsync, verificarConexion)
+Reglas de negocio: backend/services/notificacionesService.js (resuelve destinatarios y evita duplicados)
+Plantillas HTML: backend/utils/emailTemplates.js (colores CESMAG #1a2744 / #00a896 / #ea580c)
+Endpoints admin: /api/notificaciones/estado, /prueba, /recordatorios, /periodo/:id
+Panel frontend: /planeacion/notificaciones
+Bitácora: tabla notificaciones_log (database/notificaciones_log.sql) — el backend la crea si no existe
+Diagnóstico: cd backend && node test_email.js correo@cesmag.edu.co
+
+Eventos automáticos: agenda completa → director; agenda aprobada/devuelta → docente; usuario creado → bienvenida.
+Eventos masivos (desactivados por defecto, se activan con EMAIL_AVISO_PERIODO / EMAIL_AVISO_ASIGNACIONES): apertura de período e importación de asignaciones.
+Los correos nunca deben romper una transacción: siempre se disparan con notificaciones.background.* después del COMMIT.

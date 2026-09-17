@@ -1,6 +1,7 @@
 const pool = require('../db/connection');
 const xlsx = require('xlsx');
 const { calcularAlcance } = require('../utils/rolActivo');
+const notificaciones = require('../services/notificacionesService');
 
 const parseSemestre = (semestreStr) => {
     if (!semestreStr) return { numero: '1', grupo: 'A' };
@@ -241,6 +242,8 @@ const importarAsignaciones = async (req, res) => {
         let procesados = 0;
         let conservados = 0;
         let errores = [];
+        // Docentes tocados por la importación — se usa para avisarles por correo
+        const docentesAfectados = new Set();
 
         const pensulRes = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = true LIMIT 1');
         const idPensulAca = pensulRes.rows.length > 0 ? pensulRes.rows[0].id_pensulaca : 1;
@@ -356,6 +359,7 @@ const importarAsignaciones = async (req, res) => {
                 continue;
             }
             const idUsuario = userRes.rows[0].id_usuario;
+            docentesAfectados.add(idUsuario);
 
             // Actualizar tipo de vinculación / contrato automáticamente si se incluye en el Excel (MT: Medio Tiempo, TC: Tiempo Completo, HC: Hora Cátedra)
             const vinculacionRaw = row['vinculacion'] || row['tipovinculacion'] || row['vinculación'] || row['tipodevinculacion'] || row['contrato'] || row['tipocontrato'] || row['dedicacion'] || row['dedicaciondocente'];
@@ -493,14 +497,27 @@ const importarAsignaciones = async (req, res) => {
         `);
 
         await client.query('COMMIT');
-        
-        res.status(200).json({ 
+
+        // Aviso a los docentes de que ya tienen carga académica cargada.
+        // Es un correo masivo, así que solo sale si está habilitado por
+        // configuración (EMAIL_AVISO_ASIGNACIONES=true) o si se pide en la
+        // petición con ?notificar=true.
+        const notificarCarga =
+            String(process.env.EMAIL_AVISO_ASIGNACIONES).toLowerCase() === 'true' ||
+            String(req.query.notificar || req.body.notificar).toLowerCase() === 'true';
+
+        if (notificarCarga && docentesAfectados.size > 0) {
+            notificaciones.background.asignacionesCargadas([...docentesAfectados]);
+        }
+
+        res.status(200).json({
             mensaje: 'Importación procesada correctamente',
             resultados: {
                 procesados,
                 conservados,
                 erroresEncontrados: errores.length,
-                detallesErrores: errores
+                detallesErrores: errores,
+                docentesNotificados: notificarCarga ? docentesAfectados.size : 0
             }
         });
 

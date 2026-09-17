@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { LogOut, Clock, RefreshCw, ShieldAlert } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { LogOut, RefreshCw, ShieldAlert } from 'lucide-react';
 
 interface SessionTimeoutModalProps {
   secondsRemaining: number;
@@ -7,12 +7,18 @@ interface SessionTimeoutModalProps {
   onLogout: () => void;
 }
 
+// Paleta institucional Universidad CESMAG
+const AZUL = '#1a2744';
+const VERDE = '#00a896';
+const ROJO = '#b91c1c';
+
 export default function SessionTimeoutModal({
   secondsRemaining,
   onStayLoggedIn,
   onLogout,
 }: SessionTimeoutModalProps) {
   const [count, setCount] = useState(secondsRemaining);
+  const botonPrincipal = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     setCount(secondsRemaining);
@@ -32,165 +38,158 @@ export default function SessionTimeoutModal({
     return () => clearInterval(interval);
   }, [secondsRemaining]);
 
-  const progressPct = Math.max(0, (count / secondsRemaining) * 100);
-  const isUrgent = count <= 15;
+  // El foco entra al botón principal y Escape mantiene la sesión abierta
+  useEffect(() => {
+    botonPrincipal.current?.focus();
 
-  // Formato MM:SS
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onStayLoggedIn();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onStayLoggedIn]);
+
+  const progressPct = Math.max(0, Math.min(100, (count / secondsRemaining) * 100));
+  const esUrgente = count <= 15;
+  const acento = esUrgente ? ROJO : VERDE;
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
     return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   };
 
+  const RADIO = 42;
+  const CIRCUNFERENCIA = 2 * Math.PI * RADIO;
+
   return (
     <>
-      {/* Backdrop con blur */}
+      {/* Fondo */}
       <div
-        className="fixed inset-0 z-[9998] bg-black/50 backdrop-blur-sm animate-in fade-in duration-300"
+        className="fixed inset-0 z-[9998] bg-slate-900/60 backdrop-blur-[2px]"
         onClick={onStayLoggedIn}
+        aria-hidden="true"
       />
 
-      {/* Modal */}
+      {/* Diálogo */}
       <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 pointer-events-none">
         <div
-          className={`
-            pointer-events-auto w-full max-w-md rounded-2xl shadow-2xl
-            bg-white border-2 transition-all duration-300
-            animate-in slide-in-from-bottom-4 fade-in duration-300
-            ${isUrgent ? 'border-red-300' : 'border-amber-200'}
-          `}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="titulo-sesion"
+          aria-describedby="descripcion-sesion"
+          className="pointer-events-auto w-full max-w-[440px] bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header con degradado */}
-          <div
-            className={`
-              relative overflow-hidden rounded-t-2xl px-6 pt-6 pb-8
-              ${isUrgent
-                ? 'bg-gradient-to-br from-red-500 to-red-700'
-                : 'bg-gradient-to-br from-amber-400 to-orange-500'
-              }
-            `}
-          >
-            {/* Ícono animado */}
-            <div className="flex justify-center mb-4">
-              <div
-                className={`
-                  w-16 h-16 rounded-full flex items-center justify-center shadow-lg
-                  ${isUrgent ? 'bg-red-600/40 animate-pulse' : 'bg-amber-500/40'}
-                `}
-              >
-                <ShieldAlert className="w-8 h-8 text-white" />
-              </div>
+          {/* Encabezado institucional */}
+          <div className="flex items-center gap-3 px-6 py-4" style={{ backgroundColor: AZUL }}>
+            <div className="w-9 h-9 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-[18px] h-[18px] text-white" />
             </div>
-
-            {/* Título */}
-            <h2 className="text-center text-white font-black text-xl mb-1 tracking-tight">
-              ¿Sigues ahí?
-            </h2>
-            <p className="text-center text-white/85 text-sm font-medium">
-              Tu sesión está a punto de cerrarse por inactividad
-            </p>
-
-            {/* Ondas decorativas */}
-            <div className="absolute -bottom-4 left-0 right-0">
-              <svg viewBox="0 0 400 20" className="w-full" preserveAspectRatio="none">
-                <path d="M0,10 Q100,0 200,10 Q300,20 400,10 L400,20 L0,20 Z" fill="white" />
-              </svg>
+            <div className="min-w-0">
+              <h2 id="titulo-sesion" className="text-white font-bold text-base leading-tight">
+                Sesión por expirar
+              </h2>
+              <p className="text-[11px] text-slate-300 mt-0.5 tracking-wide uppercase">
+                SIGAP · Universidad CESMAG
+              </p>
             </div>
           </div>
 
-          {/* Cuerpo */}
-          <div className="px-6 pb-6 pt-2">
+          {/* Línea de acento */}
+          <div className="h-[3px] w-full transition-colors duration-500" style={{ backgroundColor: acento }} />
 
-            {/* Contador grande */}
-            <div className="flex flex-col items-center mb-5">
-              <div
-                className={`
-                  relative flex items-center justify-center w-28 h-28 rounded-full border-4 mb-2
-                  ${isUrgent ? 'border-red-400' : 'border-amber-300'}
-                `}
-              >
-                {/* SVG progreso circular */}
-                <svg
-                  className="absolute inset-0 w-full h-full -rotate-90"
-                  viewBox="0 0 112 112"
-                >
+          {/* Cuerpo */}
+          <div className="px-6 py-6">
+            <p id="descripcion-sesion" className="text-sm text-slate-700 leading-relaxed">
+              Su sesión se cerrará automáticamente por inactividad. Seleccione
+              <strong className="text-slate-900"> Continuar sesión </strong>
+              si desea permanecer en el sistema.
+            </p>
+
+            {/* Temporizador */}
+            <div className="mt-5 flex items-center gap-5">
+              <div className="relative w-24 h-24 shrink-0">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
+                  <circle cx="50" cy="50" r={RADIO} fill="none" stroke="#e2e8f0" strokeWidth="5" />
                   <circle
-                    cx="56" cy="56" r="50"
+                    cx="50"
+                    cy="50"
+                    r={RADIO}
                     fill="none"
-                    stroke={isUrgent ? '#fee2e2' : '#fef3c7'}
-                    strokeWidth="8"
-                  />
-                  <circle
-                    cx="56" cy="56" r="50"
-                    fill="none"
-                    stroke={isUrgent ? '#ef4444' : '#f59e0b'}
-                    strokeWidth="8"
+                    stroke={acento}
+                    strokeWidth="5"
                     strokeLinecap="round"
-                    strokeDasharray={`${2 * Math.PI * 50}`}
-                    strokeDashoffset={`${2 * Math.PI * 50 * (1 - progressPct / 100)}`}
-                    style={{ transition: 'stroke-dashoffset 0.9s linear' }}
+                    strokeDasharray={CIRCUNFERENCIA}
+                    strokeDashoffset={CIRCUNFERENCIA * (1 - progressPct / 100)}
+                    style={{ transition: 'stroke-dashoffset 0.95s linear, stroke 0.5s ease' }}
                   />
                 </svg>
-                {/* Número */}
-                <div className="flex flex-col items-center z-10">
-                  <Clock className={`w-4 h-4 mb-0.5 ${isUrgent ? 'text-red-500' : 'text-amber-500'}`} />
+                <div className="absolute inset-0 flex items-center justify-center">
                   <span
-                    className={`text-2xl font-black tabular-nums leading-none ${isUrgent ? 'text-red-600' : 'text-amber-600'}`}
+                    className="text-[22px] font-bold tabular-nums tracking-tight transition-colors duration-500"
+                    style={{ color: esUrgente ? ROJO : AZUL }}
                   >
                     {formatTime(count)}
                   </span>
                 </div>
               </div>
 
-              <p className={`text-sm font-semibold text-center ${isUrgent ? 'text-red-600' : 'text-gray-600'}`}>
-                {count > 0
-                  ? <>La sesión se cerrará en <strong>{count}</strong> segundo{count !== 1 ? 's' : ''}</>
-                  : 'Cerrando sesión...'
-                }
-              </p>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Tiempo restante
+                </p>
+                <p
+                  className="text-sm font-semibold mt-1 transition-colors duration-500"
+                  style={{ color: esUrgente ? ROJO : '#334155' }}
+                  aria-live="polite"
+                >
+                  {count > 0
+                    ? `${count} segundo${count !== 1 ? 's' : ''} para el cierre`
+                    : 'Cerrando la sesión…'}
+                </p>
+
+                <div className="mt-2.5 w-full h-1 bg-slate-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${progressPct}%`,
+                      backgroundColor: acento,
+                      transition: 'width 0.95s linear, background-color 0.5s ease',
+                    }}
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* Barra de progreso lineal */}
-            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mb-5">
-              <div
-                className={`h-full rounded-full transition-all duration-1000 ease-linear ${isUrgent ? 'bg-red-500' : 'bg-amber-400'}`}
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
+            <p className="mt-5 text-xs text-slate-500 leading-relaxed border-t border-slate-100 pt-4">
+              Por seguridad de la información institucional, el SIGAP finaliza las sesiones
+              que permanecen inactivas. Los cambios sin guardar podrían perderse.
+            </p>
+          </div>
 
-            {/* Botones */}
-            <div className="flex gap-3">
-              <button
-                onClick={onLogout}
-                className="
-                  flex-1 flex items-center justify-center gap-2
-                  py-2.5 px-4 rounded-xl font-semibold text-sm
-                  border-2 border-gray-200 text-gray-600
-                  hover:bg-gray-50 hover:border-gray-300
-                  transition-all duration-150 active:scale-95
-                "
-              >
-                <LogOut className="w-4 h-4" />
-                Cerrar sesión
-              </button>
+          {/* Acciones */}
+          <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5">
+            <button
+              onClick={onLogout}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 hover:text-slate-900 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+            >
+              <LogOut className="w-4 h-4" />
+              Cerrar sesión
+            </button>
 
-              <button
-                onClick={onStayLoggedIn}
-                className={`
-                  flex-1 flex items-center justify-center gap-2
-                  py-2.5 px-4 rounded-xl font-bold text-sm text-white
-                  shadow-md transition-all duration-150 active:scale-95
-                  ${isUrgent
-                    ? 'bg-red-500 hover:bg-red-600 shadow-red-200'
-                    : 'bg-amber-500 hover:bg-amber-600 shadow-amber-200'
-                  }
-                `}
-              >
-                <RefreshCw className="w-4 h-4" />
-                Continuar sesión
-              </button>
-            </div>
+            <button
+              ref={botonPrincipal}
+              onClick={onStayLoggedIn}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold text-white shadow-sm transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+              style={{ backgroundColor: acento }}
+            >
+              <RefreshCw className="w-4 h-4" />
+              Continuar sesión
+            </button>
           </div>
         </div>
       </div>
