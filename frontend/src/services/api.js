@@ -29,6 +29,20 @@ api.interceptors.request.use((config) => {
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Un usuario puede tener varios roles. El backend necesita saber con cuál
+    // está trabajando para calcular el alcance (facultad / programa / todo).
+    // El backend valida esta cabecera contra los roles del token.
+    try {
+        const activeRole = localStorage.getItem('sigap_active_role');
+        if (activeRole) {
+            const nombreRol = JSON.parse(activeRole)?.nombre_rol;
+            if (nombreRol) {
+                config.headers['X-Rol-Activo'] = nombreRol;
+            }
+        }
+    } catch { /* si no se puede leer, el backend usa todos los roles del token */ }
+
     return config;
 }, (error) => {
     return Promise.reject(error);

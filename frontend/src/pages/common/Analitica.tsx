@@ -61,9 +61,15 @@ export default function Analitica({ rol }: AnaliticaProps) {
   const [error, setError] = useState<string | null>(null);
 
   // Power BI State
-  const POWERBI_DEFAULT_URL = 'https://app.powerbi.com/reportEmbed?reportId=482c6439-3243-40bb-89c6-8aa444d90d35&autoAuth=true&embeddedDemo=true';
+  // Tablero "powerbiagenda" publicado en el tenant de la Universidad CESMAG.
+  // autoAuth + ctid exigen que quien lo vea tenga sesión Microsoft con acceso al informe.
+  const POWERBI_DEFAULT_URL = 'https://app.powerbi.com/reportEmbed?reportId=482c6439-3243-40bb-89c6-8aa444d90d35&autoAuth=true&ctid=fcb3606a-82df-48ee-a367-dbb12908a7ca';
   const storedUrl = localStorage.getItem('sigap_powerbi_url');
-  const defaultPowerBiUrl = import.meta.env.VITE_POWERBI_EMBED_URL || (storedUrl && storedUrl.trim() !== '' ? storedUrl : null) || POWERBI_DEFAULT_URL;
+  // Precedencia: lo que se configuró desde la app → variable de entorno → valor por defecto.
+  // Antes la variable de entorno ganaba y dejaba inútil el formulario de configuración.
+  const defaultPowerBiUrl = (storedUrl && storedUrl.trim() !== '' ? storedUrl : null)
+    || import.meta.env.VITE_POWERBI_EMBED_URL
+    || POWERBI_DEFAULT_URL;
   const [powerbiUrl, setPowerbiUrl] = useState<string>(defaultPowerBiUrl);
   const [tempUrlInput, setTempUrlInput] = useState<string>(defaultPowerBiUrl);
   const [urlGuardada, setUrlGuardada] = useState(false);

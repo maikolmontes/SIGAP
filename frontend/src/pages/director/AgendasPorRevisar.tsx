@@ -3,6 +3,7 @@ import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import { Search, Filter, Eye, AlertTriangle, CheckCircle2, XCircle, Clock, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import AsignacionesPorCorregir from '../../components/director/AsignacionesPorCorregir';
 
 const estadoBadge: Record<string, { bg: string; text: string; dot: string }> = {
     Pendiente: { bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-500' },
@@ -19,6 +20,9 @@ export default function AgendasPorRevisar() {
     const [filtroPrograma, setFiltroPrograma] = useState('');
     const [busqueda, setBusqueda] = useState('');
     const [showFilters, setShowFilters] = useState(false);
+    // 'asignaciones' = lo que cargó Planeación (el Director corrige horas)
+    // 'agendas'      = agendas ya diligenciadas por el docente (aprobar / devolver)
+    const [tab, setTab] = useState<'asignaciones' | 'agendas'>('asignaciones');
     const navigate = useNavigate();
 
     const cargarAgendas = useCallback(async () => {
@@ -59,9 +63,36 @@ export default function AgendasPorRevisar() {
             {/* Encabezado */}
             <div className="mb-6">
                 <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">Agendas por Revisar</h1>
-                <p className="text-sm text-gray-500 mt-1">Periodo: {periodoLabel} · {agendas.length} docentes con agenda</p>
+                <p className="text-sm text-gray-500 mt-1">
+                    Periodo: {periodoLabel}
+                    {tab === 'agendas' && ` · ${agendas.length} docentes con agenda`}
+                </p>
             </div>
 
+            {/* ── Navegación de Tabs ── */}
+            <div className="flex flex-wrap gap-3 mb-6">
+                <button
+                    onClick={() => setTab('asignaciones')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-all ${tab === 'asignaciones'
+                        ? 'bg-[#1a2744] text-white shadow-md'
+                        : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
+                >
+                    Asignaciones de Planeación
+                </button>
+                <button
+                    onClick={() => setTab('agendas')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-all ${tab === 'agendas'
+                        ? 'bg-[#1a2744] text-white shadow-md'
+                        : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
+                >
+                    Agendas Diligenciadas
+                </button>
+            </div>
+
+            {tab === 'asignaciones' ? (
+                <AsignacionesPorCorregir />
+            ) : (
+            <>
             {/* Tarjetas resumen */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 {[
@@ -207,6 +238,8 @@ export default function AgendasPorRevisar() {
                     )}
                 </div>
             </div>
+            </>
+            )}
         </Layout>
     );
 }

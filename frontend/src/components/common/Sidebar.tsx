@@ -38,10 +38,12 @@ const menuPlaneacion: MenuItem[] = [
     { label: 'Principal', isHeader: true },
     { label: 'Dashboard', path: '/planeacion/dashboard', icon: LayoutDashboard },
     { label: 'Gestión Institucional', isHeader: true },
-    { label: 'Docentes', path: '/planeacion/docentes', icon: Users },
+    // Orden según el flujo de configuración: primero la estructura académica,
+    // luego el periodo, después los docentes y por último los cortes.
     { label: 'Facultades', path: '/planeacion/facultades', icon: Library },
     { label: 'Programas', path: '/planeacion/programas', icon: GraduationCap },
     { label: 'Períodos', path: '/planeacion/periodos', icon: Calendar },
+    { label: 'Docentes', path: '/planeacion/docentes', icon: Users },
     { label: 'Semanas', path: '/planeacion/semanas', icon: Clock },
     { label: 'Seguridad y Accesos', isHeader: true },
     { label: 'Gestión de Perfiles', path: '/planeacion/perfiles', icon: ShieldCheck },
