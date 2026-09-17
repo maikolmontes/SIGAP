@@ -22,10 +22,7 @@ async function asegurarEsquemaYDatos() {
       `);
     }
 
-    // 2. Asegurar id_facultad en usuarios para Neon
-    await pool.query(`
-      ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS id_facultad INTEGER REFERENCES facultad(id_facultad) ON DELETE SET NULL;
-    `);
+
 
     // 3. Verificar si hay datos matriciales
     const countRes = await pool.query(`SELECT COUNT(*) as count FROM permisos WHERE pagina IS NOT NULL`);
