@@ -15,17 +15,11 @@ const { calcularAlcance } = require('../utils/rolActivo');
 
 // ================================================================
 // Helper: resuelve el alcance según el ROL ACTIVO de la interfaz.
-// Decano → su facultad · Director → su programa · resto → todo
+// Director → su programa · resto → todo
 // ================================================================
 const resolverAlcance = async (req) => {
     const user = req.user;
-    const { limitadoPorFacultad: isDecano, limitadoPorPrograma: isDirector } = calcularAlcance(req);
-
-    let facultadId = user?.id_facultad || null;
-    if (isDecano && !facultadId && user?.id) {
-        const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [user.id]);
-        facultadId = facQ.rows[0]?.id_facultad || null;
-    }
+    const { limitadoPorPrograma: isDirector } = calcularAlcance(req);
 
     let programaId = user?.id_programa || null;
     if (isDirector && !programaId && user?.id) {
@@ -33,7 +27,7 @@ const resolverAlcance = async (req) => {
         programaId = progQ.rows[0]?.id_programa || null;
     }
 
-    return { isDecano, isDirector, facultadId, programaId };
+    return { isDirector, programaId };
 };
 
 // ================================================================
@@ -54,7 +48,7 @@ const getAsignaciones = async (req, res) => {
         const periodo = periodoRes.rows[0];
         const idPeriodo = periodo.id_periodo;
 
-        const { isDecano, isDirector, facultadId, programaId } = await resolverAlcance(req);
+        const { isDirector, programaId } = await resolverAlcance(req);
 
         let query = `
             SELECT
@@ -79,10 +73,7 @@ const getAsignaciones = async (req, res) => {
         `;
         const params = [idPeriodo];
 
-        if (isDecano && facultadId) {
-            query += ` AND pa.id_facultad = $2`;
-            params.push(facultadId);
-        } else if (isDirector && programaId) {
+        if (isDirector && programaId) {
             query += ` AND u.id_programa = $2`;
             params.push(programaId);
         }
