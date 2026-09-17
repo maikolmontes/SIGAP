@@ -248,7 +248,7 @@ export default function HistorialAgendas() {
                                                         </td>
                                                         <td className="px-5 py-3.5 text-center">
                                                             <button
-                                                                onClick={() => navigate(`/director/agendas/${a.id_usuario}`)}
+                                                                onClick={() => navigate(`/director/agendas/${a.id_usuario}`, { state: { modo: 'historial' } })}
                                                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors"
                                                             >
                                                                 <Eye className="w-3.5 h-3.5" />
@@ -311,8 +311,10 @@ export default function HistorialAgendas() {
                                                             </span>
                                                         </td>
                                                         <td className="px-5 py-3.5 text-center">
+                                                            {/* Estas agendas siguen pendientes: se abren en modo revisión
+                                                                completo (aprobar, devolver y observaciones), no en consulta. */}
                                                             <button
-                                                                onClick={() => navigate(`/director/agendas/${a.id_usuario}`)}
+                                                                onClick={() => navigate(`/director/agendas/${a.id_usuario}`, { state: { volverA: '/director/historial' } })}
                                                                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
                                                             >
                                                                 <Eye className="w-3.5 h-3.5" />

@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
-import api from '../../services/api'
 // @ts-ignore
 import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios, updateUsuario, deleteUsuario } from '../../services/usuariosService'
 import { getPeriodos } from '../../services/periodosService'
 import { getProgramas } from '../../services/programasService'
 import { exportarDocentesExcel } from '../../utils/exportExcelDocentes'
+import PanelAgendasTiempoReal from '../../components/planeacion/PanelAgendasTiempoReal'
+import { usePermisosPagina } from '../../hooks/usePermisos'
 import * as XLSX from 'xlsx'
 import { 
     Library, 
@@ -43,27 +44,13 @@ interface Docente {
     roles: string
 }
 
-interface AgendaStat {
-    id_usuario: number
-    nombre: string
-    tipo_contrato: string
-    horas_asignadas: number
-    horas_contrato: number
-    total_funciones: number
-    funciones_aceptadas: number
-    perfil_docente: string
-    docencia_indirecta: number
-}
-
 
 
 export default function DashboardPlaneacion() {
     const [docentes, setDocentes] = useState<Docente[]>([])
     const [programas, setProgramas] = useState<any[]>([])
-    const [agendaStats, setAgendaStats] = useState<AgendaStat[]>([])
-    const [agendaMetricas, setAgendaMetricas] = useState<any>(null)
-    const [ultimaActualizacionAgendas, setUltimaActualizacionAgendas] = useState<string>('')
-    const [cargandoAgendas, setCargandoAgendas] = useState(false)
+    // Permisos dinámicos del rol activo sobre el panel de agendas
+    const permisosAgendas = usePermisosPagina('Dashboard Planeación')
     const [busqueda, setBusqueda] = useState('')
     const [filtroEstado, setFiltroEstado] = useState<'Todos' | 'Activos' | 'Inactivos'>('Todos')
     const [cargando, setCargando] = useState(true)
@@ -249,29 +236,15 @@ export default function DashboardPlaneacion() {
         }
     }, [])
 
-    const cargarAgendas = useCallback(async () => {
-        try {
-            setCargandoAgendas(true)
-            const res = await api.get('/director/dashboard')
-            setAgendaStats(res.data.docentes || [])
-            setAgendaMetricas(res.data.metricas || null)
-            setUltimaActualizacionAgendas(new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-        } catch { /* silently ignore */ }
-        finally {
-            setCargandoAgendas(false)
-        }
-    }, [])
-
     useEffect(() => {
         cargarDocentes()
-        cargarAgendas()
         cargarPeriodoActivo()
         const interval = setInterval(() => {
-            cargarAgendas()
             cargarPeriodoActivo()
         }, 30000)
         return () => clearInterval(interval)
-    }, [cargarDocentes, cargarAgendas])
+    }, [cargarDocentes])
+
 
     const cargarPeriodoActivo = async () => {
         try {
@@ -477,7 +450,7 @@ export default function DashboardPlaneacion() {
                         ? 'bg-[#1a2744] text-white shadow-md' 
                         : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
                 >
-                    Agendas en Tiempo Real
+                    Importación de Asignaciones
                 </button>
             </div>
 
@@ -681,109 +654,11 @@ export default function DashboardPlaneacion() {
                     </div>
                 </>
             ) : (
-                <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-                        <div>
-                            <h2 className="text-lg font-bold text-gray-800">Estado de Agendas (Tiempo Real)</h2>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                                Monitoreo y métricas de carga académica del período activo
-                                {ultimaActualizacionAgendas && (
-                                    <span className="ml-1 text-gray-400">· Actualizado: {ultimaActualizacionAgendas}</span>
-                                )}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={cargarAgendas}
-                                disabled={cargandoAgendas}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50"
-                            >
-                                <svg className={`w-3.5 h-3.5 ${cargandoAgendas ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                                {cargandoAgendas ? 'Actualizando...' : 'Actualizar ahora'}
-                            </button>
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 border border-green-200 rounded-full text-xs font-semibold">
-                                <span className="w-2 h-2 bg-green-500 rounded-full animate-ping"></span>
-                                Tiempo Real
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Resumen KPIs de Agendas */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Total Agendas</p>
-                            <p className="text-xl font-black text-gray-800 mt-0.5">{agendaMetricas.total}</p>
-                        </div>
-                        <div className="bg-green-50/70 border border-green-200 rounded-lg p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-green-700">Aceptadas</p>
-                            <p className="text-xl font-black text-green-800 mt-0.5">{agendaMetricas.aceptadas}</p>
-                        </div>
-                        <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pendientes / Revisión</p>
-                            <p className="text-xl font-black text-amber-800 mt-0.5">{agendaMetricas.pendientes}</p>
-                        </div>
-                        <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Total Horas Asignadas</p>
-                            <p className="text-xl font-black text-blue-800 mt-0.5">{agendaMetricas.total_horas}h</p>
-                        </div>
-                    </div>
-
-                    {agendaStats.length === 0 ? (
-                        <div className="text-center py-12 text-gray-400 italic">
-                            No hay agendas registradas en el período actual.
-                        </div>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="bg-gray-50 border-b border-gray-200">
-                                        <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Docente</th>
-                                        <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Contrato</th>
-                                        <th className="text-center px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Carga (Horas)</th>
-                                        <th className="text-center px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Perfil Docente</th>
-                                        <th className="text-center px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Docencia Indirecta</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {agendaStats.map((a) => (
-                                        <tr key={a.id_usuario} className="hover:bg-gray-50 transition-colors">
-                                            <td className="px-4 py-3 font-semibold text-gray-800">{a.nombre}</td>
-                                            <td className="px-4 py-3 text-gray-600">{a.tipo_contrato}</td>
-                                            <td className="px-4 py-3 text-center">
-                                                <div className="flex flex-col">
-                                                    <span className="font-bold">{a.horas_asignadas} / {a.horas_contrato}h</span>
-                                                    <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1 overflow-hidden">
-                                                        <div 
-                                                            className={`h-full rounded-full ${a.horas_asignadas === a.horas_contrato ? 'bg-green-500' : 'bg-blue-500'}`} 
-                                                            style={{ width: `${Math.min((a.horas_asignadas/a.horas_contrato)*100, 100)}%` }}
-                                                        ></div>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold
-                                                    ${a.perfil_docente.includes('INCONSISTENCIAS') 
-                                                        ? 'bg-red-100 text-red-700' 
-                                                        : 'bg-indigo-100 text-indigo-700'}`}
-                                                >
-                                                    {a.perfil_docente}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <div className="flex flex-col items-center">
-                                                    <span className="text-lg font-black text-blue-600 leading-none">{a.docencia_indirecta}</span>
-                                                    <span className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Horas (30%)</span>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
+                <PanelAgendasTiempoReal
+                    puedeCrear={permisosAgendas.puedeCrear}
+                    puedeEditar={permisosAgendas.puedeEditar}
+                    puedeEliminar={permisosAgendas.puedeEliminar}
+                />
             )}
 
 

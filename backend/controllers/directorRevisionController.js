@@ -3,6 +3,7 @@
  * Endpoints de supervisión: listar agendas, aprobar, devolver, observaciones, reportes
  */
 const pool = require('../db/connection');
+const { calcularAlcance } = require('../utils/rolActivo');
 
 // ================================================================
 // Helper: Calcular perfil docente según Acuerdo 030/2024
@@ -41,10 +42,8 @@ const getAgendas = async (req, res) => {
 
         const periodoInfo = await pool.query('SELECT * FROM periodo WHERE id_periodo = $1', [idPeriodo]);
 
-        // Determinar rol y restricciones
-        const userRoles = (req.user?.roles || '').toLowerCase();
-        const isDecano = userRoles.includes('decano');
-        const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
+        // Determinar restricciones a partir del ROL ACTIVO elegido en la interfaz
+        const { limitadoPorFacultad: isDecano, limitadoPorPrograma: isDirector } = calcularAlcance(req);
 
         let facultadId = req.user?.id_facultad || null;
         if (isDecano && !facultadId && req.user?.id) {
@@ -261,9 +260,12 @@ const getAgendaDetalle = async (req, res) => {
             const actividades = [];
             for (const act of actRes.rows) {
                 // Descripciones
+                // 'activo' se dejó nulo en los registros que crea el docente y la
+                // columna no tiene DEFAULT, así que NULL debe tratarse como activo.
+                // Con 'activo = TRUE' se descartaban todas las descripciones.
                 const descRes = await pool.query(`
                     SELECT * FROM descripcion
-                    WHERE id_asignacionact = $1 AND activo = TRUE
+                    WHERE id_asignacionact = $1 AND activo IS NOT FALSE
                     ORDER BY id_descripcion
                 `, [act.id_asignacionact]);
 
@@ -272,7 +274,7 @@ const getAgendaDetalle = async (req, res) => {
                     // Indicadores
                     const indRes = await pool.query(`
                         SELECT * FROM indicadores
-                        WHERE id_descripcion = $1 AND activo = TRUE
+                        WHERE id_descripcion = $1 AND activo IS NOT FALSE
                         ORDER BY id_indicadores
                     `, [desc.id_descripcion]);
 
@@ -540,8 +542,7 @@ const getReportesResumen = async (req, res) => {
         const periodo = periodoRes.rows[0];
         const idPeriodo = periodo.id_periodo;
 
-        const userRoles = (req.user?.roles || '').toLowerCase();
-        const isDecano = userRoles.includes('decano');
+        const { limitadoPorFacultad: isDecano } = calcularAlcance(req);
         let facultadId = req.user?.id_facultad || null;
         if (isDecano && !facultadId && req.user?.id) {
             const facQ = await pool.query('SELECT id_facultad FROM usuarios WHERE id_usuario = $1', [req.user.id]);
@@ -634,8 +635,8 @@ const getReportesResumen = async (req, res) => {
             JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
             JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
             JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones
-            JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo = TRUE
-            LEFT JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo = TRUE
+            JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo IS NOT FALSE
+            LEFT JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
             WHERE af.id_periodo = $1
             GROUP BY af.funcion_sustantiva
             ORDER BY af.funcion_sustantiva
@@ -702,9 +703,7 @@ const getTodasObservaciones = async (req, res) => {
             return res.json({ observaciones: [], periodo: null, total: 0 });
         }
 
-        const userRoles = (req.user?.roles || '').toLowerCase();
-        const isDecano = userRoles.includes('decano');
-        const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
+        const { limitadoPorFacultad: isDecano, limitadoPorPrograma: isDirector } = calcularAlcance(req);
 
         let facultadId = req.user?.id_facultad || null;
         if (isDecano && !facultadId && req.user?.id) {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/common/Layout';
 import api, { getArchivoUrl } from '../../services/api';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
     ArrowLeft, CheckCircle, XCircle, AlertTriangle, FileText,
     ChevronDown, ChevronRight, Send, Eye, MessageSquare, ExternalLink
@@ -10,6 +10,16 @@ import {
 export default function DetalleAgenda() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const location = useLocation();
+
+    // Modo consulta: se llega desde "Ver detalle" del historial, sobre una agenda
+    // ya revisada. No se aprueba ni se devuelve, pero SÍ se pueden dejar
+    // observaciones, porque el seguimiento de semanas 8 y 16 ocurre después
+    // de aprobar la agenda.
+    const navState = (location.state as any) || {};
+    const esHistorial = navState.modo === 'historial';
+    const rutaVolver = navState.volverA || (esHistorial ? '/director/historial' : '/director/agendas');
+    const etiquetaVolver = rutaVolver === '/director/historial' ? 'Volver al Historial' : 'Volver a Agendas';
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [expandedFuncion, setExpandedFuncion] = useState<number | null>(null);
@@ -109,7 +119,7 @@ export default function DetalleAgenda() {
             <Layout rol="director" path="Supervisión / Detalle de Agenda">
                 <div className="text-center py-16 text-gray-400">
                     <p>No se pudo cargar la agenda.</p>
-                    <button onClick={() => navigate('/director/agendas')} className="mt-3 text-blue-600 hover:underline text-sm">Volver</button>
+                    <button onClick={() => navigate(rutaVolver)} className="mt-3 text-blue-600 hover:underline text-sm">Volver</button>
                 </div>
             </Layout>
         );
@@ -120,13 +130,13 @@ export default function DetalleAgenda() {
     const todasAprobadas = funciones.every((f: any) => f.estado_agenda === 'Aprobada');
 
     return (
-        <Layout rol="director" path={`Supervisión / Agenda de ${docente.nombre_completo}`}>
+        <Layout rol="director" path={`${esHistorial ? 'Historial' : 'Supervisión'} / Agenda de ${docente.nombre_completo}`}>
             {/* Botón volver */}
             <button
-                onClick={() => navigate('/director/agendas')}
+                onClick={() => navigate(rutaVolver)}
                 className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-5 transition-colors"
             >
-                <ArrowLeft className="w-4 h-4" /> Volver a Agendas
+                <ArrowLeft className="w-4 h-4" /> {etiquetaVolver}
             </button>
 
             {/* Resultado de acción */}
@@ -347,10 +357,14 @@ export default function DetalleAgenda() {
                                                                     ))}
                                                                 </div>
                                                             ) : (
-                                                                <p className="text-xs text-amber-700/60 italic mb-4">No has realizado observaciones para esta actividad.</p>
+                                                                <p className="text-xs text-amber-700/60 italic mb-4">
+                                                                    {esHistorial
+                                                                        ? 'No se registraron observaciones para esta actividad.'
+                                                                        : 'No has realizado observaciones para esta actividad.'}
+                                                                </p>
                                                             )}
 
-                                                            {/* Formulario de nueva observación */}
+                                                            {/* Formulario de nueva observación — disponible también en consulta */}
                                                             <div className="bg-white p-4 rounded-lg border border-amber-200 shadow-sm">
                                                                 <p className="text-xs font-bold text-gray-700 mb-2">Añadir o actualizar observación</p>
                                                                 <div className="flex flex-col sm:flex-row gap-3">
@@ -396,8 +410,22 @@ export default function DetalleAgenda() {
                 })}
             </div>
 
+            {/* Aviso de solo lectura al venir del historial */}
+            {esHistorial && (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex items-center gap-3">
+                    <Eye className="w-6 h-6 text-slate-400 shrink-0" />
+                    <div>
+                        <p className="font-bold text-slate-800 text-sm">Vista de consulta</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            Estás viendo esta agenda desde el historial. Puedes dejar observaciones por actividad,
+                            pero para aprobarla o devolverla ábrela desde <strong>Agendas por Revisar</strong>.
+                        </p>
+                    </div>
+                </div>
+            )}
+
             {/* Botones de acción */}
-            {!todasAprobadas && (
+            {!esHistorial && !todasAprobadas && (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                     <h3 className="font-bold text-gray-900 mb-4">Decisión sobre la agenda</h3>
 
@@ -453,7 +481,7 @@ export default function DetalleAgenda() {
                 </div>
             )}
 
-            {todasAprobadas && (
+            {!esHistorial && todasAprobadas && (
                 <div className="bg-green-50 border border-green-200 rounded-2xl p-6 flex items-center gap-3">
                     <CheckCircle className="w-8 h-8 text-green-500" />
                     <div>

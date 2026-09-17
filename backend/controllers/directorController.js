@@ -1,5 +1,6 @@
 const pool = require('../db/connection');
 const xlsx = require('xlsx');
+const { calcularAlcance } = require('../utils/rolActivo');
 
 const parseSemestre = (semestreStr) => {
     if (!semestreStr) return { numero: '1', grupo: 'A' };
@@ -816,9 +817,9 @@ const getDashboardDirector = async (req, res) => {
         let programasFacultad = [];
 
         if (idPeriodo) {
-            const userRoles = (req.user?.roles || '').toLowerCase();
-            const isDecano = userRoles.includes('decano');
-            const isDirector = userRoles.includes('director') && !userRoles.includes('planeacion') && !userRoles.includes('consultor') && !isDecano;
+            // El alcance se calcula con el ROL ACTIVO elegido en la interfaz,
+            // no con todos los roles que el usuario tenga en el token.
+            const { limitadoPorFacultad: isDecano, limitadoPorPrograma: isDirector } = calcularAlcance(req);
             let facultadId = req.user?.id_facultad || null;
 
             if (isDecano && !facultadId && req.user?.id) {
@@ -844,6 +845,10 @@ const getDashboardDirector = async (req, res) => {
                     tc.horas_contrato,
                     COUNT(af.id_funciones) AS total_funciones,
                     COUNT(CASE WHEN af.estado_agenda = 'Aceptado' THEN af.id_funciones END) AS funciones_aceptadas,
+                    -- Una función aprobada por el Director también está diligenciada:
+                    -- sin estos conteos, aprobar una agenda la devolvía a "Pendiente".
+                    COUNT(CASE WHEN af.estado_agenda = 'Aprobada' THEN af.id_funciones END) AS funciones_aprobadas,
+                    COUNT(CASE WHEN af.estado_agenda = 'Devuelta' THEN af.id_funciones END) AS funciones_devueltas,
                     COALESCE(SUM(af.horas_funcion), 0) AS horas_asignadas,
                     COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
                     COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Investigación' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
@@ -895,14 +900,21 @@ const getDashboardDirector = async (req, res) => {
             );
             importacionRealizada = parseInt(importCheck.rows[0].cnt) > 0;
 
-            // Metricas
+            // Metricas — "diligenciada" incluye tanto Aceptado (docente la llenó)
+            // como Aprobada (el Director ya le dio el visto bueno).
+            const diligenciadas = (d) => parseInt(d.funciones_aceptadas) + parseInt(d.funciones_aprobadas);
+
             metricas.total = docentes.length;
             metricas.aceptadas = docentes.filter(d =>
-                parseInt(d.total_funciones) > 0 && parseInt(d.funciones_aceptadas) >= parseInt(d.total_funciones)
+                parseInt(d.total_funciones) > 0 && diligenciadas(d) >= parseInt(d.total_funciones)
             ).length;
             metricas.pendientes = docentes.filter(d =>
-                parseInt(d.total_funciones) > 0 && parseInt(d.funciones_aceptadas) < parseInt(d.total_funciones)
+                parseInt(d.total_funciones) > 0 && diligenciadas(d) < parseInt(d.total_funciones)
             ).length;
+            metricas.aprobadas = docentes.filter(d =>
+                parseInt(d.total_funciones) > 0 && parseInt(d.funciones_aprobadas) >= parseInt(d.total_funciones)
+            ).length;
+            metricas.devueltas = docentes.filter(d => parseInt(d.funciones_devueltas) > 0).length;
             metricas.total_horas = docentes.reduce((sum, d) =>
                 sum + parseFloat(d.horas_asignadas || 0), 0
             );
