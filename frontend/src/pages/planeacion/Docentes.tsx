@@ -100,6 +100,72 @@ function SelectorProgramasGestion({ programas, seleccionados, onChange }: Select
   );
 }
 
+const REGEX_NOMBRE = /^[\p{L}][\p{L}\s'.-]*$/u;
+const REGEX_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface CamposUsuario {
+  nombres: string;
+  apellidos: string;
+  correo: string;
+  tipoDocumento: string;
+  numeroDocumento: string;
+  roles: string[];
+  sinPrograma: boolean; // Consultor/Planeación no llevan programa
+  idPrograma: number | null;
+}
+
+/**
+ * Validación previa al envío. Repite las reglas del backend
+ * (usuariosController.validarDatosUsuario) para avisar sin ir al servidor;
+ * el backend sigue siendo quien decide.
+ * Devuelve TODOS los problemas, no solo el primero.
+ */
+function validarUsuarioCliente(c: CamposUsuario): string[] {
+  const errores: string[] = [];
+  const nombres = c.nombres.trim().replace(/\s+/g, ' ');
+  const apellidos = c.apellidos.trim().replace(/\s+/g, ' ');
+  const correo = c.correo.trim().toLowerCase();
+  const doc = c.numeroDocumento.trim();
+
+  const validarNombre = (valor: string, etiqueta: string) => {
+    if (!valor) errores.push(`${etiqueta} son obligatorios.`);
+    else if (valor.length < 2 || valor.length > 60) errores.push(`${etiqueta} deben tener entre 2 y 60 caracteres.`);
+    else if (!REGEX_NOMBRE.test(valor)) errores.push(`${etiqueta} solo pueden contener letras, espacios, apóstrofes, puntos y guiones.`);
+  };
+  validarNombre(nombres, 'Los nombres');
+  validarNombre(apellidos, 'Los apellidos');
+
+  if (!correo) errores.push('El correo es obligatorio.');
+  else if (correo.length > 100) errores.push('El correo no puede superar los 100 caracteres.');
+  else if (!REGEX_CORREO.test(correo)) errores.push('El correo no tiene un formato válido (ejemplo: nombre@unicesmag.edu.co).');
+
+  if (!doc) {
+    errores.push('El número de documento es obligatorio.');
+  } else if (c.tipoDocumento === 'PA') {
+    if (!/^[A-Za-z0-9]{5,15}$/.test(doc)) errores.push('El pasaporte debe tener entre 5 y 15 caracteres alfanuméricos, sin espacios.');
+  } else if (!/^\d{5,12}$/.test(doc)) {
+    errores.push('El número de documento debe tener entre 5 y 12 dígitos, sin puntos ni espacios.');
+  } else if (/^0+$/.test(doc)) {
+    errores.push('El número de documento no es válido.');
+  }
+
+  if (c.roles.length === 0) errores.push('Debe seleccionar al menos un rol.');
+  if (!c.sinPrograma && !c.idPrograma) errores.push('Debe seleccionar un programa académico.');
+
+  return errores;
+}
+
+/** Texto para mostrar el error de una petición: la lista completa si el backend la envía. */
+interface ErrorDeApi {
+  response?: { data?: { error?: string; errores?: { mensaje: string }[] } };
+}
+
+function mensajeDeError(error: ErrorDeApi, porDefecto: string): string {
+  const lista = error?.response?.data?.errores;
+  if (Array.isArray(lista) && lista.length > 0) return lista.map(e => e.mensaje).join('\n');
+  return error?.response?.data?.error || porDefecto;
+}
+
 export default function Docentes() {
   const location = useLocation();
   const { puedeCrear, puedeEditar } = usePermisosPagina('Docentes y Usuarios');
@@ -304,17 +370,19 @@ export default function Docentes() {
     setFormError(null);
     setFormWarning(null);
 
-    if (!nombres.trim() || !apellidos.trim() || !correo.trim() || !numeroDocumento.trim()) {
-      setFormError('Por favor diligencie todos los campos obligatorios.');
-      return;
-    }
-
-    if (rolesSeleccionados.length === 0) {
-      setFormError('Debe seleccionar al menos un rol.');
-      return;
-    }
-
     const soloConsultaOPl = esSoloConsultorOPlaneacion(rolesSeleccionados);
+
+    const problemas = validarUsuarioCliente({
+      nombres, apellidos, correo,
+      tipoDocumento, numeroDocumento,
+      roles: rolesSeleccionados,
+      sinPrograma: soloConsultaOPl,
+      idPrograma
+    });
+    if (problemas.length > 0) {
+      setFormError(problemas.join('\n'));
+      return;
+    }
 
     try {
       setCreating(true);
@@ -348,8 +416,7 @@ export default function Docentes() {
       setTimeout(() => setMensaje(null), 5000);
     } catch (error: any) {
       console.error('Error al crear usuario:', error);
-      const errMsg = error.response?.data?.error || 'No se pudo registrar el usuario. Verifique los datos o si la identificación/correo ya está registrado.';
-      setFormError(errMsg);
+      setFormError(mensajeDeError(error, 'No se pudo registrar el usuario. Verifique los datos o si la identificación/correo ya está registrado.'));
     } finally {
       setCreating(false);
     }
@@ -362,17 +429,19 @@ export default function Docentes() {
 
     if (!usuarioAEditar) return;
 
-    if (!editNombres.trim() || !editApellidos.trim() || !editCorreo.trim() || !editNumeroDocumento.trim()) {
-      setEditFormError('Por favor diligencie todos los campos obligatorios.');
-      return;
-    }
-
-    if (editRolesSeleccionados.length === 0) {
-      setEditFormError('Debe seleccionar al menos un rol.');
-      return;
-    }
-
     const soloConsultaOPl = esSoloConsultorOPlaneacion(editRolesSeleccionados);
+
+    const problemas = validarUsuarioCliente({
+      nombres: editNombres, apellidos: editApellidos, correo: editCorreo,
+      tipoDocumento: editTipoDocumento, numeroDocumento: editNumeroDocumento,
+      roles: editRolesSeleccionados,
+      sinPrograma: soloConsultaOPl,
+      idPrograma: editIdPrograma
+    });
+    if (problemas.length > 0) {
+      setEditFormError(problemas.join('\n'));
+      return;
+    }
 
     try {
       setUpdating(true);
@@ -405,8 +474,7 @@ export default function Docentes() {
       setTimeout(() => setMensaje(null), 5000);
     } catch (error: any) {
       console.error('Error al actualizar usuario:', error);
-      const errMsg = error.response?.data?.error || 'No se pudo actualizar el usuario. Verifique los datos o si la identificación/correo ya existe.';
-      setEditFormError(errMsg);
+      setEditFormError(mensajeDeError(error, 'No se pudo actualizar el usuario. Verifique los datos o si la identificación/correo ya existe.'));
     } finally {
       setUpdating(false);
     }
@@ -901,7 +969,7 @@ export default function Docentes() {
               {formError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
                   <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
-                  <div>{formError}</div>
+                  <div className="whitespace-pre-line">{formError}</div>
                 </div>
               )}
 
@@ -1106,7 +1174,7 @@ export default function Docentes() {
               {editFormError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
                   <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
-                  <div>{editFormError}</div>
+                  <div className="whitespace-pre-line">{editFormError}</div>
                 </div>
               )}
 

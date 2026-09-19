@@ -77,6 +77,12 @@ Un Director gestiona uno o varios programas y un programa puede tener varios dir
 usuarios.id_programa se conserva: para un docente es su programa; para un director, su programa principal
 El alcance de un Director se resuelve SIEMPRE con alcanceProgramas(req) / docenteEnAlcance(req, id) de backend/utils/rolActivo.js (filtro `u.id_programa = ANY($n::int[])`)
 Un Director sin programas asignados no ve nada; nunca se cae a "toda la institución" ni a un programa por defecto
+
+Usuarios (backend/controllers/usuariosController.js)
+
+/api/usuarios exige token; crear, editar, listar, borrar y activar es solo Planeación/Admin. El perfil (/:id, /perfil, /perfil-completo) es propio o admin
+Alta y edición pasan por validarDatosUsuario (una sola función): nombres/apellidos, correo, tipo y número de documento, roles existentes, programa existente y activo, contrato, programas del director y duplicados (409). Devuelve la lista completa de errores en `errores`
+Alta y edición usan una transacción real (pool.connect), no pool.query('BEGIN')
 Campo calculado automático — NO editar manualmente: porcentaje_avance en RESULTADOS
 
 Fórmula: porcentaje_avance = (ejecucion / meta) * 100
