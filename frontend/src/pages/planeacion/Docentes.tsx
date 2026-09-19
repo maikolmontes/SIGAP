@@ -43,6 +43,8 @@ import { exportarDocentesExcel } from '../../utils/exportExcelDocentes';
 interface ProgramaItem {
   id_programa: number;
   nombre_programa: string;
+  id_facultad?: number;
+  facultad?: string;
   activo?: boolean;
 }
 
@@ -59,7 +61,220 @@ interface Usuario {
   horas_contrato: number;
   programa: string;
   id_programa?: number;
+  // Solo Directores: programas que gestiona (uno o varios)
+  programas_gestion?: number[];
+  programas_gestion_nombres?: string | null;
   roles: string;
+}
+
+interface SelectorUbicacionProps {
+  programas: ProgramaItem[];
+  sinPrograma: boolean;   // solo Consultor/Planeación: no llevan facultad ni programa
+  esDocente: boolean;
+  esDirector: boolean;
+  facultadId: number;
+  onFacultad: (id: number) => void;
+  idPrograma: number;
+  onPrograma: (id: number) => void;
+  programasGestion: number[];
+  onGestion: (ids: number[]) => void;
+}
+
+const CLASE_ETIQUETA = 'text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1';
+const CLASE_CAMPO =
+  'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 ' +
+  'focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed';
+
+/**
+ * Facultad → Programa(s) según los roles elegidos:
+ *  · Docente   → elige facultad y, dentro de ella, su programa académico.
+ *  · Director  → elige facultad y marca los programas que gestiona. Puede
+ *                cambiar de facultad y seguir marcando: la selección se conserva
+ *                (un director puede gestionar programas de facultades distintas).
+ *  · Consultor/Planeación → no aplica.
+ */
+function SelectorUbicacion({
+  programas, sinPrograma, esDocente, esDirector,
+  facultadId, onFacultad, idPrograma, onPrograma, programasGestion, onGestion
+}: SelectorUbicacionProps) {
+  if (sinPrograma) {
+    return (
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={CLASE_ETIQUETA}>Facultad</label>
+          <input type="text" disabled value="No aplica" className={CLASE_CAMPO} />
+        </div>
+        <div>
+          <label className={CLASE_ETIQUETA}>Programa Académico</label>
+          <input type="text" disabled value="No aplica" className={CLASE_CAMPO} />
+        </div>
+      </div>
+    );
+  }
+
+  const activos = programas.filter(p => p.activo !== false && p.id_facultad);
+  const facultades = Array.from(
+    new Map(activos.map(p => [p.id_facultad as number, p.facultad || `Facultad ${p.id_facultad}`])).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+  const deLaFacultad = activos.filter(p => p.id_facultad === facultadId);
+  const seleccionados = programas.filter(p => programasGestion.includes(p.id_programa));
+
+  const alternar = (id: number) =>
+    onGestion(programasGestion.includes(id) ? programasGestion.filter(x => x !== id) : [...programasGestion, id]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className={CLASE_ETIQUETA}>Facultad *</label>
+        <select
+          className={CLASE_CAMPO}
+          value={facultadId || ''}
+          onChange={(e) => onFacultad(Number(e.target.value) || 0)}
+        >
+          <option value="">Seleccione una facultad</option>
+          {facultades.map(([id, nombre]) => (
+            <option key={id} value={id}>{nombre}</option>
+          ))}
+        </select>
+      </div>
+
+      {esDocente && (
+        <div>
+          <label className={CLASE_ETIQUETA}>Programa Académico *</label>
+          <select
+            className={CLASE_CAMPO}
+            disabled={!facultadId}
+            value={idPrograma || ''}
+            onChange={(e) => onPrograma(Number(e.target.value) || 0)}
+          >
+            <option value="">{facultadId ? 'Seleccione un programa' : 'Primero seleccione una facultad'}</option>
+            {deLaFacultad.map(p => (
+              <option key={p.id_programa} value={p.id_programa}>{p.nombre_programa}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {esDirector && (
+        <div>
+          <label className={CLASE_ETIQUETA}>Programas que gestiona como Director *</label>
+          {!facultadId ? (
+            <p className="text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg p-3">
+              Seleccione una facultad para ver sus programas.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto border border-gray-300 rounded-lg p-2 bg-white">
+              {deLaFacultad.map(p => (
+                <label key={p.id_programa} className="flex items-center gap-2 text-sm text-gray-700 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={programasGestion.includes(p.id_programa)}
+                    onChange={() => alternar(p.id_programa)}
+                  />
+                  {p.nombre_programa}
+                </label>
+              ))}
+            </div>
+          )}
+          {seleccionados.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {seleccionados.map(p => (
+                <span
+                  key={p.id_programa}
+                  className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                >
+                  {p.nombre_programa}
+                  <button
+                    type="button"
+                    onClick={() => alternar(p.id_programa)}
+                    aria-label={`Quitar ${p.nombre_programa}`}
+                    className="hover:text-red-600 leading-none"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400 mt-1">
+            Puede cambiar de facultad y seguir marcando programas: la selección se conserva.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const REGEX_NOMBRE = /^[\p{L}][\p{L}\s'.-]*$/u;
+const REGEX_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface CamposUsuario {
+  nombres: string;
+  apellidos: string;
+  correo: string;
+  tipoDocumento: string;
+  numeroDocumento: string;
+  roles: string[];
+  sinPrograma: boolean; // Consultor/Planeación no llevan programa
+  esDocente: boolean;
+  esDirector: boolean;
+  idPrograma: number | null;
+  programasGestion: number[];
+}
+
+/**
+ * Validación previa al envío. Repite las reglas del backend
+ * (usuariosController.validarDatosUsuario) para avisar sin ir al servidor;
+ * el backend sigue siendo quien decide.
+ * Devuelve TODOS los problemas, no solo el primero.
+ */
+function validarUsuarioCliente(c: CamposUsuario): string[] {
+  const errores: string[] = [];
+  const nombres = c.nombres.trim().replace(/\s+/g, ' ');
+  const apellidos = c.apellidos.trim().replace(/\s+/g, ' ');
+  const correo = c.correo.trim().toLowerCase();
+  const doc = c.numeroDocumento.trim();
+
+  const validarNombre = (valor: string, etiqueta: string) => {
+    if (!valor) errores.push(`${etiqueta} son obligatorios.`);
+    else if (valor.length < 2 || valor.length > 60) errores.push(`${etiqueta} deben tener entre 2 y 60 caracteres.`);
+    else if (!REGEX_NOMBRE.test(valor)) errores.push(`${etiqueta} solo pueden contener letras, espacios, apóstrofes, puntos y guiones.`);
+  };
+  validarNombre(nombres, 'Los nombres');
+  validarNombre(apellidos, 'Los apellidos');
+
+  if (!correo) errores.push('El correo es obligatorio.');
+  else if (correo.length > 100) errores.push('El correo no puede superar los 100 caracteres.');
+  else if (!REGEX_CORREO.test(correo)) errores.push('El correo no tiene un formato válido (ejemplo: nombre@unicesmag.edu.co).');
+
+  if (!doc) {
+    errores.push('El número de documento es obligatorio.');
+  } else if (c.tipoDocumento === 'PA') {
+    if (!/^[A-Za-z0-9]{5,15}$/.test(doc)) errores.push('El pasaporte debe tener entre 5 y 15 caracteres alfanuméricos, sin espacios.');
+  } else if (!/^\d{5,12}$/.test(doc)) {
+    errores.push('El número de documento debe tener entre 5 y 12 dígitos, sin puntos ni espacios.');
+  } else if (/^0+$/.test(doc)) {
+    errores.push('El número de documento no es válido.');
+  }
+
+  if (c.roles.length === 0) errores.push('Debe seleccionar al menos un rol.');
+  if (!c.sinPrograma) {
+    if (c.esDocente && !c.idPrograma) errores.push('Debe seleccionar la facultad y el programa académico del docente.');
+    if (c.esDirector && c.programasGestion.length === 0) errores.push('Debe seleccionar al menos un programa que gestionará como Director.');
+  }
+
+  return errores;
+}
+
+/** Texto para mostrar el error de una petición: la lista completa si el backend la envía. */
+interface ErrorDeApi {
+  response?: { data?: { error?: string; errores?: { mensaje: string }[] } };
+}
+
+function mensajeDeError(error: ErrorDeApi, porDefecto: string): string {
+  const lista = error?.response?.data?.errores;
+  if (Array.isArray(lista) && lista.length > 0) return lista.map(e => e.mensaje).join('\n');
+  return error?.response?.data?.error || porDefecto;
 }
 
 export default function Docentes() {
@@ -90,7 +305,9 @@ export default function Docentes() {
   const [tipoDocumento, setTipoDocumento] = useState('CC');
   const [numeroDocumento, setNumeroDocumento] = useState('');
   const [correo, setCorreo] = useState('');
-  const [idPrograma, setIdPrograma] = useState(1);
+  const [facultadId, setFacultadId] = useState(0);
+  const [idPrograma, setIdPrograma] = useState(0);
+  const [programasGestion, setProgramasGestion] = useState<number[]>([]);
   const [rolesSeleccionados, setRolesSeleccionados] = useState<string[]>(['Docente']);
   const [formError, setFormError] = useState<string | null>(null);
   const [formWarning, setFormWarning] = useState<string | null>(null);
@@ -103,7 +320,9 @@ export default function Docentes() {
   const [editTipoDocumento, setEditTipoDocumento] = useState('CC');
   const [editNumeroDocumento, setEditNumeroDocumento] = useState('');
   const [editCorreo, setEditCorreo] = useState('');
-  const [editIdPrograma, setEditIdPrograma] = useState(1);
+  const [editFacultadId, setEditFacultadId] = useState(0);
+  const [editIdPrograma, setEditIdPrograma] = useState(0);
+  const [editProgramasGestion, setEditProgramasGestion] = useState<number[]>([]);
   const [editRolesSeleccionados, setEditRolesSeleccionados] = useState<string[]>(['Docente']);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [editWarning, setEditWarning] = useState<string | null>(null);
@@ -140,9 +359,6 @@ export default function Docentes() {
 
       const listaProgs = progsRes.data || [];
       setProgramas(listaProgs);
-      if (listaProgs.length > 0) {
-        setIdPrograma(listaProgs[0].id_programa);
-      }
 
       setUsuarios(usuariosRes.data || []);
     } catch (error) {
@@ -193,16 +409,6 @@ export default function Docentes() {
     }
   };
 
-  const mapProgramaToId = (progName?: string): number => {
-    if (!progName || programas.length === 0) return programas[0]?.id_programa || 1;
-    const low = progName.toLowerCase().trim();
-    const exact = programas.find(p => p.nombre_programa.toLowerCase().trim() === low);
-    if (exact) return exact.id_programa;
-    const partial = programas.find(p => p.nombre_programa.toLowerCase().includes(low) || low.includes(p.nombre_programa.toLowerCase()));
-    if (partial) return partial.id_programa;
-    return programas[0]?.id_programa || 1;
-  };
-
   const handleOpenEditModal = (u: Usuario) => {
     setUsuarioAEditar(u);
     setEditNombres(u.nombres || '');
@@ -210,7 +416,8 @@ export default function Docentes() {
     setEditTipoDocumento(u.tipo_documento || 'CC');
     setEditNumeroDocumento(u.numero_documento || '');
     setEditCorreo(u.correo || '');
-    setEditIdPrograma(mapProgramaToId(u.programa));
+    setEditIdPrograma(u.id_programa || 0);
+    setEditProgramasGestion(u.programas_gestion || []);
 
     const parsedRoles = (u.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean);
     // Normalizar a los nombres estándar de la interfaz
@@ -223,6 +430,12 @@ export default function Docentes() {
     });
     const uniqueMapped = Array.from(new Set(mappedRoles));
     setEditRolesSeleccionados(uniqueMapped.length > 0 ? uniqueMapped : ['Docente']);
+
+    // La facultad se deduce del programa: el del docente o, si solo es director, el primero que gestiona
+    const idReferencia = uniqueMapped.includes('Docente')
+      ? (u.id_programa || 0)
+      : ((u.programas_gestion || [])[0] || u.id_programa || 0);
+    setEditFacultadId(programas.find(p => p.id_programa === idReferencia)?.id_facultad || 0);
     setEditFormError(null);
     setEditWarning(null);
     setShowEditModal(true);
@@ -249,9 +462,9 @@ export default function Docentes() {
     setTipoDocumento('CC');
     setNumeroDocumento('');
     setCorreo('');
-    if (programas.length > 0) {
-      setIdPrograma(programas[0].id_programa);
-    }
+    setFacultadId(0);
+    setIdPrograma(0);
+    setProgramasGestion([]);
     setRolesSeleccionados(['Docente']);
     setFormError(null);
     setFormWarning(null);
@@ -262,17 +475,22 @@ export default function Docentes() {
     setFormError(null);
     setFormWarning(null);
 
-    if (!nombres.trim() || !apellidos.trim() || !correo.trim() || !numeroDocumento.trim()) {
-      setFormError('Por favor diligencie todos los campos obligatorios.');
-      return;
-    }
-
-    if (rolesSeleccionados.length === 0) {
-      setFormError('Debe seleccionar al menos un rol.');
-      return;
-    }
-
     const soloConsultaOPl = esSoloConsultorOPlaneacion(rolesSeleccionados);
+
+    const problemas = validarUsuarioCliente({
+      nombres, apellidos, correo,
+      tipoDocumento, numeroDocumento,
+      roles: rolesSeleccionados,
+      sinPrograma: soloConsultaOPl,
+      esDocente: rolEstaSeleccionado(rolesSeleccionados, 'Docente'),
+      esDirector: rolEstaSeleccionado(rolesSeleccionados, 'Director'),
+      idPrograma,
+      programasGestion
+    });
+    if (problemas.length > 0) {
+      setFormError(problemas.join('\n'));
+      return;
+    }
 
     try {
       setCreating(true);
@@ -283,7 +501,8 @@ export default function Docentes() {
         numero_documento: numeroDocumento.trim(),
         correo: correo.trim().toLowerCase(),
         id_contrato: 4,
-        id_programa: soloConsultaOPl ? null : idPrograma,
+        id_programa: soloConsultaOPl ? null : (idPrograma || programasGestion[0]),
+        programas_gestion: rolEstaSeleccionado(rolesSeleccionados, 'Director') ? programasGestion : [],
         roles: rolesSeleccionados
       });
 
@@ -305,8 +524,7 @@ export default function Docentes() {
       setTimeout(() => setMensaje(null), 5000);
     } catch (error: any) {
       console.error('Error al crear usuario:', error);
-      const errMsg = error.response?.data?.error || 'No se pudo registrar el usuario. Verifique los datos o si la identificación/correo ya está registrado.';
-      setFormError(errMsg);
+      setFormError(mensajeDeError(error, 'No se pudo registrar el usuario. Verifique los datos o si la identificación/correo ya está registrado.'));
     } finally {
       setCreating(false);
     }
@@ -319,17 +537,22 @@ export default function Docentes() {
 
     if (!usuarioAEditar) return;
 
-    if (!editNombres.trim() || !editApellidos.trim() || !editCorreo.trim() || !editNumeroDocumento.trim()) {
-      setEditFormError('Por favor diligencie todos los campos obligatorios.');
-      return;
-    }
-
-    if (editRolesSeleccionados.length === 0) {
-      setEditFormError('Debe seleccionar al menos un rol.');
-      return;
-    }
-
     const soloConsultaOPl = esSoloConsultorOPlaneacion(editRolesSeleccionados);
+
+    const problemas = validarUsuarioCliente({
+      nombres: editNombres, apellidos: editApellidos, correo: editCorreo,
+      tipoDocumento: editTipoDocumento, numeroDocumento: editNumeroDocumento,
+      roles: editRolesSeleccionados,
+      sinPrograma: soloConsultaOPl,
+      esDocente: rolEstaSeleccionado(editRolesSeleccionados, 'Docente'),
+      esDirector: rolEstaSeleccionado(editRolesSeleccionados, 'Director'),
+      idPrograma: editIdPrograma,
+      programasGestion: editProgramasGestion
+    });
+    if (problemas.length > 0) {
+      setEditFormError(problemas.join('\n'));
+      return;
+    }
 
     try {
       setUpdating(true);
@@ -339,7 +562,8 @@ export default function Docentes() {
         tipo_documento: editTipoDocumento,
         numero_documento: editNumeroDocumento.trim(),
         correo: editCorreo.trim().toLowerCase(),
-        id_programa: soloConsultaOPl ? null : editIdPrograma,
+        id_programa: soloConsultaOPl ? null : (editIdPrograma || editProgramasGestion[0]),
+        programas_gestion: rolEstaSeleccionado(editRolesSeleccionados, 'Director') ? editProgramasGestion : [],
         roles: editRolesSeleccionados
       });
 
@@ -361,8 +585,7 @@ export default function Docentes() {
       setTimeout(() => setMensaje(null), 5000);
     } catch (error: any) {
       console.error('Error al actualizar usuario:', error);
-      const errMsg = error.response?.data?.error || 'No se pudo actualizar el usuario. Verifique los datos o si la identificación/correo ya existe.';
-      setEditFormError(errMsg);
+      setEditFormError(mensajeDeError(error, 'No se pudo actualizar el usuario. Verifique los datos o si la identificación/correo ya existe.'));
     } finally {
       setUpdating(false);
     }
@@ -766,6 +989,11 @@ export default function Docentes() {
                         <div className={`text-sm font-semibold ${soloConsult ? 'text-gray-400 italic' : 'text-gray-800'}`}>
                           {soloConsult ? 'No aplica' : (user.programa || 'Sin Asignar')}
                         </div>
+                        {(user.programas_gestion?.length ?? 0) > 1 && (
+                          <div className="text-[11px] text-gray-500 font-medium mt-0.5">
+                            Gestiona: {user.programas_gestion_nombres}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-700 font-medium flex items-center gap-1.5">
@@ -852,7 +1080,7 @@ export default function Docentes() {
               {formError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
                   <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
-                  <div>{formError}</div>
+                  <div className="whitespace-pre-line">{formError}</div>
                 </div>
               )}
 
@@ -957,40 +1185,18 @@ export default function Docentes() {
               </div>
 
               {/* Facultad y Programa Académico */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Facultad
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    value={esSoloConsultorOPlaneacion(rolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Programa Académico {esSoloConsultorOPlaneacion(rolesSeleccionados) ? '' : '*'}
-                  </label>
-                  <select
-                    disabled={esSoloConsultorOPlaneacion(rolesSeleccionados)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                    value={esSoloConsultorOPlaneacion(rolesSeleccionados) ? '' : idPrograma}
-                    onChange={(e) => setIdPrograma(Number(e.target.value))}
-                  >
-                    {esSoloConsultorOPlaneacion(rolesSeleccionados) ? (
-                      <option value="">Deshabilitado (Sin asignación)</option>
-                    ) : (
-                      programas.map((p) => (
-                        <option key={p.id_programa} value={p.id_programa}>
-                          {p.nombre_programa}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-              </div>
+              <SelectorUbicacion
+                programas={programas}
+                sinPrograma={esSoloConsultorOPlaneacion(rolesSeleccionados)}
+                esDocente={rolEstaSeleccionado(rolesSeleccionados, 'Docente')}
+                esDirector={rolEstaSeleccionado(rolesSeleccionados, 'Director')}
+                facultadId={facultadId}
+                onFacultad={(id) => { setFacultadId(id); setIdPrograma(0); }}
+                idPrograma={idPrograma}
+                onPrograma={setIdPrograma}
+                programasGestion={programasGestion}
+                onGestion={setProgramasGestion}
+              />
 
               {/* Botones */}
               <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
@@ -1049,7 +1255,7 @@ export default function Docentes() {
               {editFormError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
                   <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
-                  <div>{editFormError}</div>
+                  <div className="whitespace-pre-line">{editFormError}</div>
                 </div>
               )}
 
@@ -1150,40 +1356,18 @@ export default function Docentes() {
               </div>
 
               {/* Facultad y Programa Académico en Edición */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Facultad
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Programa Académico {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : '*'}
-                  </label>
-                  <select
-                    disabled={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                    value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : editIdPrograma}
-                    onChange={(e) => setEditIdPrograma(Number(e.target.value))}
-                  >
-                    {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? (
-                      <option value="">Deshabilitado (Sin asignación)</option>
-                    ) : (
-                      programas.map((p) => (
-                        <option key={p.id_programa} value={p.id_programa}>
-                          {p.nombre_programa}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-              </div>
+              <SelectorUbicacion
+                programas={programas}
+                sinPrograma={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
+                esDocente={rolEstaSeleccionado(editRolesSeleccionados, 'Docente')}
+                esDirector={rolEstaSeleccionado(editRolesSeleccionados, 'Director')}
+                facultadId={editFacultadId}
+                onFacultad={(id) => { setEditFacultadId(id); setEditIdPrograma(0); }}
+                idPrograma={editIdPrograma}
+                onPrograma={setEditIdPrograma}
+                programasGestion={editProgramasGestion}
+                onGestion={setEditProgramasGestion}
+              />
 
               {/* Botones */}
               <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">

@@ -11,24 +11,7 @@
  * cambio sobrevive al recálculo que hace la importación.
  */
 const pool = require('../db/connection');
-const { calcularAlcance } = require('../utils/rolActivo');
-
-// ================================================================
-// Helper: resuelve el alcance según el ROL ACTIVO de la interfaz.
-// Director → su programa · resto → todo
-// ================================================================
-const resolverAlcance = async (req) => {
-    const user = req.user;
-    const { limitadoPorPrograma: isDirector } = calcularAlcance(req);
-
-    let programaId = user?.id_programa || null;
-    if (isDirector && !programaId && user?.id) {
-        const progQ = await pool.query('SELECT id_programa FROM usuarios WHERE id_usuario = $1', [user.id]);
-        programaId = progQ.rows[0]?.id_programa || null;
-    }
-
-    return { isDirector, programaId };
-};
+const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
 
 // ================================================================
 // GET /api/director/asignaciones
@@ -48,7 +31,8 @@ const getAsignaciones = async (req, res) => {
         const periodo = periodoRes.rows[0];
         const idPeriodo = periodo.id_periodo;
 
-        const { isDirector, programaId } = await resolverAlcance(req);
+        // Director → los programas que gestiona (uno o varios) · resto → todo
+        const alcance = await alcanceProgramas(req);
 
         let query = `
             SELECT
@@ -73,9 +57,9 @@ const getAsignaciones = async (req, res) => {
         `;
         const params = [idPeriodo];
 
-        if (isDirector && programaId) {
-            query += ` AND u.id_programa = $2`;
-            params.push(programaId);
+        if (alcance.restringido) {
+            query += ` AND u.id_programa = ANY($2::int[])`;
+            params.push(alcance.ids);
         }
 
         query += ` ORDER BY u.apellidos, u.nombres, af.funcion_sustantiva`;
@@ -181,6 +165,9 @@ const corregirAsignaciones = async (req, res) => {
 
     if (isNaN(idUsuario)) {
         return res.status(400).json({ error: 'ID de docente inválido.' });
+    }
+    if (!(await docenteEnAlcance(req, idUsuario))) {
+        return res.status(403).json({ error: 'Este docente no pertenece a los programas que gestionas.' });
     }
     if (!Array.isArray(actividades) || actividades.length === 0) {
         return res.status(400).json({ error: 'Debes enviar al menos una actividad a corregir.' });

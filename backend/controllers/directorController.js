@@ -1,6 +1,6 @@
 const pool = require('../db/connection');
 const xlsx = require('xlsx');
-const { calcularAlcance } = require('../utils/rolActivo');
+const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
 const notificaciones = require('../services/notificacionesService');
 
 const parseSemestre = (semestreStr) => {
@@ -861,6 +861,13 @@ const getDashboardDirector = async (req, res) => {
             `;
             const docParams = [idPeriodo];
 
+            // Un director solo ve los docentes de sus programas
+            const alcance = await alcanceProgramas(req);
+            if (alcance.restringido) {
+                docentesQuery += ' AND u.id_programa = ANY($2::int[])';
+                docParams.push(alcance.ids);
+            }
+
             docentesQuery += `
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
                          pa.nombre_programa, tc.tipo, tc.horas_contrato
@@ -924,6 +931,10 @@ const getDashboardDirector = async (req, res) => {
                 WHERE af.id_periodo = $1
             `;
             const distParams = [idPeriodo];
+            if (alcance.restringido) {
+                distQuery += ' AND u.id_programa = ANY($2::int[])';
+                distParams.push(alcance.ids);
+            }
             distQuery += `
                 GROUP BY af.funcion_sustantiva
                 ORDER BY horas DESC
@@ -956,6 +967,10 @@ const getDistribucionDocente = async (req, res) => {
         const { id } = req.params;
         const idUsuario = parseInt(id, 10);
         if (isNaN(idUsuario)) return res.status(400).json({ error: 'ID de usuario inválido.' });
+
+        if (!(await docenteEnAlcance(req, idUsuario))) {
+            return res.status(403).json({ error: 'Este docente no pertenece a los programas que gestionas.' });
+        }
 
         // Periodo activo
         const periodoRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');

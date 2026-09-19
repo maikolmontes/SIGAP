@@ -17,6 +17,13 @@ const getAll = async (req, res) => {
                 tc.horas_contrato,
                 pa.nombre_programa AS programa,
                 f.nombre_facultad  AS facultad,
+                COALESCE((SELECT ARRAY_AGG(dp.id_programa ORDER BY dp.id_programa)
+                          FROM director_programa dp
+                          WHERE dp.id_usuario = u.id_usuario), '{}') AS programas_gestion,
+                (SELECT STRING_AGG(pg.nombre_programa, ', ' ORDER BY pg.nombre_programa)
+                 FROM director_programa dp
+                 JOIN programa_academico pg ON pg.id_programa = dp.id_programa
+                 WHERE dp.id_usuario = u.id_usuario) AS programas_gestion_nombres,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
@@ -62,6 +69,9 @@ const getById = async (req, res) => {
                 pa.nombre_programa AS programa,
                 f.nombre_facultad  AS facultad,
                 na.nombre_titulo   AS nivel_academico,
+                COALESCE((SELECT ARRAY_AGG(dp.id_programa ORDER BY dp.id_programa)
+                          FROM director_programa dp
+                          WHERE dp.id_usuario = u.id_usuario), '{}') AS programas_gestion,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato   = tc.id_contrato
@@ -165,6 +175,39 @@ const isOnlyConsultorOrPlaneacion = (rolesList) => {
     });
 };
 
+/**
+ * Sincroniza los programas que gestiona un Director (tabla director_programa).
+ * Un director puede gestionar uno o varios programas y un programa puede
+ * tener varios directores.
+ *
+ *  · Si el usuario NO tiene rol Director, se borran sus filas.
+ *  · Si es Director y no se indican programas, se usa su programa principal.
+ *    Así un formulario antiguo (solo id_programa) sigue funcionando.
+ *
+ * @returns {Promise<number[]>} ids de programa que quedaron asignados
+ */
+const sincronizarProgramasDirector = async (idUsuario, rolesList, programasInput, progPrincipal, db = pool) => {
+    await db.query('DELETE FROM director_programa WHERE id_usuario = $1', [idUsuario]);
+
+    const esDirector = rolesList.some(r => normalizeRolName(r) === 'director');
+    if (!esDirector) return [];
+
+    let ids = (Array.isArray(programasInput) ? programasInput : [])
+        .map(Number)
+        .filter(n => Number.isInteger(n) && n > 0);
+    if (ids.length === 0 && progPrincipal) ids = [Number(progPrincipal)];
+    if (ids.length === 0) return [];
+
+    // Se inserta solo lo que existe en programa_academico
+    const r = await db.query(`
+        INSERT INTO director_programa (id_usuario, id_programa)
+        SELECT $1, id_programa FROM programa_academico WHERE id_programa = ANY($2::int[])
+        ON CONFLICT DO NOTHING
+        RETURNING id_programa
+    `, [idUsuario, ids]);
+    return r.rows.map(f => f.id_programa);
+};
+
 const resolverIdContrato = (contratoInput) => {
     if (!contratoInput) return 4; // Por Definir por defecto (id_contrato = 4)
     const str = String(contratoInput).trim().toLowerCase();
@@ -177,6 +220,205 @@ const resolverIdContrato = (contratoInput) => {
     if (!isNaN(num) && [1, 2, 3, 4].includes(num)) return num;
 
     return 4; // Por Definir
+};
+
+// ================================================================
+// Validación de los datos de un usuario (alta y edición)
+// ----------------------------------------------------------------
+// Una sola función para crear y editar, así ambas rutas aplican
+// exactamente las mismas reglas. Devuelve la lista COMPLETA de
+// errores (no solo el primero) para que el formulario pueda marcar
+// todos los campos de una vez.
+// ================================================================
+const TIPOS_DOCUMENTO = ['CC', 'CE', 'PA', 'TI'];
+const REGEX_NOMBRE = /^[\p{L}][\p{L}\s'.\-]*$/u;
+const REGEX_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const REGEX_DOC_NUMERICO = /^\d{5,12}$/;
+const REGEX_DOC_PASAPORTE = /^[A-Za-z0-9]{5,15}$/;
+
+/**
+ * @param {object} body        cuerpo de la petición
+ * @param {object} [opciones]
+ * @param {number|string|null} [opciones.idExcluir] usuario que se edita (se ignora en los duplicados)
+ * @returns {Promise<{errores: {campo:string, mensaje:string, status:number}[], datos: object, advertencia: string|null}>}
+ */
+const validarDatosUsuario = async (body, { idExcluir = null } = {}) => {
+    const errores = [];
+    const agregar = (campo, mensaje, status = 400) => errores.push({ campo, mensaje, status });
+    const excluir = idExcluir ? Number(idExcluir) : null;
+
+    const limpiar = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
+    const nombres = limpiar(body.nombres);
+    const apellidos = limpiar(body.apellidos);
+    const correo = String(body.correo ?? '').trim().toLowerCase();
+    const tipoDoc = String(body.tipo_documento || 'CC').trim().toUpperCase();
+    const docNum = String(body.numero_documento ?? '').trim();
+
+    // ---------- Nombres y apellidos ----------
+    const validarNombre = (valor, campo, etiqueta) => {
+        if (!valor) return agregar(campo, `${etiqueta} son obligatorios.`);
+        if (valor.length < 2 || valor.length > 60) {
+            return agregar(campo, `${etiqueta} deben tener entre 2 y 60 caracteres.`);
+        }
+        if (!REGEX_NOMBRE.test(valor)) {
+            return agregar(campo, `${etiqueta} solo pueden contener letras, espacios, apóstrofes, puntos y guiones.`);
+        }
+    };
+    validarNombre(nombres, 'nombres', 'Los nombres');
+    validarNombre(apellidos, 'apellidos', 'Los apellidos');
+
+    // ---------- Correo ----------
+    let correoValido = false;
+    if (!correo) {
+        agregar('correo', 'El correo es obligatorio.');
+    } else if (correo.length > 100) {
+        agregar('correo', 'El correo no puede superar los 100 caracteres.');
+    } else if (!REGEX_CORREO.test(correo)) {
+        agregar('correo', 'El correo no tiene un formato válido (ejemplo: nombre@unicesmag.edu.co).');
+    } else {
+        correoValido = true;
+    }
+
+    // ---------- Documento ----------
+    let documentoValido = false;
+    if (!TIPOS_DOCUMENTO.includes(tipoDoc)) {
+        agregar('tipo_documento', `El tipo de documento debe ser uno de: ${TIPOS_DOCUMENTO.join(', ')}.`);
+    } else if (!docNum) {
+        agregar('numero_documento', 'El número de documento es obligatorio.');
+    } else if (tipoDoc === 'PA' ? !REGEX_DOC_PASAPORTE.test(docNum) : !REGEX_DOC_NUMERICO.test(docNum)) {
+        agregar(
+            'numero_documento',
+            tipoDoc === 'PA'
+                ? 'El pasaporte debe tener entre 5 y 15 caracteres alfanuméricos, sin espacios.'
+                : 'El número de documento debe tener entre 5 y 12 dígitos, sin puntos ni espacios.'
+        );
+    } else if (/^0+$/.test(docNum)) {
+        agregar('numero_documento', 'El número de documento no es válido.');
+    } else {
+        documentoValido = true;
+    }
+
+    // ---------- Roles ----------
+    const rolesVacios = Array.isArray(body.roles) && body.roles.length === 0 && !body.rol;
+    const rolesList = parseRoles(body.roles, body.rol);
+    const idsRol = [];
+    if (rolesVacios) {
+        agregar('roles', 'Debe seleccionar al menos un rol.');
+    } else {
+        for (const rName of rolesList) {
+            const idRol = await resolverIdRol(rName);
+            if (idRol) idsRol.push(idRol);
+            else agregar('roles', `El rol "${rName}" no existe.`);
+        }
+    }
+    const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
+    const esDirector = rolesList.some(r => normalizeRolName(r) === 'director');
+
+    // ---------- Programa académico ----------
+    // Consultor/Planeación no tienen programa; los demás roles sí, y debe ser real.
+    let progId = null;
+    if (!soloConsultorOPlaneacion) {
+        let pedido = Number(body.id_programa);
+        // Un director que no es docente no tiene "programa propio": el principal
+        // es el primero de los que gestiona.
+        const esDocente = rolesList.some(r => normalizeRolName(r) === 'docente');
+        if ((!Number.isInteger(pedido) || pedido <= 0) && esDirector && !esDocente && Array.isArray(body.programas_gestion)) {
+            pedido = Number(body.programas_gestion[0]);
+        }
+        if (!Number.isInteger(pedido) || pedido <= 0) {
+            agregar('id_programa', esDirector && !esDocente
+                ? 'Debe seleccionar al menos un programa que gestionará como Director.'
+                : 'Debe seleccionar un programa académico.');
+        } else {
+            const prog = await pool.query(
+                'SELECT activo FROM programa_academico WHERE id_programa = $1',
+                [pedido]
+            );
+            if (prog.rows.length === 0) agregar('id_programa', 'El programa académico seleccionado no existe.');
+            else if (prog.rows[0].activo === false) agregar('id_programa', 'El programa académico seleccionado está inactivo.');
+            else progId = pedido;
+        }
+    }
+
+    // ---------- Programas que gestiona un Director ----------
+    let programasGestion = [];
+    if (esDirector && body.programas_gestion !== undefined && body.programas_gestion !== null) {
+        if (!Array.isArray(body.programas_gestion)) {
+            agregar('programas_gestion', 'Los programas que gestiona deben enviarse como una lista.');
+        } else {
+            const pedidos = [...new Set(body.programas_gestion.map(Number))];
+            if (pedidos.some(n => !Number.isInteger(n) || n <= 0)) {
+                agregar('programas_gestion', 'Alguno de los programas que gestiona no es válido.');
+            } else if (pedidos.length > 0) {
+                const existentes = await pool.query(
+                    'SELECT id_programa FROM programa_academico WHERE id_programa = ANY($1::int[])',
+                    [pedidos]
+                );
+                if (existentes.rows.length !== pedidos.length) {
+                    agregar('programas_gestion', 'Alguno de los programas que gestiona no existe.');
+                } else {
+                    programasGestion = pedidos;
+                }
+            }
+        }
+    }
+
+    // ---------- Tipo de contrato ----------
+    const idContrato = Number(body.id_contrato) || resolverIdContrato(body.tipo_contrato);
+    const contrato = await pool.query('SELECT 1 FROM tipo_contrato WHERE id_contrato = $1', [idContrato]);
+    if (contrato.rows.length === 0) agregar('id_contrato', 'El tipo de contrato seleccionado no existe.');
+
+    // ---------- Duplicados (409) ----------
+    if (documentoValido) {
+        const dup = await pool.query(
+            'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND ($2::int IS NULL OR id_usuario <> $2)',
+            [docNum, excluir]
+        );
+        if (dup.rows.length > 0) {
+            agregar('numero_documento', `Ya existe un docente/usuario registrado con la identificación ${docNum}.`, 409);
+        }
+    }
+    if (correoValido) {
+        const dup = await pool.query(
+            'SELECT id_usuario FROM usuarios WHERE LOWER(correo) = $1 AND ($2::int IS NULL OR id_usuario <> $2)',
+            [correo, excluir]
+        );
+        if (dup.rows.length > 0) {
+            agregar('correo', `Ya existe un docente/usuario registrado con el correo institucional ${correo}.`, 409);
+        }
+    }
+
+    // ---------- Homónimo (solo advertencia) ----------
+    let advertencia = null;
+    if (nombres && apellidos) {
+        const dup = await pool.query(
+            `SELECT 1 FROM usuarios
+             WHERE LOWER(TRIM(nombres)) = LOWER($1) AND LOWER(TRIM(apellidos)) = LOWER($2)
+               AND ($3::int IS NULL OR id_usuario <> $3)
+             LIMIT 1`,
+            [nombres, apellidos, excluir]
+        );
+        if (dup.rows.length > 0) {
+            advertencia = '⚠️ Ya existe un docente registrado con este nombre. Verifique la identificación y el correo antes de continuar.';
+        }
+    }
+
+    return {
+        errores,
+        advertencia,
+        datos: { nombres, apellidos, correo, tipoDoc, docNum, rolesList, idsRol, progId, idContrato, programasGestion }
+    };
+};
+
+/** Responde con la lista completa de errores; 409 si hay algún duplicado. */
+const responderErroresValidacion = (res, errores) => {
+    const status = errores.some(e => e.status === 409) ? 409 : 400;
+    const principal = errores.find(e => e.status === status) || errores[0];
+    return res.status(status).json({
+        error: principal.mensaje,
+        campo: principal.campo,
+        errores: errores.map(({ campo, mensaje }) => ({ campo, mensaje }))
+    });
 };
 
 const validar = async (req, res) => {
@@ -225,103 +467,42 @@ const validar = async (req, res) => {
 };
 
 const create = async (req, res) => {
-    const {
-        nombres,
-        apellidos,
-        tipo_documento,
-        numero_documento,
-        correo,
-        id_contrato,
-        id_programa,
-        rol,
-        roles
-    } = req.body;
-
-    const rolesList = parseRoles(roles, rol);
-    const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
-    const progId = soloConsultorOPlaneacion ? null : (id_programa || 1);
-
-    const docNum = numero_documento ? String(numero_documento).trim() : '';
-    const emailStr = correo ? String(correo).trim().toLowerCase() : '';
-
+    let client;
     try {
-        // 1. Validar Identificación duplicada
-        if (docNum) {
-            const dupDoc = await pool.query(
-                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1',
-                [docNum]
-            );
-            if (dupDoc.rows.length > 0) {
-                return res.status(409).json({
-                    error: `Ya existe un docente/usuario registrado con la identificación ${docNum}.`,
-                    campo: 'numero_documento'
-                });
-            }
-        }
+        const { errores, datos, advertencia } = await validarDatosUsuario(req.body);
+        if (errores.length > 0) return responderErroresValidacion(res, errores);
 
-        // 2. Validar Correo duplicado
-        if (emailStr) {
-            const dupEmail = await pool.query(
-                'SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1)',
-                [emailStr]
-            );
-            if (dupEmail.rows.length > 0) {
-                return res.status(409).json({
-                    error: `Ya existe un docente/usuario registrado con el correo institucional ${emailStr}.`,
-                    campo: 'correo'
-                });
-            }
-        }
+        const { nombres, apellidos, correo, tipoDoc, docNum, rolesList, idsRol, progId, idContrato, programasGestion } = datos;
 
-        // 3. Verificar coincidencia por Nombre (Advertencia)
-        let advertencia = null;
-        if (nombres && apellidos) {
-            const dupName = await pool.query(
-                'SELECT id_usuario FROM usuarios WHERE LOWER(TRIM(nombres)) = LOWER(TRIM($1)) AND LOWER(TRIM(apellidos)) = LOWER(TRIM($2))',
-                [nombres.trim(), apellidos.trim()]
-            );
-            if (dupName.rows.length > 0) {
-                advertencia = '⚠️ Ya existe un docente registrado con este nombre. Verifique la identificación y el correo antes de continuar.';
-            }
-        }
+        // Transacción real: todas las consultas comparten la misma conexión
+        client = await pool.connect();
+        await client.query('BEGIN');
 
-        await pool.query('BEGIN'); // Iniciar transacción
-
-        // Buscar periodo activo
-        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        const periodRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
         const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
 
-        const result = await pool.query(`
+        const result = await client.query(`
             INSERT INTO usuarios
                 (nombres, apellidos, tipo_documento,
                  numero_documento, correo,
                  id_contrato, id_programa, activo)
             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
             RETURNING id_usuario, nombres, apellidos, correo, id_programa
-        `, [
-            nombres ? nombres.trim() : '',
-            apellidos ? apellidos.trim() : '',
-            tipo_documento || 'CC',
-            docNum || '0000000000',
-            emailStr,
-            id_contrato || resolverIdContrato(req.body.tipo_contrato) || 4,
-            progId
-        ]);
+        `, [nombres, apellidos, tipoDoc, docNum, correo, idContrato, progId]);
 
         const nuevoUsuario = result.rows[0];
 
-        // Insertar múltiples roles
-        for (const rName of rolesList) {
-            const idRol = await resolverIdRol(rName);
-            if (idRol) {
-                await pool.query(
-                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
-                    [nuevoUsuario.id_usuario, idRol]
-                );
-            } else {
-                console.warn(`No se encontró el rol: ${rName}`);
-            }
+        for (const idRol of idsRol) {
+            await client.query(
+                'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
+                [nuevoUsuario.id_usuario, idRol]
+            );
         }
+
+        // Programas que gestiona (solo si es Director)
+        const programasDirector = await sincronizarProgramasDirector(
+            nuevoUsuario.id_usuario, rolesList, programasGestion, progId, client
+        );
 
         // Asignar al periodo activo si existe y tiene rol docente o director
         const tieneRolAcademico = rolesList.some(r => {
@@ -330,7 +511,7 @@ const create = async (req, res) => {
         });
 
         if (idPeriodoActivo && tieneRolAcademico) {
-            await pool.query(`
+            await client.query(`
                 INSERT INTO docente_periodo (id_usuario, id_periodo)
                 VALUES ($1, $2)
                 ON CONFLICT DO NOTHING
@@ -338,16 +519,16 @@ const create = async (req, res) => {
 
             // Asegurar programa_periodo para el programa seleccionado
             if (progId) {
-                const existeProgPer = await pool.query(
+                const existeProgPer = await client.query(
                     'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
                     [progId, idPeriodoActivo]
                 );
                 if (existeProgPer.rows.length === 0) {
-                    const pensul = await pool.query(
+                    const pensul = await client.query(
                         'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
                     );
                     const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-                    await pool.query(`
+                    await client.query(`
                         INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
                         VALUES ($1, $2, $3)
                     `, [idPeriodoActivo, progId, id_pensulaca]);
@@ -355,9 +536,9 @@ const create = async (req, res) => {
             }
         }
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
 
-        // Correo de bienvenida con instrucciones de acceso (en segundo plano)
+        // Correo de bienvenida con instrucciones de acceso (en segundo plano, tras el COMMIT)
         notificaciones.background.bienvenida({
             idUsuario: nuevoUsuario.id_usuario,
             correo: nuevoUsuario.correo,
@@ -367,14 +548,21 @@ const create = async (req, res) => {
 
         res.status(201).json({
             ...nuevoUsuario,
+            programas_gestion: programasDirector,
             roles: rolesList.join(', '),
             advertencia
         });
 
     } catch (error) {
-        await pool.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK').catch(() => {});
         console.error('Error en create usuario:', error);
+        // Dos altas simultáneas pueden pasar la validación y chocar en la restricción UNIQUE
+        if (error.code === '23505') {
+            return res.status(409).json({ error: 'Ya existe un usuario con esa identificación o ese correo.' });
+        }
         res.status(500).json({ error: 'Error al crear el usuario en la base de datos.' });
+    } finally {
+        if (client) client.release();
     }
 };
 
@@ -569,6 +757,9 @@ const createBulk = async (req, res) => {
                     }
                 }
 
+                // Un director importado gestiona su programa; los demás se agregan desde la edición
+                await sincronizarProgramasDirector(idUsuario, rolesList, null, progId);
+
                 // Asignar al periodo activo si tiene rol académico (Docente/Director)
                 const tieneRolAcademico = rolesList.some(r => {
                     const norm = normalizeRolName(r);
@@ -652,74 +843,26 @@ const toggleActivo = async (req, res) => {
 };
 
 const update = async (req, res) => {
-    const { id } = req.params;
-    const {
-        nombres,
-        apellidos,
-        tipo_documento,
-        numero_documento,
-        correo,
-        id_programa,
-        rol,
-        roles
-    } = req.body;
+    const idUsuario = Number(req.params.id);
+    if (!Number.isInteger(idUsuario) || idUsuario <= 0) {
+        return res.status(400).json({ error: 'El identificador del usuario no es válido.' });
+    }
 
-    const rolesList = parseRoles(roles, rol);
-    const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
-    const progId = soloConsultorOPlaneacion ? null : (id_programa || 1);
-
-    const docNum = numero_documento ? String(numero_documento).trim() : '';
-    const emailStr = correo ? String(correo).trim().toLowerCase() : '';
-
+    let client;
     try {
-        // 1. Validar Identificación duplicada (excluyendo el usuario actual)
-        if (docNum) {
-            const dupDoc = await pool.query(
-                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND id_usuario != $2',
-                [docNum, id]
-            );
-            if (dupDoc.rows.length > 0) {
-                return res.status(409).json({
-                    error: `Ya existe un docente/usuario registrado con la identificación ${docNum}.`,
-                    campo: 'numero_documento'
-                });
-            }
-        }
+        const { errores, datos, advertencia } = await validarDatosUsuario(req.body, { idExcluir: idUsuario });
+        if (errores.length > 0) return responderErroresValidacion(res, errores);
 
-        // 2. Validar Correo duplicado (excluyendo el usuario actual)
-        if (emailStr) {
-            const dupEmail = await pool.query(
-                'SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1) AND id_usuario != $2',
-                [emailStr, id]
-            );
-            if (dupEmail.rows.length > 0) {
-                return res.status(409).json({
-                    error: `Ya existe un docente/usuario registrado con el correo institucional ${emailStr}.`,
-                    campo: 'correo'
-                });
-            }
-        }
+        const { nombres, apellidos, correo, tipoDoc, docNum, rolesList, idsRol, progId, programasGestion } = datos;
 
-        // 3. Verificar coincidencia por Nombre (Advertencia)
-        let advertencia = null;
-        if (nombres && apellidos) {
-            const dupName = await pool.query(
-                'SELECT id_usuario FROM usuarios WHERE LOWER(TRIM(nombres)) = LOWER(TRIM($1)) AND LOWER(TRIM(apellidos)) = LOWER(TRIM($2)) AND id_usuario != $3',
-                [nombres.trim(), apellidos.trim(), id]
-            );
-            if (dupName.rows.length > 0) {
-                advertencia = '⚠️ Ya existe un docente registrado con este nombre. Verifique la identificación y el correo antes de continuar.';
-            }
-        }
+        // Transacción real: todas las consultas comparten la misma conexión
+        client = await pool.connect();
+        await client.query('BEGIN');
 
-        await pool.query('BEGIN');
-
-        // Buscar periodo activo
-        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        const periodRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
         const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
 
-        // Actualizar datos del usuario
-        const result = await pool.query(`
+        const result = await client.query(`
             UPDATE usuarios
             SET nombres = $1,
                 apellidos = $2,
@@ -729,36 +872,28 @@ const update = async (req, res) => {
                 id_programa = $6
             WHERE id_usuario = $7
             RETURNING id_usuario, nombres, apellidos, correo, id_programa
-        `, [
-            nombres ? nombres.trim() : '',
-            apellidos ? apellidos.trim() : '',
-            tipo_documento || 'CC',
-            docNum || '0000000000',
-            emailStr,
-            progId,
-            id
-        ]);
+        `, [nombres, apellidos, tipoDoc, docNum, correo, progId, idUsuario]);
 
         if (result.rows.length === 0) {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
         const usuarioActualizado = result.rows[0];
 
         // Sincronizar Roles (Eliminar antiguos e insertar nuevos)
-        await pool.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
-        for (const rName of rolesList) {
-            const idRol = await resolverIdRol(rName);
-            if (idRol) {
-                await pool.query(
-                    'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
-                    [id, idRol]
-                );
-            } else {
-                console.warn(`No se encontró el rol: ${rName}`);
-            }
+        await client.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [idUsuario]);
+        for (const idRol of idsRol) {
+            await client.query(
+                'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
+                [idUsuario, idRol]
+            );
         }
+
+        // Programas que gestiona (si deja de ser Director se limpian)
+        const programasDirector = await sincronizarProgramasDirector(
+            idUsuario, rolesList, programasGestion, progId, client
+        );
 
         // Si hay periodo activo y rol académico (Docente/Director), asegurar docente_periodo y programa_periodo
         const tieneRolAcademico = rolesList.some(r => {
@@ -767,23 +902,23 @@ const update = async (req, res) => {
         });
 
         if (idPeriodoActivo && tieneRolAcademico) {
-            await pool.query(`
+            await client.query(`
                 INSERT INTO docente_periodo (id_usuario, id_periodo)
                 VALUES ($1, $2)
                 ON CONFLICT DO NOTHING
-            `, [id, idPeriodoActivo]);
+            `, [idUsuario, idPeriodoActivo]);
 
             if (progId) {
-                const existeProgPer = await pool.query(
+                const existeProgPer = await client.query(
                     'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
                     [progId, idPeriodoActivo]
                 );
                 if (existeProgPer.rows.length === 0) {
-                    const pensul = await pool.query(
+                    const pensul = await client.query(
                         'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
                     );
                     const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-                    await pool.query(`
+                    await client.query(`
                         INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
                         VALUES ($1, $2, $3)
                     `, [idPeriodoActivo, progId, id_pensulaca]);
@@ -791,17 +926,23 @@ const update = async (req, res) => {
             }
         }
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         res.json({
             ...usuarioActualizado,
+            programas_gestion: programasDirector,
             roles: rolesList.join(', '),
             advertencia
         });
 
     } catch (error) {
-        await pool.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK').catch(() => {});
         console.error('Error en update usuario:', error);
+        if (error.code === '23505') {
+            return res.status(409).json({ error: 'Ya existe un usuario con esa identificación o ese correo.' });
+        }
         res.status(500).json({ error: 'Error al actualizar el usuario en la base de datos.' });
+    } finally {
+        if (client) client.release();
     }
 };
 

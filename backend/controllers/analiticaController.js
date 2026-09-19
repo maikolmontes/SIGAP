@@ -25,7 +25,7 @@
 // ================================================================
 
 const pool = require('../db/connection');
-const { calcularAlcance } = require('../utils/rolActivo');
+const { calcularAlcance, alcanceProgramas } = require('../utils/rolActivo');
 const catalogo = require('../config/catalogoAnalitica');
 const gemini = require('../services/geminiService');
 
@@ -64,23 +64,34 @@ const resolverPeriodo = async (req) => {
  * Ámbito de la consulta: institución completa, una facultad o un programa.
  *
  * Reglas de seguridad:
- *  · Un Director queda SIEMPRE anclado a su propio programa. Los parámetros
- *    facultadId / programaId que llegan del cliente se ignoran para él, así
- *    que no puede usarlos para espiar otro programa.
+ *  · Un Director queda SIEMPRE dentro de los programas que gestiona
+ *    (director_programa, uno o varios). facultadId se ignora para él y
+ *    programaId solo se acepta si es uno de los suyos; así no puede usarlos
+ *    para espiar otro programa. Sin programaId ve todos los suyos juntos.
  *  · Planeación, Admin y Consultor sí pueden filtrar libremente.
+ *
+ * `permitidos` (solo Director) es la lista de programas que puede elegir el
+ * selector; `forzado` significa que no hay nada que elegir (0 o 1 programa).
  */
 const resolverAmbito = async (req) => {
-    const { limitadoPorPrograma } = calcularAlcance(req);
+    const alcance = await alcanceProgramas(req);
 
-    if (limitadoPorPrograma) {
-        let idPrograma = req.user?.id_programa || null;
-        if (!idPrograma && req.user?.id) {
-            const r = await pool.query('SELECT id_programa FROM usuarios WHERE id_usuario = $1', [req.user.id]);
-            idPrograma = r.rows[0]?.id_programa || null;
-        }
-        // Un Director sin programa resoluble no ve nada: preferible vacío
+    if (alcance.restringido) {
+        const ids = alcance.ids;
+        // Un Director sin programas no ve nada: preferible vacío
         // a mostrarle la institución entera por accidente.
-        return { tipo: 'programa', idPrograma: idPrograma || -1, idFacultad: null, forzado: true };
+        if (ids.length === 0) {
+            return { tipo: 'programa', idPrograma: -1, idFacultad: null, forzado: true, permitidos: [] };
+        }
+
+        const pedido = parseInt(req.query.programaId, 10);
+        if (Number.isInteger(pedido) && ids.includes(pedido)) {
+            return { tipo: 'programa', idPrograma: pedido, idFacultad: null, forzado: ids.length === 1, permitidos: ids };
+        }
+        if (ids.length === 1) {
+            return { tipo: 'programa', idPrograma: ids[0], idFacultad: null, forzado: true, permitidos: ids };
+        }
+        return { tipo: 'programas', idPrograma: null, idFacultad: null, idsProgramas: ids, forzado: false, permitidos: ids };
     }
 
     const programaId = parseInt(req.query.programaId, 10);
@@ -104,6 +115,9 @@ const filtroAmbito = (ambito) => {
     if (ambito.tipo === 'programa') {
         return { filtro: ' AND u.id_programa = $2', extra: [ambito.idPrograma] };
     }
+    if (ambito.tipo === 'programas') {
+        return { filtro: ' AND u.id_programa = ANY($2::int[])', extra: [ambito.idsProgramas] };
+    }
     if (ambito.tipo === 'facultad') {
         return {
             filtro: ' AND u.id_programa IN (SELECT id_programa FROM programa_academico WHERE id_facultad = $2)',
@@ -115,6 +129,13 @@ const filtroAmbito = (ambito) => {
 
 /** Texto que la interfaz muestra como alcance de las cifras. */
 const describirAmbito = async (ambito) => {
+    if (ambito.tipo === 'programas') {
+        const r = await pool.query(
+            'SELECT nombre_programa FROM programa_academico WHERE id_programa = ANY($1::int[]) ORDER BY nombre_programa',
+            [ambito.idsProgramas]
+        );
+        return r.rows.map(f => f.nombre_programa).join(' · ') || 'Programa no identificado';
+    }
     if (ambito.tipo === 'programa') {
         if (!ambito.idPrograma || ambito.idPrograma < 0) return 'Programa no identificado';
         const r = await pool.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [ambito.idPrograma]);
@@ -368,6 +389,7 @@ const getResumen = async (req, res) => {
             ambito: {
                 tipo: ambito.tipo,
                 idPrograma: ambito.idPrograma,
+                idsProgramas: ambito.idsProgramas || null,
                 idFacultad: ambito.idFacultad,
                 // true cuando el rol impone el alcance y la interfaz debe
                 // ocultar el selector en lugar de ofrecer opciones inútiles
@@ -663,7 +685,7 @@ const getConsolidadoProgramas = async (req, res) => {
 // ================================================================
 // GET /api/analitica/ambito
 // Facultades y programas por los que el usuario puede filtrar.
-// Un Director recibe solo el suyo y `bloqueado: true`.
+// Un Director recibe solo sus programas; `bloqueado: true` si tiene uno solo.
 // ================================================================
 const getAmbito = async (req, res) => {
     try {
@@ -703,9 +725,11 @@ const getAmbito = async (req, res) => {
             LEFT JOIN usuarios u ON u.id_programa = pa.id_programa AND u.activo = TRUE
             LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
             LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
+            -- Director: solo sus programas · resto ($2 nulo): todos
+            WHERE ($2::int[] IS NULL OR pa.id_programa = ANY($2::int[]))
             GROUP BY f.id_facultad, f.nombre_facultad, pa.id_programa, pa.nombre_programa
             ORDER BY f.nombre_facultad NULLS LAST, pa.nombre_programa
-        `, [periodo?.id_periodo || -1]);
+        `, [periodo?.id_periodo || -1, ambitoActual.permitidos || null]);
 
         const porFacultad = new Map();
         for (const fila of r.rows) {
@@ -724,7 +748,7 @@ const getAmbito = async (req, res) => {
             });
         }
 
-        res.json({ bloqueado: false, facultades: [...porFacultad.values()] });
+        res.json({ bloqueado: ambitoActual.forzado, facultades: [...porFacultad.values()] });
     } catch (error) {
         console.error('Error en getAmbito (analitica):', error);
         res.status(500).json({ error: 'Error al obtener facultades y programas.', detalles: error.message });

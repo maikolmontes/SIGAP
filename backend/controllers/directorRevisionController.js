@@ -4,7 +4,9 @@
  */
 const pool = require('../db/connection');
 const notificaciones = require('../services/notificacionesService');
-const { calcularAlcance } = require('../utils/rolActivo');
+const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
+
+const SIN_PERMISO_DOCENTE = { error: 'Este docente no pertenece a los programas que gestionas.' };
 
 // ================================================================
 // Helper: Calcular perfil docente según Acuerdo 030/2024
@@ -44,13 +46,8 @@ const getAgendas = async (req, res) => {
         const periodoInfo = await pool.query('SELECT * FROM periodo WHERE id_periodo = $1', [idPeriodo]);
 
         // Determinar restricciones a partir del ROL ACTIVO elegido en la interfaz
-        const { limitadoPorPrograma: isDirector } = calcularAlcance(req);
-
-        let userProgId = req.user?.id_programa || null;
-        if (isDirector && !userProgId && req.user?.id) {
-            const progQ = await pool.query('SELECT id_programa FROM usuarios WHERE id_usuario = $1', [req.user.id]);
-            userProgId = progQ.rows[0]?.id_programa || 1;
-        }
+        // Programas del director (uno o varios). Sin programas no ve nada.
+        const alcance = await alcanceProgramas(req);
 
         // Traer docentes con sus funciones agrupadas
         let query = `
@@ -82,9 +79,9 @@ const getAgendas = async (req, res) => {
         const params = [idPeriodo];
         let paramIdx = 2;
 
-        if (isDirector) {
-            query += ` AND u.id_programa = $${paramIdx}`;
-            params.push(userProgId || 1);
+        if (alcance.restringido) {
+            query += ` AND u.id_programa = ANY($${paramIdx}::int[])`;
+            params.push(alcance.ids);
             paramIdx++;
         }
 
@@ -177,6 +174,10 @@ const getAgendas = async (req, res) => {
 const getAgendaDetalle = async (req, res) => {
     try {
         const idUsuario = parseInt(req.params.id);
+
+        if (!(await docenteEnAlcance(req, idUsuario))) {
+            return res.status(403).json(SIN_PERMISO_DOCENTE);
+        }
 
         // Obtener periodo activo
         const periodoRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
@@ -333,6 +334,10 @@ const aprobarAgenda = async (req, res) => {
         const idUsuario = parseInt(req.params.id);
         const directorId = req.user.id;
 
+        if (!(await docenteEnAlcance(req, idUsuario))) {
+            return res.status(403).json(SIN_PERMISO_DOCENTE);
+        }
+
         await client.query('BEGIN');
 
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
@@ -390,6 +395,10 @@ const devolverAgenda = async (req, res) => {
 
         if (!observacion_general || observacion_general.trim() === '') {
             return res.status(400).json({ error: 'La observación general es obligatoria al devolver una agenda.' });
+        }
+
+        if (!(await docenteEnAlcance(req, idUsuario))) {
+            return res.status(403).json(SIN_PERMISO_DOCENTE);
         }
 
         await client.query('BEGIN');
@@ -458,6 +467,22 @@ const guardarObservacion = async (req, res) => {
         const actCheck = await pool.query('SELECT id_asignacionact FROM asignacion_actividades WHERE id_asignacionact = $1', [idActividad]);
         if (actCheck.rows.length === 0) {
             return res.status(404).json({ error: 'Actividad no encontrada.' });
+        }
+
+        // La actividad debe ser de un docente de los programas del director
+        const alcanceObs = await alcanceProgramas(req);
+        if (alcanceObs.restringido) {
+            const dueno = await pool.query(`
+                SELECT 1
+                FROM asignacion_actividades aa
+                JOIN usuario_asignacion ua ON ua.id_funciones = aa.id_funciones
+                JOIN usuarios u ON u.id_usuario = ua.id_usuario
+                WHERE aa.id_asignacionact = $1 AND u.id_programa = ANY($2::int[])
+                LIMIT 1
+            `, [idActividad, alcanceObs.ids]);
+            if (dueno.rows.length === 0) {
+                return res.status(403).json(SIN_PERMISO_DOCENTE);
+            }
         }
 
         // Buscar si ya existe una observación para esta actividad y semana
@@ -559,6 +584,11 @@ const getReportesResumen = async (req, res) => {
             WHERE u.activo = TRUE
         `;
         const progParams = [idPeriodo];
+        const alcance = await alcanceProgramas(req);
+        if (alcance.restringido) {
+            progQuery += ' AND u.id_programa = ANY($2::int[])';
+            progParams.push(alcance.ids);
+        }
         progQuery += `
             GROUP BY pa.nombre_programa
             ORDER BY pa.nombre_programa
@@ -585,6 +615,10 @@ const getReportesResumen = async (req, res) => {
             WHERE u.activo = TRUE
         `;
         const perfilesParams = [idPeriodo];
+        if (alcance.restringido) {
+            perfilesQuery += ' AND u.id_programa = ANY($2::int[])';
+            perfilesParams.push(alcance.ids);
+        }
         perfilesQuery += `
             GROUP BY u.id_usuario, tc.tipo, tc.horas_contrato
         `;
@@ -599,6 +633,12 @@ const getReportesResumen = async (req, res) => {
         const distribucionPerfiles = Object.entries(perfilCount).map(([perfil, cantidad]) => ({ perfil, cantidad }));
 
         // 3. Avance por bloque (semana 8 y 16) — logro parcial y final
+        const avanceParams = [idPeriodo];
+        let filtroAvance = '';
+        if (alcance.restringido) {
+            filtroAvance = ' AND u.id_programa = ANY($2::int[])';
+            avanceParams.push(alcance.ids);
+        }
         const avanceRes = await pool.query(`
             SELECT
                 af.funcion_sustantiva AS bloque,
@@ -612,10 +652,10 @@ const getReportesResumen = async (req, res) => {
             JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones
             JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo IS NOT FALSE
             LEFT JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
-            WHERE af.id_periodo = $1
+            WHERE af.id_periodo = $1${filtroAvance}
             GROUP BY af.funcion_sustantiva
             ORDER BY af.funcion_sustantiva
-        `, [idPeriodo]);
+        `, avanceParams);
 
         const avancePorBloque = avanceRes.rows.map(row => {
             const totalMetas = parseFloat(row.total_metas) || 1;
@@ -678,13 +718,7 @@ const getTodasObservaciones = async (req, res) => {
             return res.json({ observaciones: [], periodo: null, total: 0 });
         }
 
-        const { limitadoPorPrograma: isDirector } = calcularAlcance(req);
-
-        let userProgId = req.user?.id_programa || null;
-        if (isDirector && !userProgId && req.user?.id) {
-            const progQ = await pool.query('SELECT id_programa FROM usuarios WHERE id_usuario = $1', [req.user.id]);
-            userProgId = progQ.rows[0]?.id_programa || 1;
-        }
+        const alcance = await alcanceProgramas(req);
 
         let queryText = `
             SELECT 
@@ -709,9 +743,9 @@ const getTodasObservaciones = async (req, res) => {
         const params = [idPeriodo];
         let paramIdx = 2;
 
-        if (isDirector) {
-            queryText += ` AND u.id_programa = $${paramIdx}`;
-            params.push(userProgId || 1);
+        if (alcance.restringido) {
+            queryText += ` AND u.id_programa = ANY($${paramIdx}::int[])`;
+            params.push(alcance.ids);
             paramIdx++;
         }
 
@@ -737,7 +771,32 @@ const getTodasObservaciones = async (req, res) => {
     }
 };
 
+// ================================================================
+// GET /api/director/mis-programas
+// Programas que gestiona el usuario según su rol activo. Alimenta el
+// selector del panel del director (un director puede tener varios).
+// ================================================================
+const getMisProgramas = async (req, res) => {
+    try {
+        const alcance = await alcanceProgramas(req);
+
+        const result = await pool.query(`
+            SELECT pa.id_programa, pa.nombre_programa, f.nombre_facultad
+            FROM programa_academico pa
+            LEFT JOIN facultad f ON f.id_facultad = pa.id_facultad
+            WHERE ($1::int[] IS NULL OR pa.id_programa = ANY($1::int[]))
+            ORDER BY pa.nombre_programa
+        `, [alcance.restringido ? alcance.ids : null]);
+
+        res.json({ restringido: alcance.restringido, programas: result.rows });
+    } catch (error) {
+        console.error('Error en getMisProgramas:', error);
+        res.status(500).json({ error: 'Error al obtener los programas del director.', detalles: error.message });
+    }
+};
+
 module.exports = {
+    getMisProgramas,
     getAgendas,
     getAgendaDetalle,
     aprobarAgenda,
