@@ -38,6 +38,7 @@ app.use('/api/evidencias', require('./routes/evidencias'));
 app.use('/api/observaciones', require('./routes/observaciones'));
 app.use('/api/permisos', require('./routes/permisos'));
 app.use('/api/notificaciones', require('./routes/notificaciones'));
+app.use('/api/analitica', require('./routes/analitica'));
 
 // Servir archivos estáticos de evidencias
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
