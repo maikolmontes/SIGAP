@@ -3,7 +3,7 @@ import api from '../../services/api';
 import {
   Users, CheckCircle, Clock, TrendingUp, AlertCircle,
   Upload, UploadCloud, X, ClipboardList, Calendar, Lock,
-  FileBarChart2, RefreshCw, Trash2, ChevronDown, ChevronUp, UserX, Info
+  FileBarChart2, RefreshCw, Trash2, ChevronDown, ChevronUp, UserX, Info, BookOpen
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
@@ -208,6 +208,12 @@ export default function PanelAgendasTiempoReal({
   const [eliminandoSeleccion, setEliminandoSeleccion] = useState(false);
   const [modoSeleccion, setModoSeleccion] = useState(false);
 
+  // Selector Facultad → Programa (requerido antes de importar/actualizar/eliminar)
+  const [facultades, setFacultades] = useState<any[]>([]);
+  const [programas, setProgramas] = useState<any[]>([]);
+  const [facultadSel, setFacultadSel] = useState<number | ''>('');
+  const [programaSel, setProgramaSel] = useState<number | ''>('');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileUpdateRef = useRef<HTMLInputElement>(null);
 
@@ -226,6 +232,21 @@ export default function PanelAgendasTiempoReal({
       setLoading(false);
     }
   }, []);
+
+  // Cargar facultades al montar
+  useEffect(() => {
+    api.get('/facultades').then(res => setFacultades(res.data || [])).catch(() => {});
+  }, []);
+
+  // Cargar programas cuando cambia la facultad
+  useEffect(() => {
+    setProgramaSel('');
+    if (!facultadSel) { setProgramas([]); return; }
+    api.get('/programas').then(res => {
+      const todos: any[] = res.data || [];
+      setProgramas(todos.filter((p: any) => p.id_facultad === facultadSel && p.activo !== false));
+    }).catch(() => {});
+  }, [facultadSel]);
 
   useEffect(() => {
     cargarDashboard();
@@ -294,10 +315,15 @@ export default function PanelAgendasTiempoReal({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, endpoint: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!programaSel) {
+      alert('Debes seleccionar una facultad y un programa antes de importar.');
+      return;
+    }
     setUploading(true);
     setUploadResult(null);
     const formData = new FormData();
     formData.append('archivo', file);
+    formData.append('id_programa', String(programaSel));
     try {
       const res = await api.post(`/director/${endpoint}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -314,14 +340,19 @@ export default function PanelAgendasTiempoReal({
   };
 
   const handleEliminarAgendas = async () => {
-    if (!window.confirm("¿Está seguro de que desea eliminar TODAS las agendas de este periodo activo? Esta acción borrará todas las funciones, actividades, metas, indicadores y evidencias asociadas y no se podrá deshacer.")) {
+    if (!programaSel) {
+      alert('Debes seleccionar una facultad y un programa antes de eliminar agendas.');
+      return;
+    }
+    const progNombre = programas.find(p => p.id_programa === programaSel)?.nombre_programa || 'el programa seleccionado';
+    if (!window.confirm(`¿Está seguro de eliminar TODAS las agendas de "${progNombre}" en este periodo activo?\n\nEsta acción borrará todas las funciones, actividades, metas, indicadores y evidencias asociadas y no se podrá deshacer.`)) {
       return;
     }
     setUploading(true);
     setUploadResult(null);
     try {
-      await api.delete('/director/eliminar-agendas');
-      setUploadResult({ success: true, data: null, tipo: 'Eliminación de agendas' });
+      await api.delete('/director/eliminar-agendas', { data: { id_programa: programaSel } });
+      setUploadResult({ success: true, data: null, tipo: `Eliminación de agendas (${progNombre})` });
       cargarDashboard();
     } catch (err: any) {
       setUploadResult({ success: false, error: err.response?.data?.error || 'Error de conexión al eliminar las agendas.' });
@@ -388,6 +419,41 @@ export default function PanelAgendasTiempoReal({
             </div>
           </div>
 
+          {/* SELECTOR FACULTAD → PROGRAMA */}
+          <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-blue-200 uppercase tracking-wide flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5" /> Facultad
+              </label>
+              <select
+                value={facultadSel}
+                onChange={e => setFacultadSel(e.target.value ? parseInt(e.target.value) : '')}
+                className="bg-white/10 border border-white/25 text-white rounded-xl px-3 py-2 text-sm min-w-[180px] focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent appearance-none"
+              >
+                <option value="" className="bg-[#1a3a6c] text-white">— Seleccione facultad —</option>
+                {facultades.map((f: any) => (
+                  <option key={f.id_facultad} value={f.id_facultad} className="bg-[#1a3a6c] text-white">{f.nombre_facultad}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-blue-200 uppercase tracking-wide flex items-center gap-1.5">
+                <ClipboardList className="w-3.5 h-3.5" /> Programa
+              </label>
+              <select
+                value={programaSel}
+                onChange={e => setProgramaSel(e.target.value ? parseInt(e.target.value) : '')}
+                disabled={!facultadSel || programas.length === 0}
+                className="bg-white/10 border border-white/25 text-white rounded-xl px-3 py-2 text-sm min-w-[220px] focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+              >
+                <option value="" className="bg-[#1a3a6c] text-white">{!facultadSel ? '— Primero elige facultad —' : programas.length === 0 ? '— Sin programas —' : '— Seleccione programa —'}</option>
+                {programas.map((p: any) => (
+                  <option key={p.id_programa} value={p.id_programa} className="bg-[#1a3a6c] text-white">{p.nombre_programa}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* BOTONES DE IMPORTACIÓN */}
           <div className="flex flex-col sm:flex-row gap-3">
             <input type="file" accept=".xlsx,.xls" className="hidden" ref={fileInputRef}
@@ -399,6 +465,11 @@ export default function PanelAgendasTiempoReal({
               <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-700/50 border border-gray-600/50 rounded-xl text-gray-400 text-sm font-semibold">
                 <Lock className="w-4 h-4" />
                 Importación bloqueada — sin periodo activo
+              </div>
+            ) : !programaSel ? (
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-600/30 border border-yellow-500/40 rounded-xl text-yellow-200 text-sm font-semibold">
+                <AlertCircle className="w-4 h-4" />
+                Selecciona una facultad y programa para habilitar acciones
               </div>
             ) : (
               <>
@@ -435,7 +506,7 @@ export default function PanelAgendasTiempoReal({
                     disabled={uploading}
                     onClick={handleEliminarAgendas}
                     className={`flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-400 text-white rounded-xl text-sm font-bold transition-all shadow-md`}
-                    title="Eliminar todas las asignaciones de este periodo para volver a importar"
+                    title="Eliminar agendas del programa seleccionado en este periodo"
                   >
                     {uploading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     Eliminar Agendas

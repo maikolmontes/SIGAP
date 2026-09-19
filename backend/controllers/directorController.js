@@ -220,6 +220,12 @@ const importarAsignaciones = async (req, res) => {
         return res.status(400).json({ error: 'No se subió ningún archivo Excel' });
     }
 
+    // id_programa obligatorio — viene en el FormData junto con el archivo
+    const idPrograma = parseInt(req.body?.id_programa);
+    if (!idPrograma) {
+        return res.status(400).json({ error: 'Debe seleccionar un programa académico antes de importar.' });
+    }
+
     const normalizeObjectKeys = (obj) => {
         const newObj = {};
         for (let key in obj) {
@@ -233,6 +239,13 @@ const importarAsignaciones = async (req, res) => {
     
     try {
         await client.query('BEGIN');
+
+        // Verificar que el programa existe
+        const progRes = await client.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [idPrograma]);
+        if (progRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'El programa académico seleccionado no existe.' });
+        }
 
         const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
@@ -353,9 +366,18 @@ const importarAsignaciones = async (req, res) => {
                 continue;
             }
 
-            const userRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [String(inscripcion)]);
+            const userRes = await client.query(
+                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND id_programa = $2',
+                [String(inscripcion), idPrograma]
+            );
             if (userRes.rows.length === 0) {
-                errores.push(`Fila ${i+2}: Docente con documento ${inscripcion} no encontrado.`);
+                // Verificar si existe en el sistema pero en otro programa
+                const userGenRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [String(inscripcion)]);
+                if (userGenRes.rows.length > 0) {
+                    errores.push(`Fila ${i+2}: Docente ${inscripcion} no pertenece al programa seleccionado.`);
+                } else {
+                    errores.push(`Fila ${i+2}: Docente con documento ${inscripcion} no encontrado en el sistema.`);
+                }
                 continue;
             }
             const idUsuario = userRes.rows[0].id_usuario;
@@ -541,6 +563,12 @@ const actualizarImportacion = async (req, res) => {
         return res.status(400).json({ error: 'No se subió ningún archivo Excel' });
     }
 
+    // id_programa obligatorio
+    const idPrograma = parseInt(req.body?.id_programa);
+    if (!idPrograma) {
+        return res.status(400).json({ error: 'Debe seleccionar un programa académico antes de actualizar.' });
+    }
+
     const normalizeObjectKeys = (obj) => {
         const newObj = {};
         for (let key in obj) {
@@ -554,6 +582,13 @@ const actualizarImportacion = async (req, res) => {
     
     try {
         await client.query('BEGIN');
+
+        // Verificar que el programa existe
+        const progRes = await client.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [idPrograma]);
+        if (progRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'El programa académico seleccionado no existe.' });
+        }
 
         const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
@@ -607,19 +642,22 @@ const actualizarImportacion = async (req, res) => {
                 SELECT u.id_usuario, u.nombres, u.apellidos, tc.horas_contrato 
                 FROM usuarios u
                 LEFT JOIN tipo_contrato tc ON u.id_contrato = tc.id_contrato
-                WHERE u.numero_documento = $1
-            `, [inscripcion]);
+                WHERE u.numero_documento = $1 AND u.id_programa = $2
+            `, [inscripcion, idPrograma]);
 
             if (userRes.rows.length === 0) {
                 const filaRepr = filasDocente[0];
                 const nombreDocenteExcel = filaRepr['docentes'] || filaRepr['nombre'] || filaRepr['docente'] || null;
                 const programasRaw = filaRepr['programas'];
-                
+
+                // Comprobar si existe en otro programa
+                const userGenRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [inscripcion]);
                 docentesNoEncontrados.push({
                     fila: filaRepr._filaExcel,
                     documento: inscripcion,
                     nombre: nombreDocenteExcel ? String(nombreDocenteExcel).trim() : null,
-                    programa: programasRaw ? String(programasRaw).trim() : null
+                    programa: programasRaw ? String(programasRaw).trim() : null,
+                    motivo: userGenRes.rows.length > 0 ? 'No pertenece al programa seleccionado' : 'No encontrado en el sistema'
                 });
                 continue;
             }
@@ -1017,6 +1055,12 @@ const getDistribucionDocente = async (req, res) => {
 };
 
 const eliminarAgendas = async (req, res) => {
+    // id_programa obligatorio
+    const idPrograma = parseInt(req.body?.id_programa);
+    if (!idPrograma) {
+        return res.status(400).json({ error: 'Debe seleccionar un programa académico antes de eliminar agendas.' });
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -1029,8 +1073,14 @@ const eliminarAgendas = async (req, res) => {
         }
         const idPeriodoActivo = periodoRes.rows[0].id_periodo;
 
-        // 2. Obtener todas las funciones asociadas a este periodo
-        const funcRes = await client.query('SELECT id_funciones FROM asignacion_funciones WHERE id_periodo = $1', [idPeriodoActivo]);
+        // 2. Obtener funciones de los docentes del programa seleccionado en este periodo
+        const funcRes = await client.query(`
+            SELECT DISTINCT af.id_funciones
+            FROM asignacion_funciones af
+            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            JOIN usuarios u ON u.id_usuario = ua.id_usuario
+            WHERE af.id_periodo = $1 AND u.id_programa = $2
+        `, [idPeriodoActivo, idPrograma]);
         const funcIds = funcRes.rows.map(r => r.id_funciones);
 
         if (funcIds.length > 0) {
