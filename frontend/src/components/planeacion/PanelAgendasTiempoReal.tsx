@@ -745,6 +745,7 @@ export default function PanelAgendasTiempoReal({
                         </th>
                       )}
                       <th className="px-5 py-3 text-left font-bold">Docente</th>
+                      <th className="px-5 py-3 text-left font-bold">Programa</th>
                       <th className="px-5 py-3 text-left font-bold">Contrato</th>
                       <th className="px-5 py-3 text-center font-bold">Horas</th>
                       <th className="px-5 py-3 text-center font-bold">Estado</th>
@@ -753,7 +754,7 @@ export default function PanelAgendasTiempoReal({
                   <tbody className="divide-y divide-gray-50">
                     {docentesFiltrados.length === 0 ? (
                       <tr>
-                        <td colSpan={modoSeleccion ? 5 : 4} className="px-5 py-10 text-center text-gray-400 text-sm">
+                        <td colSpan={modoSeleccion ? 6 : 5} className="px-5 py-10 text-center text-gray-400 text-sm">
                           {importacionRealizada ? 'No se encontraron docentes' : 'Importa un Excel para ver los docentes asignados'}
                         </td>
                       </tr>
@@ -795,6 +796,11 @@ export default function PanelAgendasTiempoReal({
                                 <p className="text-xs text-gray-400">{d.correo}</p>
                               </div>
                             </div>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <span className="inline-block text-xs bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded font-medium leading-tight max-w-[160px] truncate" title={d.nombre_programa}>
+                              {d.nombre_programa || '—'}
+                            </span>
                           </td>
                           <td className="px-5 py-3.5">
                             <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-100">{d.tipo_contrato}</span>
