@@ -48,7 +48,7 @@ export default function AgendasPorRevisar() {
     const agendasFiltradas = agendas.filter(a =>
         a.nombre_docente.toLowerCase().includes(busqueda.toLowerCase()) ||
         a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase())
-    );
+    ).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' }));
 
     const programas = [...new Set(agendas.map(a => a.nombre_programa).filter(Boolean))];
     const periodoLabel = periodo ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}` : 'Sin periodo';

@@ -58,7 +58,7 @@ export default function HistorialAgendas() {
     const agendasFiltradas = agendas.filter(a =>
         a.nombre_docente?.toLowerCase().includes(busqueda.toLowerCase()) ||
         a.tipo_contrato?.toLowerCase().includes(busqueda.toLowerCase())
-    );
+    ).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' }));
 
     // Historial: agendas que ya tienen acción de revisión (aprobadas o devueltas)
     const historialItems = agendasFiltradas.filter(a =>

@@ -38,7 +38,7 @@ const getAll = async (req, res) => {
                 u.id_programa,
                 tc.tipo, tc.horas_contrato,
                 pa.nombre_programa, f.nombre_facultad
-            ORDER BY u.apellidos
+            ORDER BY u.nombres, u.apellidos
         `);
 
         res.json(result.rows);

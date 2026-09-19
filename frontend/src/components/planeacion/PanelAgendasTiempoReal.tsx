@@ -386,7 +386,7 @@ export default function PanelAgendasTiempoReal({
     const coincideFacultad = !filtroFacultad || d.id_facultad === filtroFacultad;
     const coincidePrograma = !filtroPrograma || d.id_programa === filtroPrograma;
     return coincideBusqueda && coincideContrato && coincideEstado && coincideFacultad && coincidePrograma;
-  });
+  }).sort((a: any, b: any) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
 
   const hayFiltros = searchQuery || filtroEstado || filtroContrato || filtroFacultad || filtroPrograma;
   const limpiarFiltros = () => {

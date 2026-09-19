@@ -914,7 +914,7 @@ const getDashboardDirector = async (req, res) => {
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
                          pa.id_programa, pa.nombre_programa, f.id_facultad, f.nombre_facultad,
                          tc.tipo, tc.horas_contrato
-                ORDER BY u.apellidos, u.nombres
+                ORDER BY u.nombres, u.apellidos
             `;
 
             const docentesRes = await pool.query(docentesQuery, docParams);

@@ -791,6 +791,10 @@ export default function Docentes() {
                               (user.programa && user.programa.toLowerCase() === selectedPrograma.toLowerCase());
 
     return coincideBusqueda && coincideRol && coincideEstado && coincidePrograma;
+  }).sort((a, b) => {
+    const nombreA = (a.nombre_completo || `${a.nombres || ''} ${a.apellidos || ''}`).trim();
+    const nombreB = (b.nombre_completo || `${b.nombres || ''} ${b.apellidos || ''}`).trim();
+    return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
   });
 
   // Métricas para tarjetas KPI
