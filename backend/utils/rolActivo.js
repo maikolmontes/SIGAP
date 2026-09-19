@@ -57,4 +57,50 @@ const calcularAlcance = (req) => {
     return { roles, esPlaneacion, esConsultor, esDirector, limitadoPorPrograma, limitadoPorFacultad: false };
 };
 
-module.exports = { rolesEfectivos, calcularAlcance, normalizar };
+/**
+ * Programas que el usuario puede ver según su rol activo.
+ *
+ * Un Director gestiona los programas de director_programa (uno o varios).
+ * Planeación, Admin y Consultor no tienen restricción.
+ *
+ * @returns {Promise<{restringido: boolean, ids: number[]}>}
+ *   Si restringido es true y ids está vacío, el director no tiene programas
+ *   asignados y NO debe ver nada (nunca se cae a "toda la institución").
+ */
+const alcanceProgramas = async (req) => {
+    if (req._alcanceProgramas) return req._alcanceProgramas;
+
+    const { limitadoPorPrograma } = calcularAlcance(req);
+    let alcance = { restringido: false, ids: [] };
+
+    if (limitadoPorPrograma) {
+        const pool = require('../db/connection');
+        const r = await pool.query(
+            'SELECT id_programa FROM director_programa WHERE id_usuario = $1 ORDER BY id_programa',
+            [req.user?.id]
+        );
+        alcance = { restringido: true, ids: r.rows.map(f => f.id_programa) };
+    }
+
+    req._alcanceProgramas = alcance;
+    return alcance;
+};
+
+/**
+ * ¿Puede el usuario actuar sobre este docente? Un Director solo puede si el
+ * docente pertenece a alguno de sus programas.
+ */
+const docenteEnAlcance = async (req, idDocente) => {
+    const alcance = await alcanceProgramas(req);
+    if (!alcance.restringido) return true;
+    if (alcance.ids.length === 0) return false;
+
+    const pool = require('../db/connection');
+    const r = await pool.query(
+        'SELECT 1 FROM usuarios WHERE id_usuario = $1 AND id_programa = ANY($2::int[])',
+        [idDocente, alcance.ids]
+    );
+    return r.rows.length > 0;
+};
+
+module.exports = { rolesEfectivos, calcularAlcance, alcanceProgramas, docenteEnAlcance, normalizar };

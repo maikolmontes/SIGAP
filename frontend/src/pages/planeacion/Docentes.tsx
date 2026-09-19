@@ -59,7 +59,45 @@ interface Usuario {
   horas_contrato: number;
   programa: string;
   id_programa?: number;
+  // Solo Directores: programas que gestiona (uno o varios)
+  programas_gestion?: number[];
+  programas_gestion_nombres?: string | null;
   roles: string;
+}
+
+interface SelectorProgramasGestionProps {
+  programas: ProgramaItem[];
+  seleccionados: number[];
+  onChange: (ids: number[]) => void;
+}
+
+/** Casillas para elegir los programas que gestiona un Director. */
+function SelectorProgramasGestion({ programas, seleccionados, onChange }: SelectorProgramasGestionProps) {
+  const alternar = (id: number) =>
+    onChange(seleccionados.includes(id) ? seleccionados.filter(x => x !== id) : [...seleccionados, id]);
+
+  return (
+    <div>
+      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
+        Programas que gestiona como Director
+      </label>
+      <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto border border-gray-300 rounded-lg p-2 bg-white">
+        {programas.map((p) => (
+          <label key={p.id_programa} className="flex items-center gap-2 text-sm text-gray-700 font-semibold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={seleccionados.includes(p.id_programa)}
+              onChange={() => alternar(p.id_programa)}
+            />
+            {p.nombre_programa}
+          </label>
+        ))}
+      </div>
+      <p className="text-[11px] text-gray-400 mt-1">
+        Si no marcas ninguno, gestionará únicamente su programa académico.
+      </p>
+    </div>
+  );
 }
 
 export default function Docentes() {
@@ -91,6 +129,7 @@ export default function Docentes() {
   const [numeroDocumento, setNumeroDocumento] = useState('');
   const [correo, setCorreo] = useState('');
   const [idPrograma, setIdPrograma] = useState(1);
+  const [programasGestion, setProgramasGestion] = useState<number[]>([]);
   const [rolesSeleccionados, setRolesSeleccionados] = useState<string[]>(['Docente']);
   const [formError, setFormError] = useState<string | null>(null);
   const [formWarning, setFormWarning] = useState<string | null>(null);
@@ -104,6 +143,7 @@ export default function Docentes() {
   const [editNumeroDocumento, setEditNumeroDocumento] = useState('');
   const [editCorreo, setEditCorreo] = useState('');
   const [editIdPrograma, setEditIdPrograma] = useState(1);
+  const [editProgramasGestion, setEditProgramasGestion] = useState<number[]>([]);
   const [editRolesSeleccionados, setEditRolesSeleccionados] = useState<string[]>(['Docente']);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [editWarning, setEditWarning] = useState<string | null>(null);
@@ -211,6 +251,7 @@ export default function Docentes() {
     setEditNumeroDocumento(u.numero_documento || '');
     setEditCorreo(u.correo || '');
     setEditIdPrograma(mapProgramaToId(u.programa));
+    setEditProgramasGestion(u.programas_gestion || []);
 
     const parsedRoles = (u.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean);
     // Normalizar a los nombres estándar de la interfaz
@@ -252,6 +293,7 @@ export default function Docentes() {
     if (programas.length > 0) {
       setIdPrograma(programas[0].id_programa);
     }
+    setProgramasGestion([]);
     setRolesSeleccionados(['Docente']);
     setFormError(null);
     setFormWarning(null);
@@ -284,6 +326,7 @@ export default function Docentes() {
         correo: correo.trim().toLowerCase(),
         id_contrato: 4,
         id_programa: soloConsultaOPl ? null : idPrograma,
+        programas_gestion: rolEstaSeleccionado(rolesSeleccionados, 'Director') ? programasGestion : [],
         roles: rolesSeleccionados
       });
 
@@ -340,6 +383,7 @@ export default function Docentes() {
         numero_documento: editNumeroDocumento.trim(),
         correo: editCorreo.trim().toLowerCase(),
         id_programa: soloConsultaOPl ? null : editIdPrograma,
+        programas_gestion: rolEstaSeleccionado(editRolesSeleccionados, 'Director') ? editProgramasGestion : [],
         roles: editRolesSeleccionados
       });
 
@@ -766,6 +810,11 @@ export default function Docentes() {
                         <div className={`text-sm font-semibold ${soloConsult ? 'text-gray-400 italic' : 'text-gray-800'}`}>
                           {soloConsult ? 'No aplica' : (user.programa || 'Sin Asignar')}
                         </div>
+                        {(user.programas_gestion?.length ?? 0) > 1 && (
+                          <div className="text-[11px] text-gray-500 font-medium mt-0.5">
+                            Gestiona: {user.programas_gestion_nombres}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-700 font-medium flex items-center gap-1.5">
@@ -992,6 +1041,14 @@ export default function Docentes() {
                 </div>
               </div>
 
+              {rolEstaSeleccionado(rolesSeleccionados, 'Director') && (
+                <SelectorProgramasGestion
+                  programas={programas}
+                  seleccionados={programasGestion}
+                  onChange={setProgramasGestion}
+                />
+              )}
+
               {/* Botones */}
               <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
                 <button
@@ -1184,6 +1241,14 @@ export default function Docentes() {
                   </select>
                 </div>
               </div>
+
+              {rolEstaSeleccionado(editRolesSeleccionados, 'Director') && (
+                <SelectorProgramasGestion
+                  programas={programas}
+                  seleccionados={editProgramasGestion}
+                  onChange={setEditProgramasGestion}
+                />
+              )}
 
               {/* Botones */}
               <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">

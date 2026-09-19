@@ -69,7 +69,14 @@ INFORME_GESTION, INFORME_ACTIVIDAD, INFORME_INDICADOR, INFORME_EVIDENCIA
 Convenciones de la BD
 
 PKs: id_Usuario, id_Funciones, id_AsignacionAct, id_Espacio_Aca, id_PensulAca, id_ActSemana, id_Resultados
-Tablas N:N: USUARIO_ROL, ROL_PERMISO, USUARIO_NIVEL, USUARIO_ASIGNACION, SEMESTRES_GRUPOS
+Tablas N:N: USUARIO_ROL, ROL_PERMISO, USUARIO_NIVEL, USUARIO_ASIGNACION, SEMESTRES_GRUPOS, DIRECTOR_PROGRAMA
+
+Directores y programas (database/director_programa.sql)
+
+Un Director gestiona uno o varios programas y un programa puede tener varios directores: tabla N:N director_programa
+usuarios.id_programa se conserva: para un docente es su programa; para un director, su programa principal
+El alcance de un Director se resuelve SIEMPRE con alcanceProgramas(req) / docenteEnAlcance(req, id) de backend/utils/rolActivo.js (filtro `u.id_programa = ANY($n::int[])`)
+Un Director sin programas asignados no ve nada; nunca se cae a "toda la institución" ni a un programa por defecto
 Campo calculado automático — NO editar manualmente: porcentaje_avance en RESULTADOS
 
 Fórmula: porcentaje_avance = (ejecucion / meta) * 100

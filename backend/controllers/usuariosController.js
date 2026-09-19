@@ -17,6 +17,13 @@ const getAll = async (req, res) => {
                 tc.horas_contrato,
                 pa.nombre_programa AS programa,
                 f.nombre_facultad  AS facultad,
+                COALESCE((SELECT ARRAY_AGG(dp.id_programa ORDER BY dp.id_programa)
+                          FROM director_programa dp
+                          WHERE dp.id_usuario = u.id_usuario), '{}') AS programas_gestion,
+                (SELECT STRING_AGG(pg.nombre_programa, ', ' ORDER BY pg.nombre_programa)
+                 FROM director_programa dp
+                 JOIN programa_academico pg ON pg.id_programa = dp.id_programa
+                 WHERE dp.id_usuario = u.id_usuario) AS programas_gestion_nombres,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
@@ -62,6 +69,9 @@ const getById = async (req, res) => {
                 pa.nombre_programa AS programa,
                 f.nombre_facultad  AS facultad,
                 na.nombre_titulo   AS nivel_academico,
+                COALESCE((SELECT ARRAY_AGG(dp.id_programa ORDER BY dp.id_programa)
+                          FROM director_programa dp
+                          WHERE dp.id_usuario = u.id_usuario), '{}') AS programas_gestion,
                 STRING_AGG(DISTINCT r.nombre_rol, ', ') AS roles
             FROM usuarios u
             LEFT JOIN tipo_contrato tc       ON u.id_contrato   = tc.id_contrato
@@ -165,6 +175,39 @@ const isOnlyConsultorOrPlaneacion = (rolesList) => {
     });
 };
 
+/**
+ * Sincroniza los programas que gestiona un Director (tabla director_programa).
+ * Un director puede gestionar uno o varios programas y un programa puede
+ * tener varios directores.
+ *
+ *  · Si el usuario NO tiene rol Director, se borran sus filas.
+ *  · Si es Director y no se indican programas, se usa su programa principal.
+ *    Así un formulario antiguo (solo id_programa) sigue funcionando.
+ *
+ * @returns {Promise<number[]>} ids de programa que quedaron asignados
+ */
+const sincronizarProgramasDirector = async (idUsuario, rolesList, programasInput, progPrincipal) => {
+    await pool.query('DELETE FROM director_programa WHERE id_usuario = $1', [idUsuario]);
+
+    const esDirector = rolesList.some(r => normalizeRolName(r) === 'director');
+    if (!esDirector) return [];
+
+    let ids = (Array.isArray(programasInput) ? programasInput : [])
+        .map(Number)
+        .filter(n => Number.isInteger(n) && n > 0);
+    if (ids.length === 0 && progPrincipal) ids = [Number(progPrincipal)];
+    if (ids.length === 0) return [];
+
+    // Se inserta solo lo que existe en programa_academico
+    const r = await pool.query(`
+        INSERT INTO director_programa (id_usuario, id_programa)
+        SELECT $1, id_programa FROM programa_academico WHERE id_programa = ANY($2::int[])
+        ON CONFLICT DO NOTHING
+        RETURNING id_programa
+    `, [idUsuario, ids]);
+    return r.rows.map(f => f.id_programa);
+};
+
 const resolverIdContrato = (contratoInput) => {
     if (!contratoInput) return 4; // Por Definir por defecto (id_contrato = 4)
     const str = String(contratoInput).trim().toLowerCase();
@@ -233,6 +276,7 @@ const create = async (req, res) => {
         correo,
         id_contrato,
         id_programa,
+        programas_gestion,
         rol,
         roles
     } = req.body;
@@ -323,6 +367,11 @@ const create = async (req, res) => {
             }
         }
 
+        // Programas que gestiona (solo si es Director)
+        const programasDirector = await sincronizarProgramasDirector(
+            nuevoUsuario.id_usuario, rolesList, programas_gestion, progId
+        );
+
         // Asignar al periodo activo si existe y tiene rol docente o director
         const tieneRolAcademico = rolesList.some(r => {
             const low = r.toLowerCase();
@@ -367,6 +416,7 @@ const create = async (req, res) => {
 
         res.status(201).json({
             ...nuevoUsuario,
+            programas_gestion: programasDirector,
             roles: rolesList.join(', '),
             advertencia
         });
@@ -569,6 +619,9 @@ const createBulk = async (req, res) => {
                     }
                 }
 
+                // Un director importado gestiona su programa; los demás se agregan desde la edición
+                await sincronizarProgramasDirector(idUsuario, rolesList, null, progId);
+
                 // Asignar al periodo activo si tiene rol académico (Docente/Director)
                 const tieneRolAcademico = rolesList.some(r => {
                     const norm = normalizeRolName(r);
@@ -660,6 +713,7 @@ const update = async (req, res) => {
         numero_documento,
         correo,
         id_programa,
+        programas_gestion,
         rol,
         roles
     } = req.body;
@@ -760,6 +814,9 @@ const update = async (req, res) => {
             }
         }
 
+        // Programas que gestiona (si deja de ser Director se limpian)
+        const programasDirector = await sincronizarProgramasDirector(id, rolesList, programas_gestion, progId);
+
         // Si hay periodo activo y rol académico (Docente/Director), asegurar docente_periodo y programa_periodo
         const tieneRolAcademico = rolesList.some(r => {
             const low = r.toLowerCase();
@@ -794,6 +851,7 @@ const update = async (req, res) => {
         await pool.query('COMMIT');
         res.json({
             ...usuarioActualizado,
+            programas_gestion: programasDirector,
             roles: rolesList.join(', '),
             advertencia
         });

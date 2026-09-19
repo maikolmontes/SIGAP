@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDistribucionDocente, eliminarAgendas, eliminarAgendasDocentes } = require('../controllers/directorController');
-const { getAgendas, getAgendaDetalle, aprobarAgenda, devolverAgenda, getReportesResumen } = require('../controllers/directorRevisionController');
+const { getAgendas, getAgendaDetalle, aprobarAgenda, devolverAgenda, getReportesResumen, getMisProgramas } = require('../controllers/directorRevisionController');
 const { getAsignaciones, corregirAsignaciones } = require('../controllers/asignacionesController');
 const verifyToken = require('../middleware/verifyToken');
 const verifyRole = require('../middleware/verifyRole');
@@ -30,6 +30,9 @@ router.get('/agendas', verifyToken, verifyRole('Director', 'Consultor'), getAgen
 router.get('/agendas/:id', verifyToken, verifyRole('Director', 'Consultor'), getAgendaDetalle);
 router.put('/agendas/:id/aprobar', verifyToken, verifyRole('Director'), aprobarAgenda);
 router.put('/agendas/:id/devolver', verifyToken, verifyRole('Director'), devolverAgenda);
+
+// Programas que gestiona el usuario (selector del panel)
+router.get('/mis-programas', verifyToken, verifyRole('Director', 'Planeacion', 'Admin', 'Consultor'), getMisProgramas);
 
 // Reportes
 router.get('/reportes/resumen', verifyToken, verifyRole('Director', 'Planeacion', 'Admin', 'Consultor'), getReportesResumen);

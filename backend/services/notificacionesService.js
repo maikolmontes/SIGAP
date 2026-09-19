@@ -55,19 +55,21 @@ const getUsuario = async (idUsuario, client = pool) => {
     return res.rows[0] || null;
 };
 
-// Directores activos del programa indicado. Si el programa no tiene
-// director asignado, se usa como respaldo Planeación/Admin para que
-// la radicación no quede sin destinatario.
+// Directores activos que gestionan el programa indicado (director_programa:
+// un programa puede tener varios y un director varios programas). Si el
+// programa no tiene director asignado, se usa como respaldo Planeación/Admin
+// para que la radicación no quede sin destinatario.
 const getDirectoresDePrograma = async (idPrograma, client = pool) => {
     if (idPrograma) {
         const res = await client.query(
             `SELECT DISTINCT u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
              FROM usuarios u
+             JOIN director_programa dp ON dp.id_usuario = u.id_usuario
              JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
              JOIN roles r ON r.id_rol = ur.id_rol
              WHERE u.activo = TRUE
                AND u.correo IS NOT NULL AND u.correo <> ''
-               AND u.id_programa = $1
+               AND dp.id_programa = $1
                AND LOWER(r.nombre_rol) LIKE '%direct%'`,
             [idPrograma]
         );
