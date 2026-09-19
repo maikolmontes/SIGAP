@@ -215,6 +215,7 @@ export default function PanelAgendasTiempoReal({
   // Selector Facultad → Programa (requerido antes de importar/actualizar/eliminar)
   const [facultades, setFacultades] = useState<any[]>([]);
   const [programas, setProgramas] = useState<any[]>([]);
+  const [todosProgramas, setTodosProgramas] = useState<any[]>([]); // lista completa para filtros de la tabla
   const [facultadSel, setFacultadSel] = useState<number | ''>('');
   const [programaSel, setProgramaSel] = useState<number | ''>('');
 
@@ -237,9 +238,10 @@ export default function PanelAgendasTiempoReal({
     }
   }, []);
 
-  // Cargar facultades al montar
+  // Cargar facultades y todos los programas al montar
   useEffect(() => {
     api.get('/facultades').then(res => setFacultades(res.data || [])).catch(() => {});
+    api.get('/programas').then(res => setTodosProgramas(res.data || [])).catch(() => {});
   }, []);
 
   // Cargar programas cuando cambia la facultad
@@ -397,18 +399,12 @@ export default function PanelAgendasTiempoReal({
 
   // Tipos de contrato únicos presentes en los datos
   const tiposContrato = Array.from(new Set(docentes.map((d: any) => d.tipo_contrato).filter(Boolean))) as string[];
-  // Facultades únicas presentes en los datos
-  const facultadesTabla = Array.from(
-    new Map(docentes.filter((d: any) => d.id_facultad).map((d: any) => [d.id_facultad, { id: d.id_facultad, nombre: d.nombre_facultad }])).values()
-  ).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre));
-  // Programas únicos filtrados por la facultad elegida
-  const programasTabla = Array.from(
-    new Map(
-      docentes
-        .filter((d: any) => d.id_programa && (!filtroFacultad || d.id_facultad === filtroFacultad))
-        .map((d: any) => [d.id_programa, { id: d.id_programa, nombre: d.nombre_programa }])
-    ).values()
-  ).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre));
+  // Facultades completas (todas las del sistema)
+  const facultadesTabla = [...facultades].sort((a: any, b: any) => a.nombre_facultad.localeCompare(b.nombre_facultad));
+  // Programas filtrados por facultad elegida (de la lista completa del sistema)
+  const programasTabla = [...todosProgramas]
+    .filter((p: any) => !filtroFacultad || p.id_facultad === filtroFacultad)
+    .sort((a: any, b: any) => a.nombre_programa.localeCompare(b.nombre_programa));
 
   const periodoLabel = periodoActivo
     ? `${periodoActivo.anio} - ${periodoActivo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`
@@ -647,7 +643,7 @@ export default function PanelAgendasTiempoReal({
                   >
                     <option value="">Todas las facultades</option>
                     {(facultadesTabla as any[]).map(f => (
-                      <option key={f.id} value={f.id}>{f.nombre}</option>
+                      <option key={f.id_facultad} value={f.id_facultad}>{f.nombre_facultad}</option>
                     ))}
                   </select>
 
@@ -660,7 +656,7 @@ export default function PanelAgendasTiempoReal({
                   >
                     <option value="">Todos los programas</option>
                     {(programasTabla as any[]).map(p => (
-                      <option key={p.id} value={p.id}>{p.nombre}</option>
+                      <option key={p.id_programa} value={p.id_programa}>{p.nombre_programa}</option>
                     ))}
                   </select>
 
