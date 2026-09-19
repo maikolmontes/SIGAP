@@ -90,7 +90,7 @@ export default function DashboardDirector() {
   const docentesFiltrados = docentes.filter(d =>
     d.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
     d.correo?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ).sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
 
   const periodoLabel = periodoActivo
     ? `${periodoActivo.anio} - ${periodoActivo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`

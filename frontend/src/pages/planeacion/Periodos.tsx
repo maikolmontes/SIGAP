@@ -164,11 +164,14 @@ export default function Periodos() {
             ])
             const todosDocentes: Docente[] = resUsuarios.data
             const asignados: Docente[] = resAsignados.data
-            setDocentesAsignados(asignados)
+            const sortDocentes = (lista: Docente[]) => [...lista].sort((a, b) =>
+                ((a.nombres || '') + ' ' + (a.apellidos || '')).trim().localeCompare(((b.nombres || '') + ' ' + (b.apellidos || '')).trim(), 'es', { sensitivity: 'base' })
+            );
+            setDocentesAsignados(sortDocentes(asignados));
 
             // Filtrar: solo activos y que no estén ya asignados
-            const idsAsignados = new Set(asignados.map((d: Docente) => d.id_usuario))
-            setDocentesDisponibles(todosDocentes.filter(d => d.activo && !idsAsignados.has(d.id_usuario)))
+            const idsAsignados = new Set(asignados.map((d: Docente) => d.id_usuario));
+            setDocentesDisponibles(sortDocentes(todosDocentes.filter(d => d.activo && !idsAsignados.has(d.id_usuario))));
         } catch {
             setError('Error al cargar los docentes.')
         } finally {
@@ -233,7 +236,10 @@ export default function Periodos() {
         setDocenteSeleccionadoReporte(null)
         try {
             const res = await getDocentesPeriodo(periodo.id_periodo)
-            setDocentesReporte(res.data)
+            const listaReporte = (res.data || []).sort((a: Docente, b: Docente) =>
+                ((a.nombres || '') + ' ' + (a.apellidos || '')).trim().localeCompare(((b.nombres || '') + ' ' + (b.apellidos || '')).trim(), 'es', { sensitivity: 'base' })
+            );
+            setDocentesReporte(listaReporte)
         } catch {
             setError('Error al cargar los docentes del período.')
         } finally {

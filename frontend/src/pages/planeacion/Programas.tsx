@@ -243,7 +243,7 @@ export default function Programas() {
         const matchesBusqueda = p.nombre_programa.toLowerCase().includes(busqueda.toLowerCase())
         const matchesFacultad = facultadFiltro === 'Todas' || p.facultad === facultadFiltro
         return matchesBusqueda && matchesFacultad
-    })
+    }).sort((a, b) => a.nombre_programa.localeCompare(b.nombre_programa, 'es', { sensitivity: 'base' }))
 
     return (
         <Layout rol="planeacion" path="/planeacion/programas">

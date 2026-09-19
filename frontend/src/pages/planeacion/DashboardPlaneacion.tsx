@@ -297,7 +297,7 @@ export default function DashboardPlaneacion() {
             (d.programa && d.programa.toLowerCase().trim() === filtroPrograma.toLowerCase().trim())
 
         return matchBusqueda && matchEstado && matchFacultad && matchPrograma
-    })
+    }).sort((a, b) => ((a.nombres || '') + ' ' + (a.apellidos || '')).trim().localeCompare(((b.nombres || '') + ' ' + (b.apellidos || '')).trim(), 'es', { sensitivity: 'base' }))
 
     const handleToggle = async (id: number) => {
         try {

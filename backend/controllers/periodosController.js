@@ -61,7 +61,7 @@ const getById = async (req, res) => {
               AND u.activo = TRUE
             GROUP BY u.id_usuario, u.nombres, u.apellidos,
                      u.correo, u.activo, pa.nombre_programa
-            ORDER BY u.apellidos, u.nombres
+            ORDER BY u.nombres, u.apellidos
         `, [id]);
 
         res.json({
@@ -204,7 +204,7 @@ const getDocentesAsignados = async (req, res) => {
             GROUP BY u.id_usuario, u.nombres, u.apellidos,
                      u.correo, u.tipo_documento, u.numero_documento, u.activo, tc.tipo, tc.horas_contrato,
                      pa.nombre_programa, f.nombre_facultad, dp.fecha_asignacion
-            ORDER BY u.apellidos, u.nombres
+            ORDER BY u.nombres, u.apellidos
         `, [id]);
 
         res.json(result.rows);

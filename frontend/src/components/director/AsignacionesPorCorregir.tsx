@@ -391,7 +391,7 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
             a.correo?.toLowerCase().includes(busqueda.toLowerCase());
         if (soloInconsistentes) return coincideBusqueda && !a.coincide;
         return coincideBusqueda;
-    });
+    }).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' }));
 
     const totalInconsistentes = asignaciones.filter(a => !a.coincide).length;
     const totalCorrectas = asignaciones.length - totalInconsistentes;

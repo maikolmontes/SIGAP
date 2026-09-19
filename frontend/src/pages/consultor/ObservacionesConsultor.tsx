@@ -45,7 +45,7 @@ export default function ObservacionesConsultor() {
             o.rol_seleccionado?.toLowerCase().includes(busqueda.toLowerCase());
         const coincideFuncion = filtroFuncion ? o.funcion_sustantiva === filtroFuncion : true;
         return coincideBusqueda && coincideFuncion;
-    });
+    }).sort((a, b) => (a.docente_nombre || '').localeCompare(b.docente_nombre || '', 'es', { sensitivity: 'base' }));
 
     const periodoLabel = periodo
         ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}`

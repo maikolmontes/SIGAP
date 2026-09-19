@@ -62,7 +62,7 @@ const getAsignaciones = async (req, res) => {
             params.push(alcance.ids);
         }
 
-        query += ` ORDER BY u.apellidos, u.nombres, af.funcion_sustantiva`;
+        query += ` ORDER BY u.nombres, u.apellidos, af.funcion_sustantiva`;
 
         const result = await pool.query(query, params);
 

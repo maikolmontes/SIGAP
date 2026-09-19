@@ -26,7 +26,7 @@ export default function DocentesAnalyticsTable({ metrica }: { metrica?: MetricaA
         f.tipoContrato.toLowerCase().includes(q) ||
         f.programa.toLowerCase().includes(q);
       return coincide && (filtroBalance ? f.balance === filtroBalance : true);
-    });
+    }).sort((a, b) => a.docente.localeCompare(b.docente, 'es', { sensitivity: 'base' }));
   }, [filas, busqueda, filtroBalance]);
 
   if (!metrica) return null;
