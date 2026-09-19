@@ -200,6 +200,8 @@ export default function PanelAgendasTiempoReal({
   const [searchQuery, setSearchQuery] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('');
   const [filtroContrato, setFiltroContrato] = useState('');
+  const [filtroFacultad, setFiltroFacultad] = useState<number | ''>('');
+  const [filtroPrograma, setFiltroPrograma] = useState<number | ''>('');
   const [docenteSeleccionado, setDocenteSeleccionado] = useState<any>(null);
   const [distribucionDocente, setDistribucionDocente] = useState<any[]>([]);
   const [loadingDistribucion, setLoadingDistribucion] = useState(false);
@@ -370,7 +372,7 @@ export default function PanelAgendasTiempoReal({
   const importacionRealizada = data?.importacionRealizada || false;
   const puedeImportar = !!periodoActivo;
 
-  const docentesFiltrados = docentes.filter(d => {
+  const docentesFiltrados = docentes.filter((d: any) => {
     const q = searchQuery.toLowerCase();
     const coincideBusqueda = !q ||
       d.nombre.toLowerCase().includes(q) ||
@@ -379,18 +381,34 @@ export default function PanelAgendasTiempoReal({
       (d.tipo_contrato || '').toLowerCase().includes(filtroContrato.toLowerCase());
     const estadoDocente = getEstadoDocente(d).label;
     const coincideEstado = !filtroEstado || estadoDocente === filtroEstado;
-    return coincideBusqueda && coincideContrato && coincideEstado;
+    const coincideFacultad = !filtroFacultad || d.id_facultad === filtroFacultad;
+    const coincidePrograma = !filtroPrograma || d.id_programa === filtroPrograma;
+    return coincideBusqueda && coincideContrato && coincideEstado && coincideFacultad && coincidePrograma;
   });
 
-  const hayFiltros = searchQuery || filtroEstado || filtroContrato;
+  const hayFiltros = searchQuery || filtroEstado || filtroContrato || filtroFacultad || filtroPrograma;
   const limpiarFiltros = () => {
     setSearchQuery('');
     setFiltroEstado('');
     setFiltroContrato('');
+    setFiltroFacultad('');
+    setFiltroPrograma('');
   };
 
-  // Obtener tipos de contrato únicos presentes en los datos
-  const tiposContrato = Array.from(new Set(docentes.map((d: any) => d.tipo_contrato).filter(Boolean)));
+  // Tipos de contrato únicos presentes en los datos
+  const tiposContrato = Array.from(new Set(docentes.map((d: any) => d.tipo_contrato).filter(Boolean))) as string[];
+  // Facultades únicas presentes en los datos
+  const facultadesTabla = Array.from(
+    new Map(docentes.filter((d: any) => d.id_facultad).map((d: any) => [d.id_facultad, { id: d.id_facultad, nombre: d.nombre_facultad }])).values()
+  ).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre));
+  // Programas únicos filtrados por la facultad elegida
+  const programasTabla = Array.from(
+    new Map(
+      docentes
+        .filter((d: any) => d.id_programa && (!filtroFacultad || d.id_facultad === filtroFacultad))
+        .map((d: any) => [d.id_programa, { id: d.id_programa, nombre: d.nombre_programa }])
+    ).values()
+  ).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre));
 
   const periodoLabel = periodoActivo
     ? `${periodoActivo.anio} - ${periodoActivo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`
@@ -617,6 +635,34 @@ export default function PanelAgendasTiempoReal({
                       className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
                     />
                   </div>
+
+                  {/* Filtro Facultad */}
+                  <select
+                    value={filtroFacultad}
+                    onChange={e => {
+                      setFiltroFacultad(e.target.value ? parseInt(e.target.value) : '');
+                      setFiltroPrograma('');
+                    }}
+                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
+                  >
+                    <option value="">Todas las facultades</option>
+                    {(facultadesTabla as any[]).map(f => (
+                      <option key={f.id} value={f.id}>{f.nombre}</option>
+                    ))}
+                  </select>
+
+                  {/* Filtro Programa (encadenado a facultad) */}
+                  <select
+                    value={filtroPrograma}
+                    onChange={e => setFiltroPrograma(e.target.value ? parseInt(e.target.value) : '')}
+                    disabled={programasTabla.length === 0}
+                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="">Todos los programas</option>
+                    {(programasTabla as any[]).map(p => (
+                      <option key={p.id} value={p.id}>{p.nombre}</option>
+                    ))}
+                  </select>
 
                   {/* Filtro Estado */}
                   <select

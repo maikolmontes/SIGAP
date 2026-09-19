@@ -875,7 +875,10 @@ const getDashboardDirector = async (req, res) => {
                     u.id_usuario,
                     u.nombres || ' ' || u.apellidos AS nombre,
                     u.correo,
+                    pa.id_programa,
                     pa.nombre_programa,
+                    f.id_facultad,
+                    f.nombre_facultad,
                     tc.tipo AS tipo_contrato,
                     tc.horas_contrato,
                     COUNT(af.id_funciones) AS total_funciones,
@@ -890,6 +893,7 @@ const getDashboardDirector = async (req, res) => {
                 FROM usuarios u
                 JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
                 JOIN programa_academico pa ON pa.id_programa = u.id_programa
+                JOIN facultad f ON f.id_facultad = pa.id_facultad
                 JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
                 JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
                 JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
@@ -908,7 +912,8 @@ const getDashboardDirector = async (req, res) => {
 
             docentesQuery += `
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
-                         pa.nombre_programa, tc.tipo, tc.horas_contrato
+                         pa.id_programa, pa.nombre_programa, f.id_facultad, f.nombre_facultad,
+                         tc.tipo, tc.horas_contrato
                 ORDER BY u.apellidos, u.nombres
             `;
 
