@@ -3,7 +3,7 @@ import api from '../../services/api';
 import {
   Users, CheckCircle, Clock, TrendingUp, AlertCircle,
   Upload, UploadCloud, X, ClipboardList, Calendar, Lock,
-  FileBarChart2, RefreshCw, Trash2, ChevronDown, ChevronUp, UserX, Info, BookOpen
+  FileBarChart2, RefreshCw, Trash2, ChevronDown, ChevronUp, UserX, Info, BookOpen, Search
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
@@ -198,6 +198,8 @@ export default function PanelAgendasTiempoReal({
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('');
+  const [filtroContrato, setFiltroContrato] = useState('');
   const [docenteSeleccionado, setDocenteSeleccionado] = useState<any>(null);
   const [distribucionDocente, setDistribucionDocente] = useState<any[]>([]);
   const [loadingDistribucion, setLoadingDistribucion] = useState(false);
@@ -368,10 +370,27 @@ export default function PanelAgendasTiempoReal({
   const importacionRealizada = data?.importacionRealizada || false;
   const puedeImportar = !!periodoActivo;
 
-  const docentesFiltrados = docentes.filter(d =>
-    d.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    d.correo?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const docentesFiltrados = docentes.filter(d => {
+    const q = searchQuery.toLowerCase();
+    const coincideBusqueda = !q ||
+      d.nombre.toLowerCase().includes(q) ||
+      d.correo?.toLowerCase().includes(q);
+    const coincideContrato = !filtroContrato ||
+      (d.tipo_contrato || '').toLowerCase().includes(filtroContrato.toLowerCase());
+    const estadoDocente = getEstadoDocente(d).label;
+    const coincideEstado = !filtroEstado || estadoDocente === filtroEstado;
+    return coincideBusqueda && coincideContrato && coincideEstado;
+  });
+
+  const hayFiltros = searchQuery || filtroEstado || filtroContrato;
+  const limpiarFiltros = () => {
+    setSearchQuery('');
+    setFiltroEstado('');
+    setFiltroContrato('');
+  };
+
+  // Obtener tipos de contrato únicos presentes en los datos
+  const tiposContrato = Array.from(new Set(docentes.map((d: any) => d.tipo_contrato).filter(Boolean)));
 
   const periodoLabel = periodoActivo
     ? `${periodoActivo.anio} - ${periodoActivo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`
@@ -557,35 +576,88 @@ export default function PanelAgendasTiempoReal({
 
             {/* TABLA DOCENTES */}
             <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-gray-900">Estado de Docentes</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">Periodo: {periodoLabel}</p>
+              {/* CABECERA CON FILTROS */}
+              <div className="px-6 py-4 border-b border-gray-100">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Estado de Docentes</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Periodo: {periodoLabel}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {importacionRealizada && puedeEliminar && (
+                      <button
+                        onClick={() => {
+                          setModoSeleccion(v => !v);
+                          setDocentesParaEliminar(new Set());
+                        }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                          modoSeleccion
+                            ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                        }`}
+                        title={modoSeleccion ? 'Cancelar selección' : 'Seleccionar docentes para eliminar agenda'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        {modoSeleccion ? 'Cancelar' : 'Eliminar agenda'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input
-                    type="text"
-                    placeholder="Buscar docente..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-400 w-full sm:w-48"
-                  />
-                  {importacionRealizada && puedeEliminar && (
+
+                {/* FILA DE FILTROS */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Búsqueda */}
+                  <div className="relative flex-1 min-w-[160px]">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por nombre o correo..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
+
+                  {/* Filtro Estado */}
+                  <select
+                    value={filtroEstado}
+                    onChange={e => setFiltroEstado(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
+                  >
+                    <option value="">Todos los estados</option>
+                    {['Pendiente', 'En progreso', 'Completa', 'Aprobada', 'Devuelta', 'Sin asignar'].map(e => (
+                      <option key={e} value={e}>{e}</option>
+                    ))}
+                  </select>
+
+                  {/* Filtro Contrato */}
+                  <select
+                    value={filtroContrato}
+                    onChange={e => setFiltroContrato(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
+                  >
+                    <option value="">Todos los contratos</option>
+                    {tiposContrato.map((tc: string) => (
+                      <option key={tc} value={tc}>{tc}</option>
+                    ))}
+                  </select>
+
+                  {/* Limpiar filtros */}
+                  {hayFiltros && (
                     <button
-                      onClick={() => {
-                        setModoSeleccion(v => !v);
-                        setDocentesParaEliminar(new Set());
-                      }}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                        modoSeleccion
-                          ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                      }`}
-                      title={modoSeleccion ? 'Cancelar selección' : 'Seleccionar docentes para eliminar agenda'}
+                      onClick={limpiarFiltros}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-semibold transition-all border border-gray-200"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      {modoSeleccion ? 'Cancelar' : 'Eliminar agenda'}
+                      <X className="w-3.5 h-3.5" />
+                      Limpiar filtros
                     </button>
+                  )}
+
+                  {/* Contador de resultados */}
+                  {docentes.length > 0 && (
+                    <span className="text-xs text-gray-400 ml-auto">
+                      {docentesFiltrados.length} de {docentes.length} docentes
+                    </span>
                   )}
                 </div>
               </div>
