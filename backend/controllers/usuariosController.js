@@ -363,6 +363,39 @@ const validarDatosUsuario = async (body, { idExcluir = null } = {}) => {
         }
     }
 
+    // ---------- Exclusividad de programas para Director (un programa solo un director activo) ----------
+    if (esDirector) {
+        const progsAValidar = [...new Set([
+            ...programasGestion,
+            ...((!rolesList.some(r => normalizeRolName(r) === 'docente') && progId) ? [progId] : [])
+        ])];
+
+        if (progsAValidar.length > 0) {
+            const ocupados = await pool.query(`
+                SELECT DISTINCT pa.id_programa, pa.nombre_programa, dir.id_usuario, dir.nombres, dir.apellidos
+                FROM programa_academico pa
+                JOIN (
+                    SELECT dp.id_programa, u.id_usuario, u.nombres, u.apellidos, u.activo
+                    FROM director_programa dp
+                    JOIN usuarios u ON u.id_usuario = dp.id_usuario
+                    JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
+                    JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'director'
+                ) dir ON dir.id_programa = pa.id_programa
+                WHERE pa.id_programa = ANY($1::int[])
+                  AND dir.activo = true
+                  AND ($2::int IS NULL OR dir.id_usuario <> $2)
+            `, [progsAValidar, excluir]);
+
+            for (const f of ocupados.rows) {
+                agregar(
+                    'programas_gestion',
+                    `El programa "${f.nombre_programa}" ya se encuentra asignado al director ${f.nombres} ${f.apellidos}. Seleccione únicamente programas disponibles.`,
+                    409
+                );
+            }
+        }
+    }
+
     // ---------- Tipo de contrato ----------
     const idContrato = Number(body.id_contrato) || resolverIdContrato(body.tipo_contrato);
     const contrato = await pool.query('SELECT 1 FROM tipo_contrato WHERE id_contrato = $1', [idContrato]);

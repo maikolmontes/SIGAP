@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import Layout from '../../components/common/Layout';
 import * as XLSX from 'xlsx';
@@ -78,6 +78,8 @@ interface SelectorUbicacionProps {
   onPrograma: (id: number) => void;
   programasGestion: number[];
   onGestion: (ids: number[]) => void;
+  directoresPorPrograma?: Map<number, { id_usuario: number; nombre: string }>;
+  usuarioActualId?: number | null;
 }
 
 const CLASE_ETIQUETA = 'text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1';
@@ -91,23 +93,23 @@ const CLASE_CAMPO =
  *  · Director  → elige facultad y marca los programas que gestiona. Puede
  *                cambiar de facultad y seguir marcando: la selección se conserva
  *                (un director puede gestionar programas de facultades distintas).
+ *                Solo se pueden elegir programas disponibles (los asignados a otro
+ *                director activo se muestran deshabilitados con su responsable).
  *  · Consultor/Planeación → no aplica.
  */
 function SelectorUbicacion({
   programas, sinPrograma, esDocente, esDirector,
-  facultadId, onFacultad, idPrograma, onPrograma, programasGestion, onGestion
+  facultadId, onFacultad, idPrograma, onPrograma, programasGestion, onGestion,
+  directoresPorPrograma, usuarioActualId
 }: SelectorUbicacionProps) {
   if (sinPrograma) {
     return (
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className={CLASE_ETIQUETA}>Facultad</label>
-          <input type="text" disabled value="No aplica" className={CLASE_CAMPO} />
-        </div>
-        <div>
-          <label className={CLASE_ETIQUETA}>Programa Académico</label>
-          <input type="text" disabled value="No aplica" className={CLASE_CAMPO} />
-        </div>
+      <div className="bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-xs text-gray-500 flex flex-col items-center justify-center gap-2 my-auto">
+        <Shield className="w-8 h-8 text-blue-500/70" />
+        <span className="font-bold text-gray-700 text-sm">Acceso Institucional Global</span>
+        <p className="text-[11px] text-gray-400 max-w-xs">
+          Los roles seleccionados (Consultor / Planeación) no requieren adscripción a una facultad ni programa académico específico.
+        </p>
       </div>
     );
   }
@@ -119,8 +121,13 @@ function SelectorUbicacion({
   const deLaFacultad = activos.filter(p => p.id_facultad === facultadId);
   const seleccionados = programas.filter(p => programasGestion.includes(p.id_programa));
 
-  const alternar = (id: number) =>
+  const alternar = (id: number) => {
+    const ocupante = directoresPorPrograma?.get(id);
+    if (ocupante && (!usuarioActualId || ocupante.id_usuario !== usuarioActualId)) {
+      return; // No permitir alternar programas asignados a otro director activo
+    }
     onGestion(programasGestion.includes(id) ? programasGestion.filter(x => x !== id) : [...programasGestion, id]);
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -159,21 +166,41 @@ function SelectorUbicacion({
         <div>
           <label className={CLASE_ETIQUETA}>Programas que gestiona como Director *</label>
           {!facultadId ? (
-            <p className="text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg p-3">
+            <p className="text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg p-2.5 bg-white">
               Seleccione una facultad para ver sus programas.
             </p>
           ) : (
-            <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto border border-gray-300 rounded-lg p-2 bg-white">
-              {deLaFacultad.map(p => (
-                <label key={p.id_programa} className="flex items-center gap-2 text-sm text-gray-700 font-semibold cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={programasGestion.includes(p.id_programa)}
-                    onChange={() => alternar(p.id_programa)}
-                  />
-                  {p.nombre_programa}
-                </label>
-              ))}
+            <div className="grid grid-cols-1 gap-1 max-h-36 overflow-y-auto border border-gray-300 rounded-lg p-1.5 bg-white">
+              {deLaFacultad.map(p => {
+                const ocupante = directoresPorPrograma?.get(p.id_programa);
+                const ocupadoPorOtro = Boolean(ocupante && (!usuarioActualId || ocupante.id_usuario !== usuarioActualId));
+                return (
+                  <label
+                    key={p.id_programa}
+                    className={`flex items-center justify-between gap-2 text-sm p-1.5 rounded transition-colors ${
+                      ocupadoPorOtro
+                        ? 'opacity-60 bg-gray-50 text-gray-400 cursor-not-allowed select-none'
+                        : 'text-gray-700 font-semibold cursor-pointer hover:bg-gray-50'
+                    }`}
+                    title={ocupadoPorOtro ? `Ya asignado al director ${ocupante?.nombre}` : undefined}
+                  >
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        disabled={ocupadoPorOtro}
+                        checked={programasGestion.includes(p.id_programa)}
+                        onChange={() => alternar(p.id_programa)}
+                      />
+                      <span>{p.nombre_programa}</span>
+                    </span>
+                    {ocupadoPorOtro && (
+                      <span className="text-[10px] text-amber-800 bg-amber-100/90 border border-amber-300/80 px-1.5 py-0.5 rounded font-medium">
+                        Asignado a: {ocupante?.nombre}
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
             </div>
           )}
           {seleccionados.length > 0 && (
@@ -197,7 +224,7 @@ function SelectorUbicacion({
             </div>
           )}
           <p className="text-[11px] text-gray-400 mt-1">
-            Puede cambiar de facultad y seguir marcando programas: la selección se conserva.
+            Solo están disponibles programas sin director asignado. Puede cambiar de facultad y seguir marcando.
           </p>
         </div>
       )}
@@ -220,6 +247,8 @@ interface CamposUsuario {
   esDirector: boolean;
   idPrograma: number | null;
   programasGestion: number[];
+  directoresPorPrograma?: Map<number, { id_usuario: number; nombre: string }>;
+  usuarioActualId?: number | null;
 }
 
 /**
@@ -261,6 +290,17 @@ function validarUsuarioCliente(c: CamposUsuario): string[] {
   if (!c.sinPrograma) {
     if (c.esDocente && !c.idPrograma) errores.push('Debe seleccionar la facultad y el programa académico del docente.');
     if (c.esDirector && c.programasGestion.length === 0) errores.push('Debe seleccionar al menos un programa que gestionará como Director.');
+    
+    // Validación de programas ocupados por otro director
+    if (c.esDirector && c.directoresPorPrograma && c.programasGestion.length > 0) {
+      for (const pId of c.programasGestion) {
+        const ocupante = c.directoresPorPrograma.get(pId);
+        if (ocupante && (!c.usuarioActualId || ocupante.id_usuario !== c.usuarioActualId)) {
+          errores.push(`Uno de los programas seleccionados ya se encuentra asignado al director ${ocupante.nombre}.`);
+          break;
+        }
+      }
+    }
   }
 
   return errores;
@@ -377,6 +417,33 @@ export default function Docentes() {
     return 'docente';
   };
 
+  // Mapa reactivo de programas ocupados por directores activos
+  const directoresPorPrograma = useMemo(() => {
+    const mapa = new Map<number, { id_usuario: number; nombre: string }>();
+    for (const u of usuarios) {
+      if (!u.activo) continue;
+      const rolesList = (u.roles || '').split(',').map(r => normalizarRol(r));
+      if (!rolesList.includes('director')) continue;
+
+      const nombre = u.nombre_completo || `${u.nombres || ''} ${u.apellidos || ''}`.trim() || 'Director asignado';
+
+      if (Array.isArray(u.programas_gestion) && u.programas_gestion.length > 0) {
+        for (const pId of u.programas_gestion) {
+          const idNum = Number(pId);
+          if (idNum && !mapa.has(idNum)) {
+            mapa.set(idNum, { id_usuario: u.id_usuario, nombre });
+          }
+        }
+      } else if (u.id_programa) {
+        const idNum = Number(u.id_programa);
+        if (idNum && !mapa.has(idNum)) {
+          mapa.set(idNum, { id_usuario: u.id_usuario, nombre });
+        }
+      }
+    }
+    return mapa;
+  }, [usuarios]);
+
   const rolEstaSeleccionado = (lista: string[], rolName: string) => {
     const normTarget = normalizarRol(rolName);
     return lista.some(r => normalizarRol(r) === normTarget);
@@ -485,7 +552,9 @@ export default function Docentes() {
       esDocente: rolEstaSeleccionado(rolesSeleccionados, 'Docente'),
       esDirector: rolEstaSeleccionado(rolesSeleccionados, 'Director'),
       idPrograma,
-      programasGestion
+      programasGestion,
+      directoresPorPrograma,
+      usuarioActualId: null
     });
     if (problemas.length > 0) {
       setFormError(problemas.join('\n'));
@@ -547,7 +616,9 @@ export default function Docentes() {
       esDocente: rolEstaSeleccionado(editRolesSeleccionados, 'Docente'),
       esDirector: rolEstaSeleccionado(editRolesSeleccionados, 'Director'),
       idPrograma: editIdPrograma,
-      programasGestion: editProgramasGestion
+      programasGestion: editProgramasGestion,
+      directoresPorPrograma,
+      usuarioActualId: usuarioAEditar.id_usuario
     });
     if (problemas.length > 0) {
       setEditFormError(problemas.join('\n'));
@@ -1058,16 +1129,17 @@ export default function Docentes() {
 
       {/* MODAL 1: REGISTRO INDIVIDUAL MULTIRROL */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
             
             {/* Encabezado */}
-            <div className="bg-[#1a2744] text-white px-6 py-4 flex justify-between items-center">
-              <h3 className="font-bold text-lg flex items-center gap-2">
+            <div className="bg-[#1a2744] text-white px-6 py-3.5 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-base sm:text-lg flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-blue-400" />
                 Registrar Nuevo Usuario / Docente
               </h3>
               <button 
+                type="button"
                 onClick={() => setShowAddModal(false)} 
                 className="p-1.5 bg-white/10 hover:bg-white/15 rounded-lg transition-colors text-white"
               >
@@ -1076,7 +1148,7 @@ export default function Docentes() {
             </div>
 
             {/* Formulario */}
-            <form onSubmit={handleSubmitIndividual} className="p-6 flex flex-col gap-4">
+            <form onSubmit={handleSubmitIndividual} className="p-5 sm:p-6 overflow-y-auto flex-1 flex flex-col gap-4">
               {formError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
                   <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
@@ -1091,119 +1163,138 @@ export default function Docentes() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    placeholder="Ej. Juan Carlos"
-                    value={nombres}
-                    onChange={(e) => setNombres(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    placeholder="Ej. Pérez Gómez"
-                    value={apellidos}
-                    onChange={(e) => setApellidos(e.target.value)}
-                  />
-                </div>
-              </div>
+              {/* Layout en 2 columnas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+                
+                {/* Columna 1: Información Personal y Roles */}
+                <div className="flex flex-col gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-blue-900/70 border-b border-gray-200 pb-1">
+                    1. Información Personal y Credenciales
+                  </div>
 
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
-                <input
-                  type="email"
-                  required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  placeholder="ejemplo@unicesmag.edu.co"
-                  value={correo}
-                  onChange={(e) => setCorreo(e.target.value)}
-                />
-              </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        placeholder="Ej. Juan Carlos"
+                        value={nombres}
+                        onChange={(e) => setNombres(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        placeholder="Ej. Pérez Gómez"
+                        value={apellidos}
+                        onChange={(e) => setApellidos(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
-                  <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                    value={tipoDocumento}
-                    onChange={(e) => setTipoDocumento(e.target.value)}
-                  >
-                    <option value="CC">C.C.</option>
-                    <option value="CE">C.E.</option>
-                    <option value="PA">Pasaporte</option>
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    placeholder="Número de identificación"
-                    value={numeroDocumento}
-                    onChange={(e) => setNumeroDocumento(e.target.value)}
-                  />
-                </div>
-              </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
+                    <input
+                      type="email"
+                      required
+                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      placeholder="ejemplo@unicesmag.edu.co"
+                      value={correo}
+                      onChange={(e) => setCorreo(e.target.value)}
+                    />
+                  </div>
 
-              {/* Multiselección de Roles (Checklist) */}
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                  Roles de Acceso (Selecciona uno o varios) *
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
-                    const isChecked = rolEstaSeleccionado(rolesSeleccionados, rItem);
-                    return (
-                      <label
-                        key={rItem}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
-                          isChecked
-                            ? 'bg-blue-50 border-blue-400 text-blue-800 shadow-xs'
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
-                        }`}
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
+                      <select
+                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                        value={tipoDocumento}
+                        onChange={(e) => setTipoDocumento(e.target.value)}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleRol(rItem, false)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
-                        />
-                        <span>{rItem}</span>
-                      </label>
-                    );
-                  })}
+                        <option value="CC">C.C.</option>
+                        <option value="CE">C.E.</option>
+                        <option value="PA">Pasaporte</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        placeholder="Número de identificación"
+                        value={numeroDocumento}
+                        onChange={(e) => setNumeroDocumento(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Multiselección de Roles */}
+                  <div>
+                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
+                      Roles de Acceso *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 bg-gray-50/80 p-2.5 rounded-lg border border-gray-200">
+                      {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
+                        const isChecked = rolEstaSeleccionado(rolesSeleccionados, rItem);
+                        return (
+                          <label
+                            key={rItem}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
+                              isChecked
+                                ? 'bg-blue-50 border-blue-400 text-blue-800 shadow-xs'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleRol(rItem, false)}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                            />
+                            <span>{rItem}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Columna 2: Ubicación y Asignación Académica */}
+                <div className="flex flex-col gap-3 bg-gray-50/60 p-4 rounded-xl border border-gray-200/80">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-blue-900/70 border-b border-gray-200 pb-1">
+                    2. Ubicación y Asignación Académica
+                  </div>
+
+                  <SelectorUbicacion
+                    programas={programas}
+                    sinPrograma={esSoloConsultorOPlaneacion(rolesSeleccionados)}
+                    esDocente={rolEstaSeleccionado(rolesSeleccionados, 'Docente')}
+                    esDirector={rolEstaSeleccionado(rolesSeleccionados, 'Director')}
+                    facultadId={facultadId}
+                    onFacultad={(id) => { setFacultadId(id); setIdPrograma(0); }}
+                    idPrograma={idPrograma}
+                    onPrograma={setIdPrograma}
+                    programasGestion={programasGestion}
+                    onGestion={setProgramasGestion}
+                    directoresPorPrograma={directoresPorPrograma}
+                    usuarioActualId={null}
+                  />
                 </div>
               </div>
 
-              {/* Facultad y Programa Académico */}
-              <SelectorUbicacion
-                programas={programas}
-                sinPrograma={esSoloConsultorOPlaneacion(rolesSeleccionados)}
-                esDocente={rolEstaSeleccionado(rolesSeleccionados, 'Docente')}
-                esDirector={rolEstaSeleccionado(rolesSeleccionados, 'Director')}
-                facultadId={facultadId}
-                onFacultad={(id) => { setFacultadId(id); setIdPrograma(0); }}
-                idPrograma={idPrograma}
-                onPrograma={setIdPrograma}
-                programasGestion={programasGestion}
-                onGestion={setProgramasGestion}
-              />
-
-              {/* Botones */}
-              <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
+              {/* Botones Fijos al pie */}
+              <div className="sticky bottom-0 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-2 pt-3 px-5 sm:px-6 bg-gray-50/95 backdrop-blur-xs border-t border-gray-200 flex justify-end gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="bg-gray-100 hover:bg-gray-150 text-gray-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors"
+                  className="bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-xs"
                 >
                   Cancelar
                 </button>
@@ -1232,12 +1323,12 @@ export default function Docentes() {
 
       {/* MODAL EDITAR USUARIO MULTIRROL */}
       {showEditModal && usuarioAEditar && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
             
             {/* Encabezado */}
-            <div className="bg-[#1a2744] text-white px-6 py-4 flex justify-between items-center">
-              <h3 className="font-bold text-lg flex items-center gap-2">
+            <div className="bg-[#1a2744] text-white px-6 py-3.5 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-base sm:text-lg flex items-center gap-2">
                 <Pencil className="w-5 h-5 text-blue-400" />
                 Editar Usuario / Docente
               </h3>
@@ -1251,7 +1342,7 @@ export default function Docentes() {
             </div>
 
             {/* Formulario de Edición */}
-            <form onSubmit={handleEditSubmit} className="p-6 flex flex-col gap-4">
+            <form onSubmit={handleEditSubmit} className="p-5 sm:p-6 overflow-y-auto flex-1 flex flex-col gap-4">
               {editFormError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
                   <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
@@ -1266,115 +1357,134 @@ export default function Docentes() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    value={editNombres}
-                    onChange={(e) => setEditNombres(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    value={editApellidos}
-                    onChange={(e) => setEditApellidos(e.target.value)}
-                  />
-                </div>
-              </div>
+              {/* Layout en 2 columnas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+                
+                {/* Columna 1: Información Personal y Roles */}
+                <div className="flex flex-col gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-blue-900/70 border-b border-gray-200 pb-1">
+                    1. Información Personal y Credenciales
+                  </div>
 
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
-                <input
-                  type="email"
-                  required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  value={editCorreo}
-                  onChange={(e) => setEditCorreo(e.target.value)}
-                />
-              </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        value={editNombres}
+                        onChange={(e) => setEditNombres(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        value={editApellidos}
+                        onChange={(e) => setEditApellidos(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
-                  <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                    value={editTipoDocumento}
-                    onChange={(e) => setEditTipoDocumento(e.target.value)}
-                  >
-                    <option value="CC">C.C.</option>
-                    <option value="CE">C.E.</option>
-                    <option value="PA">Pasaporte</option>
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    value={editNumeroDocumento}
-                    onChange={(e) => setEditNumeroDocumento(e.target.value)}
-                  />
-                </div>
-              </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
+                    <input
+                      type="email"
+                      required
+                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      value={editCorreo}
+                      onChange={(e) => setEditCorreo(e.target.value)}
+                    />
+                  </div>
 
-              {/* Multiselección de Roles en Edición */}
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                  Roles de Acceso (Selecciona uno o varios) *
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
-                    const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
-                    return (
-                      <label
-                        key={rItem}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
-                          isChecked
-                            ? 'bg-blue-50 border-blue-400 text-blue-800 shadow-xs'
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
-                        }`}
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
+                      <select
+                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                        value={editTipoDocumento}
+                        onChange={(e) => setEditTipoDocumento(e.target.value)}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleRol(rItem, true)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
-                        />
-                        <span>{rItem}</span>
-                      </label>
-                    );
-                  })}
+                        <option value="CC">C.C.</option>
+                        <option value="CE">C.E.</option>
+                        <option value="PA">Pasaporte</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        value={editNumeroDocumento}
+                        onChange={(e) => setEditNumeroDocumento(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Multiselección de Roles en Edición */}
+                  <div>
+                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
+                      Roles de Acceso *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 bg-gray-50/80 p-2.5 rounded-lg border border-gray-200">
+                      {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
+                        const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
+                        return (
+                          <label
+                            key={rItem}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
+                              isChecked
+                                ? 'bg-blue-50 border-blue-400 text-blue-800 shadow-xs'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleRol(rItem, true)}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                            />
+                            <span>{rItem}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Columna 2: Ubicación y Asignación Académica */}
+                <div className="flex flex-col gap-3 bg-gray-50/60 p-4 rounded-xl border border-gray-200/80">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-blue-900/70 border-b border-gray-200 pb-1">
+                    2. Ubicación y Asignación Académica
+                  </div>
+
+                  <SelectorUbicacion
+                    programas={programas}
+                    sinPrograma={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
+                    esDocente={rolEstaSeleccionado(editRolesSeleccionados, 'Docente')}
+                    esDirector={rolEstaSeleccionado(editRolesSeleccionados, 'Director')}
+                    facultadId={editFacultadId}
+                    onFacultad={(id) => { setEditFacultadId(id); setEditIdPrograma(0); }}
+                    idPrograma={editIdPrograma}
+                    onPrograma={setEditIdPrograma}
+                    programasGestion={editProgramasGestion}
+                    onGestion={setEditProgramasGestion}
+                    directoresPorPrograma={directoresPorPrograma}
+                    usuarioActualId={usuarioAEditar?.id_usuario || null}
+                  />
                 </div>
               </div>
 
-              {/* Facultad y Programa Académico en Edición */}
-              <SelectorUbicacion
-                programas={programas}
-                sinPrograma={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
-                esDocente={rolEstaSeleccionado(editRolesSeleccionados, 'Docente')}
-                esDirector={rolEstaSeleccionado(editRolesSeleccionados, 'Director')}
-                facultadId={editFacultadId}
-                onFacultad={(id) => { setEditFacultadId(id); setEditIdPrograma(0); }}
-                idPrograma={editIdPrograma}
-                onPrograma={setEditIdPrograma}
-                programasGestion={editProgramasGestion}
-                onGestion={setEditProgramasGestion}
-              />
-
-              {/* Botones */}
-              <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
+              {/* Botones Fijos al pie */}
+              <div className="sticky bottom-0 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-2 pt-3 px-5 sm:px-6 bg-gray-50/95 backdrop-blur-xs border-t border-gray-200 flex justify-end gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="bg-gray-100 hover:bg-gray-150 text-gray-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors"
+                  className="bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-xs"
                 >
                   Cancelar
                 </button>
