@@ -43,6 +43,8 @@ import { exportarDocentesExcel } from '../../utils/exportExcelDocentes';
 interface ProgramaItem {
   id_programa: number;
   nombre_programa: string;
+  id_facultad?: number;
+  facultad?: string;
   activo?: boolean;
 }
 
@@ -65,37 +67,140 @@ interface Usuario {
   roles: string;
 }
 
-interface SelectorProgramasGestionProps {
+interface SelectorUbicacionProps {
   programas: ProgramaItem[];
-  seleccionados: number[];
-  onChange: (ids: number[]) => void;
+  sinPrograma: boolean;   // solo Consultor/Planeación: no llevan facultad ni programa
+  esDocente: boolean;
+  esDirector: boolean;
+  facultadId: number;
+  onFacultad: (id: number) => void;
+  idPrograma: number;
+  onPrograma: (id: number) => void;
+  programasGestion: number[];
+  onGestion: (ids: number[]) => void;
 }
 
-/** Casillas para elegir los programas que gestiona un Director. */
-function SelectorProgramasGestion({ programas, seleccionados, onChange }: SelectorProgramasGestionProps) {
+const CLASE_ETIQUETA = 'text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1';
+const CLASE_CAMPO =
+  'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 ' +
+  'focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed';
+
+/**
+ * Facultad → Programa(s) según los roles elegidos:
+ *  · Docente   → elige facultad y, dentro de ella, su programa académico.
+ *  · Director  → elige facultad y marca los programas que gestiona. Puede
+ *                cambiar de facultad y seguir marcando: la selección se conserva
+ *                (un director puede gestionar programas de facultades distintas).
+ *  · Consultor/Planeación → no aplica.
+ */
+function SelectorUbicacion({
+  programas, sinPrograma, esDocente, esDirector,
+  facultadId, onFacultad, idPrograma, onPrograma, programasGestion, onGestion
+}: SelectorUbicacionProps) {
+  if (sinPrograma) {
+    return (
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={CLASE_ETIQUETA}>Facultad</label>
+          <input type="text" disabled value="No aplica" className={CLASE_CAMPO} />
+        </div>
+        <div>
+          <label className={CLASE_ETIQUETA}>Programa Académico</label>
+          <input type="text" disabled value="No aplica" className={CLASE_CAMPO} />
+        </div>
+      </div>
+    );
+  }
+
+  const activos = programas.filter(p => p.activo !== false && p.id_facultad);
+  const facultades = Array.from(
+    new Map(activos.map(p => [p.id_facultad as number, p.facultad || `Facultad ${p.id_facultad}`])).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+  const deLaFacultad = activos.filter(p => p.id_facultad === facultadId);
+  const seleccionados = programas.filter(p => programasGestion.includes(p.id_programa));
+
   const alternar = (id: number) =>
-    onChange(seleccionados.includes(id) ? seleccionados.filter(x => x !== id) : [...seleccionados, id]);
+    onGestion(programasGestion.includes(id) ? programasGestion.filter(x => x !== id) : [...programasGestion, id]);
 
   return (
-    <div>
-      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-        Programas que gestiona como Director
-      </label>
-      <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto border border-gray-300 rounded-lg p-2 bg-white">
-        {programas.map((p) => (
-          <label key={p.id_programa} className="flex items-center gap-2 text-sm text-gray-700 font-semibold cursor-pointer">
-            <input
-              type="checkbox"
-              checked={seleccionados.includes(p.id_programa)}
-              onChange={() => alternar(p.id_programa)}
-            />
-            {p.nombre_programa}
-          </label>
-        ))}
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className={CLASE_ETIQUETA}>Facultad *</label>
+        <select
+          className={CLASE_CAMPO}
+          value={facultadId || ''}
+          onChange={(e) => onFacultad(Number(e.target.value) || 0)}
+        >
+          <option value="">Seleccione una facultad</option>
+          {facultades.map(([id, nombre]) => (
+            <option key={id} value={id}>{nombre}</option>
+          ))}
+        </select>
       </div>
-      <p className="text-[11px] text-gray-400 mt-1">
-        Si no marcas ninguno, gestionará únicamente su programa académico.
-      </p>
+
+      {esDocente && (
+        <div>
+          <label className={CLASE_ETIQUETA}>Programa Académico *</label>
+          <select
+            className={CLASE_CAMPO}
+            disabled={!facultadId}
+            value={idPrograma || ''}
+            onChange={(e) => onPrograma(Number(e.target.value) || 0)}
+          >
+            <option value="">{facultadId ? 'Seleccione un programa' : 'Primero seleccione una facultad'}</option>
+            {deLaFacultad.map(p => (
+              <option key={p.id_programa} value={p.id_programa}>{p.nombre_programa}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {esDirector && (
+        <div>
+          <label className={CLASE_ETIQUETA}>Programas que gestiona como Director *</label>
+          {!facultadId ? (
+            <p className="text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg p-3">
+              Seleccione una facultad para ver sus programas.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto border border-gray-300 rounded-lg p-2 bg-white">
+              {deLaFacultad.map(p => (
+                <label key={p.id_programa} className="flex items-center gap-2 text-sm text-gray-700 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={programasGestion.includes(p.id_programa)}
+                    onChange={() => alternar(p.id_programa)}
+                  />
+                  {p.nombre_programa}
+                </label>
+              ))}
+            </div>
+          )}
+          {seleccionados.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {seleccionados.map(p => (
+                <span
+                  key={p.id_programa}
+                  className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                >
+                  {p.nombre_programa}
+                  <button
+                    type="button"
+                    onClick={() => alternar(p.id_programa)}
+                    aria-label={`Quitar ${p.nombre_programa}`}
+                    className="hover:text-red-600 leading-none"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400 mt-1">
+            Puede cambiar de facultad y seguir marcando programas: la selección se conserva.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -111,7 +216,10 @@ interface CamposUsuario {
   numeroDocumento: string;
   roles: string[];
   sinPrograma: boolean; // Consultor/Planeación no llevan programa
+  esDocente: boolean;
+  esDirector: boolean;
   idPrograma: number | null;
+  programasGestion: number[];
 }
 
 /**
@@ -150,7 +258,10 @@ function validarUsuarioCliente(c: CamposUsuario): string[] {
   }
 
   if (c.roles.length === 0) errores.push('Debe seleccionar al menos un rol.');
-  if (!c.sinPrograma && !c.idPrograma) errores.push('Debe seleccionar un programa académico.');
+  if (!c.sinPrograma) {
+    if (c.esDocente && !c.idPrograma) errores.push('Debe seleccionar la facultad y el programa académico del docente.');
+    if (c.esDirector && c.programasGestion.length === 0) errores.push('Debe seleccionar al menos un programa que gestionará como Director.');
+  }
 
   return errores;
 }
@@ -194,7 +305,8 @@ export default function Docentes() {
   const [tipoDocumento, setTipoDocumento] = useState('CC');
   const [numeroDocumento, setNumeroDocumento] = useState('');
   const [correo, setCorreo] = useState('');
-  const [idPrograma, setIdPrograma] = useState(1);
+  const [facultadId, setFacultadId] = useState(0);
+  const [idPrograma, setIdPrograma] = useState(0);
   const [programasGestion, setProgramasGestion] = useState<number[]>([]);
   const [rolesSeleccionados, setRolesSeleccionados] = useState<string[]>(['Docente']);
   const [formError, setFormError] = useState<string | null>(null);
@@ -208,7 +320,8 @@ export default function Docentes() {
   const [editTipoDocumento, setEditTipoDocumento] = useState('CC');
   const [editNumeroDocumento, setEditNumeroDocumento] = useState('');
   const [editCorreo, setEditCorreo] = useState('');
-  const [editIdPrograma, setEditIdPrograma] = useState(1);
+  const [editFacultadId, setEditFacultadId] = useState(0);
+  const [editIdPrograma, setEditIdPrograma] = useState(0);
   const [editProgramasGestion, setEditProgramasGestion] = useState<number[]>([]);
   const [editRolesSeleccionados, setEditRolesSeleccionados] = useState<string[]>(['Docente']);
   const [editFormError, setEditFormError] = useState<string | null>(null);
@@ -246,9 +359,6 @@ export default function Docentes() {
 
       const listaProgs = progsRes.data || [];
       setProgramas(listaProgs);
-      if (listaProgs.length > 0) {
-        setIdPrograma(listaProgs[0].id_programa);
-      }
 
       setUsuarios(usuariosRes.data || []);
     } catch (error) {
@@ -299,16 +409,6 @@ export default function Docentes() {
     }
   };
 
-  const mapProgramaToId = (progName?: string): number => {
-    if (!progName || programas.length === 0) return programas[0]?.id_programa || 1;
-    const low = progName.toLowerCase().trim();
-    const exact = programas.find(p => p.nombre_programa.toLowerCase().trim() === low);
-    if (exact) return exact.id_programa;
-    const partial = programas.find(p => p.nombre_programa.toLowerCase().includes(low) || low.includes(p.nombre_programa.toLowerCase()));
-    if (partial) return partial.id_programa;
-    return programas[0]?.id_programa || 1;
-  };
-
   const handleOpenEditModal = (u: Usuario) => {
     setUsuarioAEditar(u);
     setEditNombres(u.nombres || '');
@@ -316,7 +416,7 @@ export default function Docentes() {
     setEditTipoDocumento(u.tipo_documento || 'CC');
     setEditNumeroDocumento(u.numero_documento || '');
     setEditCorreo(u.correo || '');
-    setEditIdPrograma(mapProgramaToId(u.programa));
+    setEditIdPrograma(u.id_programa || 0);
     setEditProgramasGestion(u.programas_gestion || []);
 
     const parsedRoles = (u.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean);
@@ -330,6 +430,12 @@ export default function Docentes() {
     });
     const uniqueMapped = Array.from(new Set(mappedRoles));
     setEditRolesSeleccionados(uniqueMapped.length > 0 ? uniqueMapped : ['Docente']);
+
+    // La facultad se deduce del programa: el del docente o, si solo es director, el primero que gestiona
+    const idReferencia = uniqueMapped.includes('Docente')
+      ? (u.id_programa || 0)
+      : ((u.programas_gestion || [])[0] || u.id_programa || 0);
+    setEditFacultadId(programas.find(p => p.id_programa === idReferencia)?.id_facultad || 0);
     setEditFormError(null);
     setEditWarning(null);
     setShowEditModal(true);
@@ -356,9 +462,8 @@ export default function Docentes() {
     setTipoDocumento('CC');
     setNumeroDocumento('');
     setCorreo('');
-    if (programas.length > 0) {
-      setIdPrograma(programas[0].id_programa);
-    }
+    setFacultadId(0);
+    setIdPrograma(0);
     setProgramasGestion([]);
     setRolesSeleccionados(['Docente']);
     setFormError(null);
@@ -377,7 +482,10 @@ export default function Docentes() {
       tipoDocumento, numeroDocumento,
       roles: rolesSeleccionados,
       sinPrograma: soloConsultaOPl,
-      idPrograma
+      esDocente: rolEstaSeleccionado(rolesSeleccionados, 'Docente'),
+      esDirector: rolEstaSeleccionado(rolesSeleccionados, 'Director'),
+      idPrograma,
+      programasGestion
     });
     if (problemas.length > 0) {
       setFormError(problemas.join('\n'));
@@ -393,7 +501,7 @@ export default function Docentes() {
         numero_documento: numeroDocumento.trim(),
         correo: correo.trim().toLowerCase(),
         id_contrato: 4,
-        id_programa: soloConsultaOPl ? null : idPrograma,
+        id_programa: soloConsultaOPl ? null : (idPrograma || programasGestion[0]),
         programas_gestion: rolEstaSeleccionado(rolesSeleccionados, 'Director') ? programasGestion : [],
         roles: rolesSeleccionados
       });
@@ -436,7 +544,10 @@ export default function Docentes() {
       tipoDocumento: editTipoDocumento, numeroDocumento: editNumeroDocumento,
       roles: editRolesSeleccionados,
       sinPrograma: soloConsultaOPl,
-      idPrograma: editIdPrograma
+      esDocente: rolEstaSeleccionado(editRolesSeleccionados, 'Docente'),
+      esDirector: rolEstaSeleccionado(editRolesSeleccionados, 'Director'),
+      idPrograma: editIdPrograma,
+      programasGestion: editProgramasGestion
     });
     if (problemas.length > 0) {
       setEditFormError(problemas.join('\n'));
@@ -451,7 +562,7 @@ export default function Docentes() {
         tipo_documento: editTipoDocumento,
         numero_documento: editNumeroDocumento.trim(),
         correo: editCorreo.trim().toLowerCase(),
-        id_programa: soloConsultaOPl ? null : editIdPrograma,
+        id_programa: soloConsultaOPl ? null : (editIdPrograma || editProgramasGestion[0]),
         programas_gestion: rolEstaSeleccionado(editRolesSeleccionados, 'Director') ? editProgramasGestion : [],
         roles: editRolesSeleccionados
       });
@@ -1074,48 +1185,18 @@ export default function Docentes() {
               </div>
 
               {/* Facultad y Programa Académico */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Facultad
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    value={esSoloConsultorOPlaneacion(rolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Programa Académico {esSoloConsultorOPlaneacion(rolesSeleccionados) ? '' : '*'}
-                  </label>
-                  <select
-                    disabled={esSoloConsultorOPlaneacion(rolesSeleccionados)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                    value={esSoloConsultorOPlaneacion(rolesSeleccionados) ? '' : idPrograma}
-                    onChange={(e) => setIdPrograma(Number(e.target.value))}
-                  >
-                    {esSoloConsultorOPlaneacion(rolesSeleccionados) ? (
-                      <option value="">Deshabilitado (Sin asignación)</option>
-                    ) : (
-                      programas.map((p) => (
-                        <option key={p.id_programa} value={p.id_programa}>
-                          {p.nombre_programa}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              {rolEstaSeleccionado(rolesSeleccionados, 'Director') && (
-                <SelectorProgramasGestion
-                  programas={programas}
-                  seleccionados={programasGestion}
-                  onChange={setProgramasGestion}
-                />
-              )}
+              <SelectorUbicacion
+                programas={programas}
+                sinPrograma={esSoloConsultorOPlaneacion(rolesSeleccionados)}
+                esDocente={rolEstaSeleccionado(rolesSeleccionados, 'Docente')}
+                esDirector={rolEstaSeleccionado(rolesSeleccionados, 'Director')}
+                facultadId={facultadId}
+                onFacultad={(id) => { setFacultadId(id); setIdPrograma(0); }}
+                idPrograma={idPrograma}
+                onPrograma={setIdPrograma}
+                programasGestion={programasGestion}
+                onGestion={setProgramasGestion}
+              />
 
               {/* Botones */}
               <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
@@ -1275,48 +1356,18 @@ export default function Docentes() {
               </div>
 
               {/* Facultad y Programa Académico en Edición */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Facultad
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Programa Académico {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : '*'}
-                  </label>
-                  <select
-                    disabled={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                    value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : editIdPrograma}
-                    onChange={(e) => setEditIdPrograma(Number(e.target.value))}
-                  >
-                    {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? (
-                      <option value="">Deshabilitado (Sin asignación)</option>
-                    ) : (
-                      programas.map((p) => (
-                        <option key={p.id_programa} value={p.id_programa}>
-                          {p.nombre_programa}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              {rolEstaSeleccionado(editRolesSeleccionados, 'Director') && (
-                <SelectorProgramasGestion
-                  programas={programas}
-                  seleccionados={editProgramasGestion}
-                  onChange={setEditProgramasGestion}
-                />
-              )}
+              <SelectorUbicacion
+                programas={programas}
+                sinPrograma={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
+                esDocente={rolEstaSeleccionado(editRolesSeleccionados, 'Docente')}
+                esDirector={rolEstaSeleccionado(editRolesSeleccionados, 'Director')}
+                facultadId={editFacultadId}
+                onFacultad={(id) => { setEditFacultadId(id); setEditIdPrograma(0); }}
+                idPrograma={editIdPrograma}
+                onPrograma={setEditIdPrograma}
+                programasGestion={editProgramasGestion}
+                onGestion={setEditProgramasGestion}
+              />
 
               {/* Botones */}
               <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">

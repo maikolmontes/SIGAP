@@ -318,9 +318,17 @@ const validarDatosUsuario = async (body, { idExcluir = null } = {}) => {
     // Consultor/Planeación no tienen programa; los demás roles sí, y debe ser real.
     let progId = null;
     if (!soloConsultorOPlaneacion) {
-        const pedido = Number(body.id_programa);
+        let pedido = Number(body.id_programa);
+        // Un director que no es docente no tiene "programa propio": el principal
+        // es el primero de los que gestiona.
+        const esDocente = rolesList.some(r => normalizeRolName(r) === 'docente');
+        if ((!Number.isInteger(pedido) || pedido <= 0) && esDirector && !esDocente && Array.isArray(body.programas_gestion)) {
+            pedido = Number(body.programas_gestion[0]);
+        }
         if (!Number.isInteger(pedido) || pedido <= 0) {
-            agregar('id_programa', 'Debe seleccionar un programa académico.');
+            agregar('id_programa', esDirector && !esDocente
+                ? 'Debe seleccionar al menos un programa que gestionará como Director.'
+                : 'Debe seleccionar un programa académico.');
         } else {
             const prog = await pool.query(
                 'SELECT activo FROM programa_academico WHERE id_programa = $1',
