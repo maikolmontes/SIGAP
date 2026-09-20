@@ -21,6 +21,7 @@ const propioOAdmin = (req, res, next) => {
     return res.status(403).json({ error: 'No puedes acceder a los datos de otro usuario.' });
 };
 
+router.get('/roles', soloAdmin, controller.getRolesAsignables);
 router.get('/', soloAdmin, controller.getAll);
 router.post('/validar', soloAdmin, controller.validar);
 router.post('/bulk', soloAdmin, controller.createBulk);

@@ -146,15 +146,15 @@ const saludo = (nombre) => `<p style="margin:0 0 14px;">Cordial saludo, <strong>
 const plantillaAgendaEnviada = ({ director, docente, programa, periodo, totalFunciones, enlace }) => {
     const destino = enlace || url('/director/agendas');
     return {
-        subject: `Nueva agenda para revisión — ${docente}`,
+        subject: `El docente ${docente} completó la agenda (semana 0)`,
         html: layout({
-            titulo: 'Agenda docente lista para revisión',
-            preheader: `${docente} radicó su agenda del período ${periodo || ''} para revisión.`,
+            titulo: 'Agenda docente completada — semana 0',
+            preheader: `${docente} completó su agenda del período ${periodo || ''}.`,
             cuerpo: `
         ${saludo(director)}
         <p style="margin:0 0 14px;">
-          El docente <strong>${esc(docente)}</strong> completó y radicó su agenda profesoral.
-          Ya está disponible en el SIGAP para su revisión y aprobación.
+          El docente <strong>${esc(docente)}</strong> completó la agenda de la <strong>semana 0</strong>:
+          diligenció todas sus funciones sustantivas. Ya puedes consultarla en el SIGAP.
         </p>
         ${tablaDatos([
             ['Docente', docente],

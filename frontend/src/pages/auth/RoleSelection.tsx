@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Users, Settings, Eye, ChevronRight, LogOut, Check, ArrowRight } from 'lucide-react';
+import { BookOpen, Users, Settings, Eye, ChevronRight, LogOut, Check, ArrowRight, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 // @ts-ignore
 import api from '../../services/api';
@@ -9,6 +9,8 @@ interface Rol {
   id_rol: number;
   nombre_rol: string;
   descripcion_rol: string;
+  /** Funciones sustantivas que este rol revisa (database/rol_funcion.sql) */
+  funciones_revisa?: string[];
 }
 
 const RoleSelection = () => {
@@ -63,7 +65,8 @@ const RoleSelection = () => {
     if (rolLower.includes('director')) return <Users className="w-6 h-6" />;
     if (rolLower.includes('planeacion') || rolLower.includes('admin')) return <Settings className="w-6 h-6" />;
     if (rolLower.includes('consultor') || rolLower.includes('auditor')) return <Eye className="w-6 h-6" />;
-    return <Eye className="w-6 h-6" />;
+    // Roles revisores de una función sustantiva (Investigación y los que sigan)
+    return <ClipboardCheck className="w-6 h-6" />;
   };
 
   const getRoleStyling = (nombreRol: string) => {
@@ -123,8 +126,8 @@ const RoleSelection = () => {
       badgeBg: 'bg-gray-100',
       badgeText: 'text-gray-700',
       buttonBg: 'bg-gray-600 hover:bg-gray-700',
-      moduleName: 'Módulo General',
-      defaultDesc: 'Accede a las funcionalidades de consulta y visualización general asignadas a tu cuenta.',
+      moduleName: 'Módulo de Revisión',
+      defaultDesc: 'Revisa la función sustantiva a tu cargo en las agendas de los docentes: aprueba, devuelve y deja observaciones.',
     };
   };
 
@@ -139,7 +142,11 @@ const RoleSelection = () => {
     else if (nombreNormalizado.includes('director')) navigate('/director/dashboard');
     else if (nombreNormalizado.includes('planeacion') || nombreNormalizado.includes('admin')) navigate('/planeacion/dashboard');
     else if (nombreNormalizado.includes('consultor') || nombreNormalizado.includes('auditor')) navigate('/consultor/dashboard');
-    else navigate('/');
+    // Cualquier otro rol que revise funciones sustantivas (Investigaci\u00f3n y los
+    // que se creen despu\u00e9s) entra al m\u00f3dulo gen\u00e9rico de revisi\u00f3n. Antes ca\u00eda en
+    // navigate('/') y el usuario se quedaba sin pantalla.
+    else if (finalRole.funciones_revisa?.length) navigate('/revision/dashboard');
+    else navigate('/perfil');
   };
 
   const handleRoleSelectionWithDelay = async (rolItem: Rol) => {

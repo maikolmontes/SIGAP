@@ -5,7 +5,7 @@ import { RefreshCw } from 'lucide-react';
 
 interface TopbarProps {
     path: string
-    rol: 'planeacion' | 'director' | 'docente' | 'consultor'
+    rol: 'planeacion' | 'director' | 'docente' | 'consultor' | 'revision'
     onOpenMenu?: () => void
     onToggleDesktop?: () => void
 }
@@ -18,20 +18,34 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
     // Verificar si el usuario tiene más de un rol
     const rolesArray = user?.roles ? user.roles.split(',').map(r => r.trim()) : [];
     const hasMultipleRoles = rolesArray.length > 1;
-    const rolLabel = rol === 'planeacion' 
-        ? 'Planeación' 
-        : rol === 'director' 
-            ? 'Director' 
-            : rol === 'consultor' 
-                ? 'Consultor' 
-                : 'Docente'
-    const iniciales = rol === 'planeacion' 
-        ? 'PL' 
-        : rol === 'director' 
-            ? 'DI' 
-            : rol === 'consultor' 
-                ? 'CO' 
-                : 'DO'
+    // El nombre del rol activo manda: los revisores por función (Investigación
+    // y los que se creen después) no tienen etiqueta fija en el código.
+    const nombreRolActivo = (() => {
+        try {
+            const stored = localStorage.getItem('sigap_active_role')
+            if (stored) return JSON.parse(stored).nombre_rol || ''
+        } catch { /* sin rol guardado */ }
+        return ''
+    })()
+
+    const rolLabel = rol === 'planeacion'
+        ? 'Planeación'
+        : rol === 'director'
+            ? 'Director'
+            : rol === 'consultor'
+                ? 'Consultor'
+                : rol === 'revision'
+                    ? (nombreRolActivo || 'Revisión')
+                    : 'Docente'
+    const iniciales = rol === 'planeacion'
+        ? 'PL'
+        : rol === 'director'
+            ? 'DI'
+            : rol === 'consultor'
+                ? 'CO'
+                : rol === 'revision'
+                    ? (rolLabel.slice(0, 2).toUpperCase() || 'RV')
+                    : 'DO'
 
     return (
         <header className="h-14 sm:h-11 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-5 flex-shrink-0 z-40 w-full relative">

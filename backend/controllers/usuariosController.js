@@ -104,6 +104,32 @@ const getById = async (req, res) => {
     }
 };
 
+/**
+ * GET /api/usuarios/roles
+ * Catálogo de roles asignables. La interfaz de Planeación lo usa para armar
+ * el selector de roles: así un rol nuevo (Investigación y los que sigan)
+ * aparece solo, sin editar listas quemadas en el frontend.
+ */
+const getRolesAsignables = async (req, res) => {
+    try {
+        const { rows } = await pool.query(`
+            SELECT r.id_rol, r.nombre_rol, r.descripcion_rol,
+                   COALESCE(
+                     ARRAY_AGG(rf.funcion_sustantiva ORDER BY rf.funcion_sustantiva)
+                     FILTER (WHERE rf.funcion_sustantiva IS NOT NULL), '{}'
+                   ) AS funciones_revisa
+            FROM roles r
+            LEFT JOIN rol_funcion rf ON rf.id_rol = r.id_rol
+            GROUP BY r.id_rol, r.nombre_rol, r.descripcion_rol
+            ORDER BY r.id_rol
+        `);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error en getRolesAsignables:', error.message);
+        res.status(500).json({ error: 'Error al obtener los roles' });
+    }
+};
+
 const normalizeRolName = (rName) => {
     if (!rName) return 'docente';
     const low = rName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -1233,5 +1259,6 @@ module.exports = {
     update,
     deleteUsuario,
     getPerfilCompleto,
-    updatePerfil
+    updatePerfil,
+    getRolesAsignables
 };

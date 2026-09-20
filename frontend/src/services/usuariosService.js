@@ -1,5 +1,7 @@
 import api from './api'
 
+export const getRolesAsignables = () => api.get('/usuarios/roles');
+
 export const getUsuarios = () => {
     return api.get('/usuarios')
 }

@@ -4,9 +4,24 @@
  */
 const pool = require('../db/connection');
 const notificaciones = require('../services/notificacionesService');
-const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
+const { alcanceProgramas, docenteEnAlcance, alcanceFunciones } = require('../utils/rolActivo');
 
 const SIN_PERMISO_DOCENTE = { error: 'Este docente no pertenece a los programas que gestionas.' };
+const SIN_PERMISO_FUNCION = { error: 'Tu rol no revisa esta función sustantiva.' };
+
+/**
+ * Resume un conjunto de estados de función en un estado único.
+ * Devuelta manda (requiere acción); 'Parcial' es el caso nuevo que aparece
+ * al repartir la revisión: unos revisores ya aprobaron y otros no.
+ */
+const estadoDeConjunto = (estados) => {
+    if (!estados || estados.length === 0) return 'Sin asignar';
+    if (estados.includes('Devuelta')) return 'Devuelta';
+    if (estados.every(e => e === 'Aprobada')) return 'Aprobada';
+    if (estados.some(e => e === 'Aprobada')) return 'Parcial';
+    if (estados.every(e => e === 'Aceptado')) return 'Aceptado';
+    return 'Pendiente';
+};
 
 // ================================================================
 // Helper: Calcular perfil docente según Acuerdo 030/2024
@@ -48,6 +63,9 @@ const getAgendas = async (req, res) => {
         // Determinar restricciones a partir del ROL ACTIVO elegido en la interfaz
         // Programas del director (uno o varios). Sin programas no ve nada.
         const alcance = await alcanceProgramas(req);
+        // Funciones sustantivas que este rol revisa (Director: docencia y
+        // académico-administrativo · Investigación: solo la suya).
+        const alcanceFunc = await alcanceFunciones(req);
 
         // Traer docentes con sus funciones agrupadas
         let query = `
@@ -82,6 +100,24 @@ const getAgendas = async (req, res) => {
         if (alcance.restringido) {
             query += ` AND u.id_programa = ANY($${paramIdx}::int[])`;
             params.push(alcance.ids);
+            paramIdx++;
+        }
+
+        // Solo docentes que tengan al menos una función que este rol revise.
+        // Se traen TODAS sus funciones igual, porque el revisor necesita ver las
+        // horas completas para contrastar contra el contrato (Acuerdo 030).
+        if (alcanceFunc.restringido) {
+            if (alcanceFunc.funciones.length === 0) {
+                return res.json({ agendas: [], periodo: periodoInfo.rows[0] || null });
+            }
+            query += ` AND EXISTS (
+                SELECT 1 FROM usuario_asignacion ua2
+                JOIN asignacion_funciones af2 ON af2.id_funciones = ua2.id_funciones
+                WHERE ua2.id_usuario = u.id_usuario
+                  AND af2.id_periodo = $1
+                  AND af2.funcion_sustantiva = ANY($${paramIdx}::text[])
+            )`;
+            params.push(alcanceFunc.funciones);
             paramIdx++;
         }
 
@@ -127,7 +163,10 @@ const getAgendas = async (req, res) => {
                 funcion_sustantiva: row.funcion_sustantiva,
                 horas_funcion: parseFloat(row.horas_funcion) || 0,
                 estado_agenda: row.estado_agenda,
-                observaciones_generales: row.observaciones_generales
+                observaciones_generales: row.observaciones_generales,
+                // false = se muestra como contexto de horas, pero este rol no la aprueba
+                en_alcance: !alcanceFunc.restringido
+                    || alcanceFunc.funciones.includes(row.funcion_sustantiva)
             });
             docente.total_horas += parseFloat(row.horas_funcion) || 0;
             if (row.funcion_sustantiva === 'Docencia Directa') {
@@ -144,16 +183,54 @@ const getAgendas = async (req, res) => {
         const agendas = Array.from(docentesMap.values()).map(d => {
             d.perfil_docente = calcularPerfilDocente(d.tipo_contrato, d.horas_directas, d.horas_investigacion, d.total_horas, d.horas_contrato);
 
-            // Estado general: si alguna función fue devuelta → Devuelta,
-            // si todas aprobadas → Aprobada, si alguna aceptada → Aceptado, sino Pendiente
-            const estados = d.funciones.map(f => f.estado_agenda);
-            if (estados.includes('Devuelta')) d.estado_general = 'Devuelta';
-            else if (estados.every(e => e === 'Aprobada')) d.estado_general = 'Aprobada';
-            else if (estados.every(e => e === 'Aceptado' || e === 'Aprobada')) d.estado_general = 'Aceptado';
-            else d.estado_general = 'Pendiente';
+            // Estado global de la agenda: considera TODAS las funciones, las
+            // revise quien las revise. 'Aprobada' exige que todos los revisores
+            // hayan aprobado su parte; si solo algunos lo hicieron es 'Parcial'.
+            d.estado_general = estadoDeConjunto(d.funciones.map(f => f.estado_agenda));
+
+            // Estado de la parte que le toca a ESTE rol. Es el que guía su
+            // bandeja de trabajo: el Director no debe ver "pendiente" algo
+            // que en realidad le falta aprobar a Investigación.
+            const mias = d.funciones.filter(f => f.en_alcance).map(f => f.estado_agenda);
+            d.estado_mi_revision = estadoDeConjunto(mias);
+            d.funciones_en_alcance = mias.length;
 
             return d;
         });
+
+        // Avance de los cortes por docente: cuántos indicadores ya tienen
+        // ejecución reportada en semana 8 y en semana 16. Se consulta aparte
+        // para no inflar la consulta principal con un JOIN de 4 niveles.
+        if (agendas.length > 0) {
+            const idsDocentes = agendas.map(a => a.id_usuario);
+            const cortesRes = await pool.query(`
+                SELECT ua.id_usuario,
+                       COUNT(i.id_indicadores)::int AS total_indicadores,
+                       COUNT(*) FILTER (WHERE COALESCE(i.ejecucion_8, 0) > 0)::int  AS reportados_8,
+                       COUNT(*) FILTER (WHERE COALESCE(i.ejecucion_16, 0) > 0)::int AS reportados_16
+                FROM usuario_asignacion ua
+                JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
+                JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones
+                JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo IS NOT FALSE
+                JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
+                WHERE ua.id_usuario = ANY($2::int[])
+                GROUP BY ua.id_usuario
+            `, [idPeriodo, idsDocentes]);
+
+            const porDocente = new Map(cortesRes.rows.map(r => [r.id_usuario, r]));
+            const estadoCorte = (total, reportados) => {
+                if (!total) return 'Sin indicadores';
+                if (reportados === 0) return 'Pendiente';
+                return reportados < total ? 'En progreso' : 'Completado';
+            };
+
+            for (const a of agendas) {
+                const c = porDocente.get(a.id_usuario) || { total_indicadores: 0, reportados_8: 0, reportados_16: 0 };
+                a.total_indicadores = c.total_indicadores;
+                a.corte_8  = { reportados: c.reportados_8,  total: c.total_indicadores, estado: estadoCorte(c.total_indicadores, c.reportados_8) };
+                a.corte_16 = { reportados: c.reportados_16, total: c.total_indicadores, estado: estadoCorte(c.total_indicadores, c.reportados_16) };
+            }
+        }
 
         res.json({
             agendas,
@@ -206,14 +283,23 @@ const getAgendaDetalle = async (req, res) => {
         }
         const docente = docenteRes.rows[0];
 
-        // Funciones del docente en el periodo activo
+        // Funciones que este rol puede aprobar; las demás viajan igual para que
+        // el revisor contraste las horas totales contra el contrato.
+        const alcanceFunc = await alcanceFunciones(req);
+
+        // El revisor de UNA función solo recibe la suya: las demás no son de su
+        // competencia y no deben viajar en la respuesta. El revisor integral
+        // (comodín, hoy el Director) sí recibe todas, porque valida las 40h.
+        const soloMisFunciones = alcanceFunc.restringido && !alcanceFunc.esComodin;
+
         const funcionesRes = await pool.query(`
             SELECT af.*
             FROM asignacion_funciones af
             JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
             WHERE ua.id_usuario = $1 AND af.id_periodo = $2
+              AND ($3::text[] IS NULL OR af.funcion_sustantiva = ANY($3::text[]))
             ORDER BY af.funcion_sustantiva
-        `, [idUsuario, idPeriodo]);
+        `, [idUsuario, idPeriodo, soloMisFunciones ? alcanceFunc.funciones : null]);
 
         let horasDirectas = 0;
         let horasInvestigacion = 0;
@@ -297,6 +383,9 @@ const getAgendaDetalle = async (req, res) => {
 
             funciones.push({
                 ...func,
+                // false = otro rol la revisa; se muestra como contexto de horas
+                en_alcance: !alcanceFunc.restringido
+                    || alcanceFunc.funciones.includes(func.funcion_sustantiva),
                 actividades
             });
         }
@@ -347,6 +436,15 @@ const aprobarAgenda = async (req, res) => {
         }
         const idPeriodo = periodoRes.rows[0].id_periodo;
 
+        // Solo las funciones que este rol revisa. Antes se aprobaba la agenda
+        // entera de un golpe; ahora el Director no puede aprobar Investigación
+        // ni Investigación puede aprobar docencia.
+        const alcanceFunc = await alcanceFunciones(req);
+        if (alcanceFunc.restringido && alcanceFunc.funciones.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(403).json(SIN_PERMISO_FUNCION);
+        }
+
         const result = await client.query(`
             UPDATE asignacion_funciones af
             SET estado_agenda = 'Aprobada',
@@ -357,19 +455,36 @@ const aprobarAgenda = async (req, res) => {
             AND ua.id_usuario = $2
             AND af.id_periodo = $3
             AND af.estado_agenda IN ('Pendiente', 'Aceptado', 'Devuelta')
+            AND ($4::text[] IS NULL OR af.funcion_sustantiva = ANY($4::text[]))
             RETURNING af.id_funciones
-        `, [directorId, idUsuario, idPeriodo]);
+        `, [directorId, idUsuario, idPeriodo, alcanceFunc.restringido ? alcanceFunc.funciones : null]);
+
+        // ¿Quedó aprobada TODA la agenda o solo la parte de este revisor?
+        // Con la revisión repartida, cada revisor aprueba su función: avisar en
+        // cada aprobación le mandaría al docente un correo por revisor.
+        const pendientes = await client.query(`
+            SELECT COUNT(*)::int AS faltan
+            FROM usuario_asignacion ua
+            JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones
+            WHERE ua.id_usuario = $1 AND af.id_periodo = $2
+              AND af.estado_agenda <> 'Aprobada'
+        `, [idUsuario, idPeriodo]);
+        const agendaCompleta = pendientes.rows[0].faltan === 0;
 
         await client.query('COMMIT');
 
-        // Avisar al docente que su agenda quedó aprobada (en segundo plano)
-        if (result.rowCount > 0) {
+        // Solo se avisa cuando ya no falta ningún revisor.
+        if (result.rowCount > 0 && agendaCompleta) {
             notificaciones.background.agendaAprobada(idUsuario, directorId);
         }
 
         res.json({
-            mensaje: 'Agenda aprobada exitosamente.',
-            funciones_aprobadas: result.rowCount
+            mensaje: agendaCompleta
+                ? 'Agenda aprobada exitosamente.'
+                : 'Tu parte de la agenda fue aprobada. Faltan otras funciones por revisar.',
+            funciones_aprobadas: result.rowCount,
+            agenda_completa: agendaCompleta,
+            funciones_pendientes: pendientes.rows[0].faltan
         });
 
     } catch (error) {
@@ -410,6 +525,13 @@ const devolverAgenda = async (req, res) => {
         }
         const idPeriodo = periodoRes.rows[0].id_periodo;
 
+        // Igual que al aprobar: solo las funciones de este rol.
+        const alcanceFunc = await alcanceFunciones(req);
+        if (alcanceFunc.restringido && alcanceFunc.funciones.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(403).json(SIN_PERMISO_FUNCION);
+        }
+
         const result = await client.query(`
             UPDATE asignacion_funciones af
             SET estado_agenda = 'Devuelta',
@@ -421,8 +543,10 @@ const devolverAgenda = async (req, res) => {
             AND ua.id_usuario = $3
             AND af.id_periodo = $4
             AND af.estado_agenda IN ('Pendiente', 'Aceptado', 'Aprobada')
+            AND ($5::text[] IS NULL OR af.funcion_sustantiva = ANY($5::text[]))
             RETURNING af.id_funciones
-        `, [observacion_general.trim(), directorId, idUsuario, idPeriodo]);
+        `, [observacion_general.trim(), directorId, idUsuario, idPeriodo,
+            alcanceFunc.restringido ? alcanceFunc.funciones : null]);
 
         await client.query('COMMIT');
 
@@ -515,6 +639,81 @@ const guardarObservacion = async (req, res) => {
     } catch (error) {
         console.error('Error en guardarObservacion:', error);
         res.status(500).json({ error: 'Error al guardar observación.', detalles: error.message });
+    }
+};
+
+// ================================================================
+// POST /api/observaciones/:actividad_id
+// Agrega una observación NUEVA (no reemplaza las anteriores).
+// El PUT de arriba actualiza la del director para esa semana; este
+// permite dejar varias a lo largo del seguimiento.
+// Body: { semana, texto }
+// ================================================================
+const agregarObservacion = async (req, res) => {
+    try {
+        const idActividad = parseInt(req.params.actividad_id);
+        const { semana, texto } = req.body;
+
+        if (!semana || ![8, 16].includes(parseInt(semana))) {
+            return res.status(400).json({ error: 'La semana debe ser 8 o 16.' });
+        }
+        if (!texto || texto.trim() === '') {
+            return res.status(400).json({ error: 'El texto de la observación es obligatorio.' });
+        }
+
+        // La actividad debe pertenecer a un docente de mi alcance
+        const duenio = await pool.query(`
+            SELECT ua.id_usuario
+            FROM asignacion_actividades aa
+            JOIN asignacion_funciones af ON af.id_funciones = aa.id_funciones
+            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            WHERE aa.id_asignacionact = $1
+            LIMIT 1
+        `, [idActividad]);
+
+        if (duenio.rows.length === 0) {
+            return res.status(404).json({ error: 'Actividad no encontrada.' });
+        }
+        if (!(await docenteEnAlcance(req, duenio.rows[0].id_usuario))) {
+            return res.status(403).json(SIN_PERMISO_DOCENTE);
+        }
+
+        const result = await pool.query(`
+            INSERT INTO observaciones_director (id_asignacionact, semana, texto, director_id)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+        `, [idActividad, parseInt(semana), texto.trim(), req.user.id]);
+
+        res.status(201).json({ mensaje: 'Observación agregada.', observacion: result.rows[0] });
+
+    } catch (error) {
+        console.error('Error en agregarObservacion:', error);
+        res.status(500).json({ error: 'Error al agregar la observación.', detalles: error.message });
+    }
+};
+
+// ================================================================
+// DELETE /api/observaciones/item/:id
+// Borra una observación. Solo quien la escribió puede retirarla.
+// ================================================================
+const eliminarObservacion = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (isNaN(id)) return res.status(400).json({ error: 'Identificador inválido.' });
+
+        const result = await pool.query(
+            'DELETE FROM observaciones_director WHERE id = $1 AND director_id = $2 RETURNING id',
+            [id, req.user.id]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(403).json({ error: 'Solo puedes eliminar las observaciones que tú escribiste.' });
+        }
+        res.json({ mensaje: 'Observación eliminada.' });
+
+    } catch (error) {
+        console.error('Error en eliminarObservacion:', error);
+        res.status(500).json({ error: 'Error al eliminar la observación.', detalles: error.message });
     }
 };
 
@@ -804,5 +1003,7 @@ module.exports = {
     guardarObservacion,
     getObservacion,
     getReportesResumen,
-    getTodasObservaciones
+    getTodasObservaciones,
+    agregarObservacion,
+    eliminarObservacion
 };

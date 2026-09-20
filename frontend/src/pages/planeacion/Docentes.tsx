@@ -31,7 +31,8 @@ import {
   createUsuario, 
   updateUsuario,
   createBulkUsuarios, 
-  toggleActivo 
+  toggleActivo,
+  getRolesAsignables,
 } from '../../services/usuariosService';
 import {
   getPeriodoActivo,
@@ -340,6 +341,8 @@ export default function Docentes() {
 
   // Formulario de Creación Individual (Multirrol)
   const [programas, setProgramas] = useState<ProgramaItem[]>([]);
+  // Roles asignables traídos de la BD; si falla la consulta se usan los base.
+  const [rolesDisponibles, setRolesDisponibles] = useState<string[]>(['Docente', 'Director', 'Consultor', 'Planeación']);
   const [nombres, setNombres] = useState('');
   const [apellidos, setApellidos] = useState('');
   const [tipoDocumento, setTipoDocumento] = useState('CC');
@@ -376,6 +379,13 @@ export default function Docentes() {
 
   useEffect(() => {
     cargarUsuarios();
+    // El catálogo de roles sale de la BD: un rol nuevo aparece sin tocar código.
+    getRolesAsignables()
+      .then((res: any) => {
+        const nombres = (res.data || []).map((r: any) => r.nombre_rol).filter(Boolean);
+        if (nombres.length > 0) setRolesDisponibles(nombres);
+      })
+      .catch(() => { /* se conservan los roles base */ });
   }, []);
 
   useEffect(() => {
@@ -414,7 +424,9 @@ export default function Docentes() {
     if (low.includes('planea') || low.includes('admin')) return 'planeacion';
     if (low.includes('direct')) return 'director';
     if (low.includes('consult')) return 'consultor';
-    return 'docente';
+    // Un rol nuevo (Investigación y los que sigan) conserva su nombre. Antes
+    // caía en 'docente' y al guardar se convertía en Docente en silencio.
+    return low || 'docente';
   };
 
   // Mapa reactivo de programas ocupados por directores activos
@@ -1245,7 +1257,7 @@ export default function Docentes() {
                       Roles de Acceso *
                     </label>
                     <div className="grid grid-cols-2 gap-2 bg-gray-50/80 p-2.5 rounded-lg border border-gray-200">
-                      {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
+                      {rolesDisponibles.map((rItem) => {
                         const isChecked = rolEstaSeleccionado(rolesSeleccionados, rItem);
                         return (
                           <label
@@ -1435,7 +1447,7 @@ export default function Docentes() {
                       Roles de Acceso *
                     </label>
                     <div className="grid grid-cols-2 gap-2 bg-gray-50/80 p-2.5 rounded-lg border border-gray-200">
-                      {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
+                      {rolesDisponibles.map((rItem) => {
                         const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
                         return (
                           <label

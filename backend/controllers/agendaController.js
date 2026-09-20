@@ -40,7 +40,7 @@ const getAgenda = async (req, res) => {
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
             JOIN periodo p ON p.id_periodo = af.id_periodo
-            WHERE ua.id_usuario = $1 AND p.activo = true
+            WHERE ua.id_usuario = $1 AND p.activo = true AND af.estado_agenda <> 'Por Aprobar'
             ORDER BY af.id_funciones
         `, [id_usuario]);
 
@@ -68,7 +68,7 @@ const getAgenda = async (req, res) => {
                 JOIN descripcion d              ON aa.id_asignacionact = d.id_asignacionact
                 JOIN indicadores i              ON i.id_descripcion    = d.id_descripcion
                 JOIN periodo p                  ON p.id_periodo        = af.id_periodo
-                WHERE ua.id_usuario = $1 AND p.activo = true
+                WHERE ua.id_usuario = $1 AND p.activo = true AND af.estado_agenda <> 'Por Aprobar'
             ),
             ejecuciones_s8 AS (
                 SELECT
@@ -173,7 +173,7 @@ const getAgendaBase = async (req, res) => {
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
             JOIN periodo p ON p.id_periodo = af.id_periodo
-            WHERE ua.id_usuario = $1 AND p.activo = true
+            WHERE ua.id_usuario = $1 AND p.activo = true AND af.estado_agenda <> 'Por Aprobar'
             ORDER BY af.id_funciones
         `, [id_usuario]);
 
@@ -238,7 +238,7 @@ const getAgendaBase = async (req, res) => {
             LEFT JOIN descripcion d         ON aa.id_asignacionact = d.id_asignacionact
             LEFT JOIN indicadores i         ON i.id_descripcion    = d.id_descripcion
             JOIN periodo p                  ON p.id_periodo        = af.id_periodo
-            WHERE ua.id_usuario = $1 AND p.activo = true
+            WHERE ua.id_usuario = $1 AND p.activo = true AND af.estado_agenda <> 'Por Aprobar'
             ORDER BY af.id_funciones, aa.id_asignacionact, d.id_descripcion, i.id_indicadores
         `, [id_usuario]);
 

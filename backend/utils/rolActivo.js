@@ -103,4 +103,92 @@ const docenteEnAlcance = async (req, idDocente) => {
     return r.rows.length > 0;
 };
 
-module.exports = { rolesEfectivos, calcularAlcance, alcanceProgramas, docenteEnAlcance, normalizar };
+/**
+ * Funciones sustantivas que el rol activo puede REVISAR (database/rol_funcion.sql).
+ *
+ * La agenda de un docente se reparte entre varios revisores: el Director
+ * revisa docencia y lo académico-administrativo de SUS programas, mientras
+ * que Investigación revisa su función en toda la institución.
+ *
+ * Regla, sin roles quemados en el código:
+ *   · rol CON filas en rol_funcion  → restringido a esas funciones
+ *   · rol SIN filas (Planeación, Consultor) → ve todas
+ *   · rol comodín → además, toda función que ningún rol reclame
+ *
+ * @returns {Promise<{restringido: boolean, funciones: string[]}>}
+ *   Si restringido es true y funciones está vacío, el rol no revisa nada.
+ */
+const alcanceFunciones = async (req) => {
+    if (req._alcanceFunciones) return req._alcanceFunciones;
+
+    const rolesActivos = rolesEfectivos(req);
+    const pool = require('../db/connection');
+
+    // Se normaliza en JS (no en SQL) para usar exactamente el mismo criterio
+    // de acentos y mayúsculas que rolesEfectivos.
+    const { rows } = await pool.query(`
+        SELECT r.nombre_rol, r.es_comodin, rf.funcion_sustantiva
+        FROM roles r
+        LEFT JOIN rol_funcion rf ON rf.id_rol = r.id_rol
+    `);
+
+    const funciones = new Set();
+    let esComodin = false;
+    let tieneFunciones = false;
+
+    for (const row of rows) {
+        if (!rolesActivos.includes(normalizar(row.nombre_rol))) continue;
+        if (row.es_comodin) esComodin = true;
+        if (row.funcion_sustantiva) {
+            funciones.add(row.funcion_sustantiva);
+            tieneFunciones = true;
+        }
+    }
+
+    let alcance;
+    if (!tieneFunciones) {
+        alcance = { restringido: false, funciones: [], esComodin: false };
+    } else {
+        if (esComodin) {
+            // La importación de Excel puede inventar funciones nuevas; sin esto
+            // quedarían sin revisor y la agenda nunca podría completarse.
+            const huerfanas = await pool.query(`
+                SELECT DISTINCT af.funcion_sustantiva
+                FROM asignacion_funciones af
+                WHERE af.funcion_sustantiva IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM rol_funcion rf
+                      WHERE rf.funcion_sustantiva = af.funcion_sustantiva
+                  )
+            `);
+            for (const h of huerfanas.rows) funciones.add(h.funcion_sustantiva);
+        }
+        // esComodin distingue al revisor integral (Director, que valida las 40h
+        // del contrato) del revisor de una sola función, que no debe ver el resto.
+        alcance = { restringido: true, funciones: [...funciones], esComodin };
+    }
+
+    req._alcanceFunciones = alcance;
+    return alcance;
+};
+
+/**
+ * ¿Puede el rol activo revisar esta función sustantiva?
+ * Es la validación autoritativa: verifyRole solo comprueba el nombre del rol,
+ * así que el permiso real sobre una función se decide aquí.
+ */
+const funcionEnAlcance = async (req, funcionSustantiva) => {
+    const alcance = await alcanceFunciones(req);
+    if (!alcance.restringido) return true;
+    return alcance.funciones.includes(funcionSustantiva);
+};
+
+module.exports = {
+    rolesEfectivos,
+    calcularAlcance,
+    alcanceProgramas,
+    docenteEnAlcance,
+    alcanceFunciones,
+    funcionEnAlcance,
+    normalizar,
+};

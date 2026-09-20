@@ -6,6 +6,12 @@ import { ShieldOff, Home } from 'lucide-react';
 
 interface ProtectedRouteProps {
     allowedRoles?: string[];
+    /**
+     * Deja pasar a cualquier rol que revise una función sustantiva, sin
+     * nombrarlo. Evita tener que listar aquí cada revisor nuevo: el dato sale
+     * de rol_funcion y viaja en sigap_active_role.funciones_revisa.
+     */
+    requiereRevisionFuncion?: boolean;
 }
 
 // Mapa de rutas → nombre de página en el catálogo de permisos
@@ -67,7 +73,7 @@ const AccesoRestringido = ({ pagina }: { pagina: string }) => (
     </div>
 );
 
-export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
+export const ProtectedRoute = ({ allowedRoles, requiereRevisionFuncion }: ProtectedRouteProps) => {
     const { isAuthenticated, user, isLoading } = useAuth();
     const location = useLocation();
 
@@ -225,6 +231,35 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
         const hasRole = allowedRoles.some(role => user.roles.includes(role));
         if (!hasRole) {
             return <Navigate to="/login" replace />;
+        }
+    }
+
+    // Módulo de revisión por función: el rol activo debe tener al menos una
+    // función sustantiva a su cargo. El backend valida lo mismo con rol_funcion,
+    // así que esto solo evita mostrar una pantalla vacía.
+    if (requiereRevisionFuncion) {
+        let revisaFunciones: string[] = [];
+        try {
+            const stored = localStorage.getItem('sigap_active_role');
+            if (stored) revisaFunciones = JSON.parse(stored).funciones_revisa || [];
+        } catch { /* sin rol activo guardado */ }
+
+        // Los roles con módulo propio (el Director también revisa funciones) van
+        // a su módulo: si no, entrarían aquí y verían el panel con su etiqueta.
+        const MODULO_PROPIO: Record<string, string> = {
+            director: '/director/dashboard',
+            planeacion: '/planeacion/dashboard',
+            admin: '/planeacion/dashboard',
+            docente: '/docente/dashboard',
+            consultor: '/consultor/dashboard',
+        };
+        const propio = Object.keys(MODULO_PROPIO).find(k => activeRole.includes(k));
+        if (propio) {
+            return <Navigate to={MODULO_PROPIO[propio]} replace />;
+        }
+
+        if (revisaFunciones.length === 0) {
+            return <Navigate to="/role-selection" replace />;
         }
     }
 

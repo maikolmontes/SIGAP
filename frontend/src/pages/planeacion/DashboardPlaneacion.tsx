@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
 // @ts-ignore
-import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios, updateUsuario, deleteUsuario } from '../../services/usuariosService'
+import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios, updateUsuario, deleteUsuario, getRolesAsignables } from '../../services/usuariosService'
 import { getPeriodos, getDocentesPeriodo } from '../../services/periodosService'
 import { getProgramas } from '../../services/programasService'
 import { getFacultades } from '../../services/facultadesService'
@@ -55,6 +55,8 @@ interface Docente {
 export default function DashboardPlaneacion() {
     const [docentes, setDocentes] = useState<Docente[]>([])
     const [programas, setProgramas] = useState<any[]>([])
+    // Roles asignables traídos de la BD; si falla la consulta se usan los base.
+    const [rolesDisponibles, setRolesDisponibles] = useState<string[]>(['Docente', 'Director', 'Consultor', 'Planeación'])
     const [facultades, setFacultades] = useState<any[]>([])
     // Permisos dinámicos del rol activo sobre el panel de agendas
     const permisosAgendas = usePermisosPagina('Dashboard Planeación')
@@ -98,7 +100,9 @@ export default function DashboardPlaneacion() {
         if (low.includes('planea') || low.includes('admin')) return 'planeacion';
         if (low.includes('direct')) return 'director';
         if (low.includes('consult')) return 'consultor';
-        return 'docente';
+        // Un rol nuevo (Investigación y los que sigan) conserva su nombre. Antes
+        // caía en 'docente' y al guardar se convertía en Docente en silencio.
+        return low || 'docente';
     };
 
     const rolEstaSeleccionado = (lista: string[], rolName: string) => {
@@ -151,7 +155,10 @@ export default function DashboardPlaneacion() {
             if (norm === 'planeacion') return 'Planeación';
             if (norm === 'director') return 'Director';
             if (norm === 'consultor') return 'Consultor';
-            return 'Docente';
+            if (norm === 'docente') return 'Docente';
+            // Roles nuevos (Investigación y los que sigan) conservan su nombre;
+            // antes se mostraban como "Docente" al abrir la edición.
+            return r.trim();
         });
         const uniqueMapped = Array.from(new Set(mappedRoles));
         setEditRolesSeleccionados(uniqueMapped.length > 0 ? uniqueMapped : ['Docente'])
@@ -257,6 +264,13 @@ export default function DashboardPlaneacion() {
 
     useEffect(() => {
         cargarDocentes()
+        // El catálogo de roles sale de la BD: un rol nuevo aparece sin tocar código.
+        getRolesAsignables()
+            .then((res: any) => {
+                const nombres = (res.data || []).map((r: any) => r.nombre_rol).filter(Boolean)
+                if (nombres.length > 0) setRolesDisponibles(nombres)
+            })
+            .catch(() => { /* se conservan los roles base */ })
         const interval = setInterval(() => {
             cargarDocentes()
         }, 30000)
@@ -892,7 +906,7 @@ export default function DashboardPlaneacion() {
                                     Roles de Acceso (Selecciona uno o varios) *
                                 </label>
                                 <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                    {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
+                                    {rolesDisponibles.map((rItem) => {
                                         const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
                                         return (
                                             <label

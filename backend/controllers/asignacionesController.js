@@ -11,7 +11,7 @@
  * cambio sobrevive al recálculo que hace la importación.
  */
 const pool = require('../db/connection');
-const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
+const { alcanceProgramas, docenteEnAlcance, alcanceFunciones } = require('../utils/rolActivo');
 
 // ================================================================
 // GET /api/director/asignaciones
@@ -33,6 +33,10 @@ const getAsignaciones = async (req, res) => {
 
         // Director → los programas que gestiona (uno o varios) · resto → todo
         const alcance = await alcanceProgramas(req);
+        // Funciones que este rol revisa. El comodín (Director) las ve todas y
+        // es el único que puede liberar la agenda al docente.
+        const alcanceFunc = await alcanceFunciones(req);
+        const puedeAprobar = !alcanceFunc.restringido || !!alcanceFunc.esComodin;
 
         let query = `
             SELECT
@@ -45,7 +49,9 @@ const getAsignaciones = async (req, res) => {
                 af.id_funciones,
                 af.funcion_sustantiva,
                 af.horas_funcion,
-                af.estado_agenda
+                af.estado_agenda,
+                af.visto_bueno_en,
+                COALESCE(vb.nombres || ' ' || vb.apellidos, NULL) AS visto_bueno_nombre
             FROM usuarios u
             JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
             JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
@@ -53,13 +59,28 @@ const getAsignaciones = async (req, res) => {
             JOIN programa_academico pa ON pa.id_programa = u.id_programa
             JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
+            LEFT JOIN usuarios vb ON vb.id_usuario = af.visto_bueno_por
             WHERE u.activo = TRUE
         `;
         const params = [idPeriodo];
 
+        let idx = 2;
         if (alcance.restringido) {
-            query += ` AND u.id_programa = ANY($2::int[])`;
+            query += ` AND u.id_programa = ANY($${idx}::int[])`;
             params.push(alcance.ids);
+            idx++;
+        }
+
+        // Un revisor de UNA función (Investigación) solo ve esa función; el
+        // Director, comodín, ve la agenda completa para validar las 40h.
+        const soloMisFunciones = alcanceFunc.restringido && !alcanceFunc.esComodin;
+        if (soloMisFunciones) {
+            if (alcanceFunc.funciones.length === 0) {
+                return res.json({ asignaciones: [], periodo, puede_aprobar: false });
+            }
+            query += ` AND af.funcion_sustantiva = ANY($${idx}::text[])`;
+            params.push(alcanceFunc.funciones);
+            idx++;
         }
 
         query += ` ORDER BY u.nombres, u.apellidos, af.funcion_sustantiva`;
@@ -67,7 +88,7 @@ const getAsignaciones = async (req, res) => {
         const result = await pool.query(query, params);
 
         if (result.rows.length === 0) {
-            return res.json({ asignaciones: [], periodo });
+            return res.json({ asignaciones: [], periodo, puede_aprobar: puedeAprobar });
         }
 
         // Traer todas las actividades de las funciones encontradas en una sola consulta
@@ -129,6 +150,11 @@ const getAsignaciones = async (req, res) => {
                 estado_agenda: row.estado_agenda,
                 // El docente ya diligenció esta función: corregirla la desincroniza
                 diligenciada: ['Aceptado', 'Aprobada'].includes(row.estado_agenda),
+                visto_bueno: !!row.visto_bueno_en,
+                visto_bueno_nombre: row.visto_bueno_nombre,
+                visto_bueno_en: row.visto_bueno_en,
+                // ¿Este rol puede dar el visto a esta función?
+                puede_dar_visto: puedeAprobar || alcanceFunc.funciones.includes(row.funcion_sustantiva),
                 actividades: actividadesPorFuncion.get(row.id_funciones) || []
             });
             docente.total_horas += horasFuncion;
@@ -146,7 +172,7 @@ const getAsignaciones = async (req, res) => {
             };
         });
 
-        res.json({ asignaciones, periodo });
+        res.json({ asignaciones, periodo, puede_aprobar: puedeAprobar });
 
     } catch (error) {
         console.error('Error en getAsignaciones:', error);
@@ -225,6 +251,25 @@ const corregirAsignaciones = async (req, res) => {
             });
         }
 
+        // Una vez aprobadas, las asignaciones ya están en manos del docente:
+        // cambiarle las horas por detrás descuadraría lo que esté diligenciando.
+        // La corrección solo se permite mientras estén en 'Por Aprobar'.
+        const yaLiberadas = await client.query(`
+            SELECT DISTINCT af.funcion_sustantiva
+            FROM asignacion_actividades aa
+            JOIN asignacion_funciones af ON af.id_funciones = aa.id_funciones
+            WHERE aa.id_asignacionact = ANY($1)
+              AND af.estado_agenda <> 'Por Aprobar'
+        `, [idsAct]);
+
+        if (yaLiberadas.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                error: 'Estas asignaciones ya fueron aprobadas y el docente las tiene a la vista, así que no se pueden modificar.',
+                funciones_bloqueadas: yaLiberadas.rows.map(r => r.funcion_sustantiva)
+            });
+        }
+
         // Aplicar la corrección
         for (const { idAct, horas } of cambios) {
             await client.query(
@@ -264,12 +309,25 @@ const corregirAsignaciones = async (req, res) => {
             GROUP BY tc.horas_contrato
         `, [idUsuario, idPeriodo]);
 
-        await client.query('COMMIT');
-
         const balance = balanceRes.rows[0] || {};
         const totalHoras = parseFloat(balance.total_horas) || 0;
         const horasContrato = parseFloat(balance.horas_contrato) || 0;
         const diferencia = totalHoras - horasContrato;
+
+        // La corrección no puede dejar al docente por encima de su contrato.
+        // Se valida DESPUÉS de recalcular y antes del COMMIT: así se compara el
+        // total real y, si excede, no queda nada guardado.
+        if (horasContrato > 0 && diferencia > 0.001) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                error: `Con esos valores el docente quedaría en ${totalHoras}h y su contrato es de ${horasContrato}h. Reduce ${diferencia.toFixed(diferencia % 1 === 0 ? 0 : 1)}h antes de guardar.`,
+                total_horas: totalHoras,
+                horas_contrato: horasContrato,
+                diferencia
+            });
+        }
+
+        await client.query('COMMIT');
 
         res.json({
             mensaje: 'Asignaciones corregidas correctamente.',
@@ -289,4 +347,179 @@ const corregirAsignaciones = async (req, res) => {
     }
 };
 
-module.exports = { getAsignaciones, corregirAsignaciones };
+// ================================================================
+// PUT /api/director/asignaciones/:id_usuario/aprobar
+// Libera las asignaciones al docente: pasan de 'Por Aprobar' a
+// 'Pendiente' y recién entonces aparecen en su agenda.
+// Solo afecta las funciones que este rol revisa.
+// ================================================================
+const aprobarAsignaciones = async (req, res) => {
+    const idUsuario = parseInt(req.params.id_usuario, 10);
+    if (isNaN(idUsuario)) {
+        return res.status(400).json({ error: 'ID de docente inválido.' });
+    }
+    if (!(await docenteEnAlcance(req, idUsuario))) {
+        return res.status(403).json({ error: 'Este docente no pertenece a los programas que gestionas.' });
+    }
+
+    // Liberar la agenda es exclusivo del Director (rol comodín). Un revisor de
+    // una sola función puede dar su visto bueno, pero no poner la agenda en
+    // manos del docente.
+    const alcanceAprobar = await alcanceFunciones(req);
+    if (alcanceAprobar.restringido && !alcanceAprobar.esComodin) {
+        return res.status(403).json({
+            error: 'Solo el Director de programa puede aprobar las asignaciones y liberar la agenda al docente.'
+        });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        if (periodoRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'No hay un período académico activo.' });
+        }
+        const idPeriodo = periodoRes.rows[0].id_periodo;
+
+        // Las horas deben cuadrar EXACTAS con el contrato antes de liberar la
+        // agenda: aprobar una carga descuadrada la deja mal para todo el periodo.
+        const balance = await client.query(`
+            SELECT COALESCE(SUM(af.horas_funcion), 0) AS total, tc.horas_contrato
+            FROM usuario_asignacion ua
+            JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
+            JOIN usuarios u ON u.id_usuario = ua.id_usuario
+            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            WHERE ua.id_usuario = $1
+            GROUP BY tc.horas_contrato
+        `, [idUsuario, idPeriodo]);
+
+        if (balance.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Este docente no tiene asignaciones en el período activo.' });
+        }
+
+        const total = parseFloat(balance.rows[0].total) || 0;
+        const horasContrato = parseFloat(balance.rows[0].horas_contrato) || 0;
+
+        if (horasContrato > 0 && Math.abs(total - horasContrato) > 0.001) {
+            await client.query('ROLLBACK');
+            const diferencia = total - horasContrato;
+            return res.status(400).json({
+                error: diferencia > 0
+                    ? `Las horas del docente exceden su contrato (${total}h de ${horasContrato}h). Corrige las horas antes de aprobar.`
+                    : `Al docente le faltan horas para completar su contrato (${total}h de ${horasContrato}h). Corrige las horas antes de aprobar.`,
+                total_horas: total,
+                horas_contrato: horasContrato,
+                diferencia
+            });
+        }
+
+        // Libera la agenda COMPLETA del docente, no solo las funciones de este
+        // rol: la compuerta de semana 0 es sobre la agenda entera. Liberar por
+        // función dejaba al docente viendo media agenda mientras otro revisor
+        // no aprobara la suya.
+        const result = await client.query(`
+            UPDATE asignacion_funciones af
+            SET estado_agenda = 'Pendiente',
+                asignacion_aprobada_por = $1,
+                asignacion_aprobada_en = NOW()
+            FROM usuario_asignacion ua
+            WHERE ua.id_funciones = af.id_funciones
+              AND ua.id_usuario = $2
+              AND af.id_periodo = $3
+              AND af.estado_agenda = 'Por Aprobar'
+            RETURNING af.id_funciones
+        `, [req.user.id, idUsuario, idPeriodo]);
+
+        await client.query('COMMIT');
+
+        res.json({
+            mensaje: 'Asignaciones aprobadas. El docente ya puede ver y diligenciar su agenda.',
+            funciones_aprobadas: result.rowCount,
+            total_horas: total,
+            horas_contrato: horasContrato
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en aprobarAsignaciones:', error);
+        res.status(500).json({ error: 'Error al aprobar las asignaciones.', detalles: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+// ================================================================
+// PUT /api/director/asignaciones/:id_usuario/funcion/:id_funciones/visto
+// Marca (o quita) el visto bueno de UNA función sustantiva.
+// Body opcional: { visto: false } para retirarlo.
+//
+// Es solo una constancia de revisión: NO libera la agenda al docente.
+// Eso lo hace únicamente el Director con "Aprobar asignaciones".
+// ================================================================
+const marcarVistoBueno = async (req, res) => {
+    const idUsuario = parseInt(req.params.id_usuario, 10);
+    const idFunciones = parseInt(req.params.id_funciones, 10);
+    const quitar = req.body?.visto === false;
+
+    if (isNaN(idUsuario) || isNaN(idFunciones)) {
+        return res.status(400).json({ error: 'Identificadores inválidos.' });
+    }
+    if (!(await docenteEnAlcance(req, idUsuario))) {
+        return res.status(403).json({ error: 'Este docente no pertenece a los programas que gestionas.' });
+    }
+
+    try {
+        const periodoRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        if (periodoRes.rows.length === 0) {
+            return res.status(400).json({ error: 'No hay un período académico activo.' });
+        }
+        const idPeriodo = periodoRes.rows[0].id_periodo;
+
+        // La función debe ser de este docente y del periodo activo
+        const funcRes = await pool.query(`
+            SELECT af.funcion_sustantiva
+            FROM asignacion_funciones af
+            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            WHERE af.id_funciones = $1 AND ua.id_usuario = $2 AND af.id_periodo = $3
+        `, [idFunciones, idUsuario, idPeriodo]);
+
+        if (funcRes.rows.length === 0) {
+            return res.status(404).json({ error: 'La función no pertenece a este docente en el período activo.' });
+        }
+        const funcion = funcRes.rows[0].funcion_sustantiva;
+
+        // Puede darlo el revisor de esa función o quien aprueba (el Director).
+        const alcanceFunc = await alcanceFunciones(req);
+        const esComodin = !alcanceFunc.restringido || !!alcanceFunc.esComodin;
+        const revisaEstaFuncion = alcanceFunc.funciones.includes(funcion);
+
+        if (!esComodin && !revisaEstaFuncion) {
+            return res.status(403).json({ error: `Tu rol no revisa la función "${funcion}".` });
+        }
+
+        const result = await pool.query(`
+            UPDATE asignacion_funciones
+            SET visto_bueno_por = $1, visto_bueno_en = $2
+            WHERE id_funciones = $3
+            RETURNING visto_bueno_en
+        `, [quitar ? null : req.user.id, quitar ? null : new Date(), idFunciones]);
+
+        res.json({
+            mensaje: quitar
+                ? `Se retiró el visto bueno de "${funcion}".`
+                : `Diste el visto bueno a "${funcion}". El Director sigue siendo quien libera la agenda.`,
+            funcion_sustantiva: funcion,
+            visto_bueno: !quitar,
+            visto_bueno_en: result.rows[0]?.visto_bueno_en || null
+        });
+
+    } catch (error) {
+        console.error('Error en marcarVistoBueno:', error);
+        res.status(500).json({ error: 'Error al registrar el visto bueno.', detalles: error.message });
+    }
+};
+
+module.exports = { getAsignaciones, corregirAsignaciones, aprobarAsignaciones, marcarVistoBueno };

@@ -455,7 +455,7 @@ const importarAsignaciones = async (req, res) => {
                 const newFunc = await client.query(`
                     INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
                     VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
-                `, [funcionSustantivaStr, 0, 'Pendiente', 'Asignado automáticamente vía Excel', idPeriodoActivo]);
+                `, [funcionSustantivaStr, 0, 'Por Aprobar', 'Asignado automáticamente vía Excel', idPeriodoActivo]);
                 idFunciones = newFunc.rows[0].id_funciones;
                 await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
             }
@@ -724,7 +724,7 @@ const actualizarImportacion = async (req, res) => {
                         const newFunc = await client.query(`
                             INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
                             VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
-                        `, [funcionSustantivaStr, 0, 'Pendiente', 'Agregado vía actualización Excel', idPeriodoActivo]);
+                        `, [funcionSustantivaStr, 0, 'Por Aprobar', 'Agregado vía actualización Excel', idPeriodoActivo]);
                         idFunciones = newFunc.rows[0].id_funciones;
                         await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
                     }

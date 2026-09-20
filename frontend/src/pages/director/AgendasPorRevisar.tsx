@@ -2,8 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import { Search, Filter, Eye, AlertTriangle, CheckCircle2, XCircle, Clock, ChevronDown } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import AsignacionesPorCorregir from '../../components/director/AsignacionesPorCorregir';
+import PanelAgendas from '../../components/director/PanelAgendas';
+import PanelSemana from '../../components/director/PanelSemana';
+
+
+type TabId = 'asignaciones' | 'diligenciadas' | 'agendas' | 'semana8' | 'semana16';
 
 const estadoBadge: Record<string, { bg: string; text: string; dot: string }> = {
     Pendiente: { bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-500' },
@@ -20,9 +25,15 @@ export default function AgendasPorRevisar() {
     const [filtroPrograma, setFiltroPrograma] = useState('');
     const [busqueda, setBusqueda] = useState('');
     const [showFilters, setShowFilters] = useState(false);
-    // 'asignaciones' = lo que cargó Planeación (el Director corrige horas)
-    // 'agendas'      = agendas ya diligenciadas por el docente (aprobar / devolver)
-    const [tab, setTab] = useState<'asignaciones' | 'agendas'>('asignaciones');
+    // 'asignaciones'  = lo que cargó Planeación (aprobar y corregir horas)
+    // 'diligenciadas' = agendas ya diligenciadas (aprobar / devolver)
+    // 'agendas'       = consulta de la agenda de semana 0
+    // 'semana8'/'16'  = seguimiento de cada corte
+    // Al volver desde el detalle de un corte se reabre la pestaña de origen,
+    // en vez de mandar al usuario de vuelta a la primera.
+    const location = useLocation();
+    const tabInicial = (location.state as any)?.tab as TabId | undefined;
+    const [tab, setTab] = useState<TabId>(tabInicial || 'asignaciones');
     const navigate = useNavigate();
 
     const cargarAgendas = useCallback(async () => {
@@ -65,7 +76,7 @@ export default function AgendasPorRevisar() {
                 <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">Agendas por Revisar</h1>
                 <p className="text-sm text-gray-500 mt-1">
                     Periodo: {periodoLabel}
-                    {tab === 'agendas' && ` · ${agendas.length} docentes con agenda`}
+                    {tab === 'diligenciadas' && ` · ${agendas.length} docentes con agenda`}
                 </p>
             </div>
 
@@ -80,17 +91,47 @@ export default function AgendasPorRevisar() {
                     Asignaciones de Planeación
                 </button>
                 <button
-                    onClick={() => setTab('agendas')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-all ${tab === 'agendas'
+                    onClick={() => setTab('diligenciadas')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-all ${tab === 'diligenciadas'
                         ? 'bg-[#1a2744] text-white shadow-md'
                         : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
                 >
                     Agendas Diligenciadas
                 </button>
+                <button
+                    onClick={() => setTab('agendas')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-all ${tab === 'agendas'
+                        ? 'bg-[#1a2744] text-white shadow-md'
+                        : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
+                >
+                    Agendas Semana 0
+                </button>
+                <button
+                    onClick={() => setTab('semana8')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-all ${tab === 'semana8'
+                        ? 'bg-[#1a2744] text-white shadow-md'
+                        : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
+                >
+                    Agenda Semana 8
+                </button>
+                <button
+                    onClick={() => setTab('semana16')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-all ${tab === 'semana16'
+                        ? 'bg-[#1a2744] text-white shadow-md'
+                        : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
+                >
+                    Agenda Semana 16
+                </button>
             </div>
 
             {tab === 'asignaciones' ? (
                 <AsignacionesPorCorregir />
+            ) : tab === 'agendas' ? (
+                <PanelAgendas />
+            ) : tab === 'semana8' ? (
+                <PanelSemana semana="8" />
+            ) : tab === 'semana16' ? (
+                <PanelSemana semana="16" />
             ) : (
             <>
             {/* Tarjetas resumen */}

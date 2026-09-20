@@ -15,6 +15,9 @@ import Notificaciones from './pages/planeacion/Notificaciones'
 import DashboardDirector from './pages/director/DashboardDirector'
 import AgendasPorRevisar from './pages/director/AgendasPorRevisar'
 import DetalleAgenda from './pages/director/DetalleAgenda'
+import RevisionSemana from './pages/director/RevisionSemana'
+import DashboardRevision from './pages/revision/DashboardRevision'
+import AgendasRevision from './pages/revision/AgendasRevision'
 import ReportesDirector from './pages/director/ReportesDirector'
 import ObservacionesDirector from './pages/director/ObservacionesDirector'
 import DashboardDocente from './pages/docente/Dashboard'
@@ -70,6 +73,7 @@ function App() {
           <Route path="/director/dashboard" element={<DashboardDirector />} />
           <Route path="/director/agendas" element={<AgendasPorRevisar />} />
           <Route path="/director/agendas/:id" element={<DetalleAgenda />} />
+          <Route path="/director/agendas/:id/semana/:semana" element={<RevisionSemana />} />
           <Route path="/director/reportes" element={<ReportesDirector />} />
           <Route path="/director/observaciones" element={<ObservacionesDirector />} />
           <Route path="/director/analitica" element={<Analitica rol="director" />} />
@@ -82,6 +86,15 @@ function App() {
           <Route path="/docente/avance-semana-8" element={<AvanceSemana semana="8" />} />
           <Route path="/docente/avance-semana-16" element={<AvanceSemana semana="16" />} />
           <Route path="/docente/evidencias" element={<Evidencias />} />
+        </Route>
+
+        {/* Revisores de una función sustantiva (Investigación y los que se
+            creen después). No se listan por nombre: ProtectedRoute deja pasar
+            a cualquier rol con funciones asignadas en rol_funcion. */}
+        <Route element={<ProtectedRoute requiereRevisionFuncion />}>
+          <Route path="/revision/dashboard" element={<DashboardRevision />} />
+          <Route path="/revision/agendas" element={<AgendasRevision />} />
+          <Route path="/revision/agendas/:id" element={<DetalleAgenda modulo="revision" />} />
         </Route>
 
         {/* Consultor */}
