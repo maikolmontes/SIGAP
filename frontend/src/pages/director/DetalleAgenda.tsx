@@ -119,6 +119,13 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
     const [obsEditando, setObsEditando] = useState<Record<string, boolean>>({});
     const [obsPanelAbierto, setObsPanelAbierto] = useState<Record<number, boolean>>({});
 
+    // Corrección de horas por actividad desde la propia revisión: el Director
+    // detecta aquí que Planeación cargó mal unas horas y las arregla sin salir
+    // de la agenda. Solo él; un revisor de una función no toca horas.
+    const [horasEditando, setHorasEditando] = useState<number | null>(null);
+    const [horasValor, setHorasValor] = useState<string>('');
+    const [horasGuardando, setHorasGuardando] = useState(false);
+
     const cargarDetalle = useCallback(async () => {
         setLoading(true);
         try {
@@ -252,6 +259,36 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
             console.error('Error guardando observación:', e);
         } finally {
             setObsGuardando(prev => ({ ...prev, [key]: false }));
+        }
+    };
+
+    const abrirEditorHoras = (act: any) => {
+        setHorasEditando(act.id_asignacionact);
+        setHorasValor(String(parseFloat(act.horas_rol) || 0));
+    };
+
+    const guardarHorasActividad = async (act: any) => {
+        const horas = parseFloat(horasValor);
+        if (isNaN(horas) || horas < 0) {
+            setActionResult({ tipo: 'error', msg: 'Las horas deben ser un número mayor o igual a cero.' });
+            return;
+        }
+
+        setHorasGuardando(true);
+        try {
+            // 'forzar' porque aquí la agenda ya está en manos del docente: es
+            // justamente el momento en que el Director interviene.
+            const res = await api.put(`/director/asignaciones/${data.docente.id_usuario}`, {
+                actividades: [{ id_asignacionact: act.id_asignacionact, horas_rol: horas }],
+                forzar: true,
+            });
+            setHorasEditando(null);
+            setActionResult({ tipo: 'success', msg: res.data?.mensaje || 'Horas actualizadas.' });
+            cargarDetalle();
+        } catch (e: any) {
+            setActionResult({ tipo: 'error', msg: e.response?.data?.error || 'No se pudieron actualizar las horas.' });
+        } finally {
+            setHorasGuardando(false);
         }
     };
 
@@ -728,10 +765,50 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
                                                             </div>
 
                                                             <div className="shrink-0">
-                                                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-extrabold">
-                                                                    <Clock className="w-3.5 h-3.5" />
-                                                                    {parseFloat(act.horas_rol).toFixed(0)} horas semanales
-                                                                </span>
+                                                                {horasEditando === act.id_asignacionact ? (
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            step="0.5"
+                                                                            autoFocus
+                                                                            value={horasValor}
+                                                                            onChange={e => setHorasValor(e.target.value)}
+                                                                            className="w-20 px-2 py-1.5 border border-blue-300 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-500"
+                                                                        />
+                                                                        <span className="text-xs text-slate-500">h</span>
+                                                                        <button
+                                                                            onClick={() => guardarHorasActividad(act)}
+                                                                            disabled={horasGuardando}
+                                                                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-lg transition-colors"
+                                                                        >
+                                                                            {horasGuardando ? '...' : 'Guardar'}
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => setHorasEditando(null)}
+                                                                            className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors"
+                                                                        >
+                                                                            Cancelar
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-extrabold">
+                                                                            <Clock className="w-3.5 h-3.5" />
+                                                                            {parseFloat(act.horas_rol).toFixed(0)} horas semanales
+                                                                        </span>
+                                                                        {/* Corregir horas es del Director, no del revisor de una función */}
+                                                                        {!esRevision && (
+                                                                            <button
+                                                                                onClick={() => abrirEditorHoras(act)}
+                                                                                title="Corregir las horas de esta actividad"
+                                                                                className="w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-600 flex items-center justify-center transition-colors"
+                                                                            >
+                                                                                <Pencil className="w-3.5 h-3.5" />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
 

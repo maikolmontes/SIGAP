@@ -8,23 +8,21 @@ import {
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
+// Este panel mide la revisión de los cortes (semana 8 y 16), no la
+// aprobación de la agenda: el rol revisor no aprueba agendas.
 const COLORES_ESTADO: Record<string, string> = {
-    'Aprobada': '#16a34a',
-    'Aceptado': '#2563eb',
-    'Parcial': '#8b5cf6',
-    'Devuelta': '#f97316',
-    'Pendiente': '#ef4444',
-    'Sin asignar': '#9ca3af',
+    'Revisado': '#16a34a',
+    'Revisado parcial': '#2563eb',
+    'Pendiente por revisar': '#f59e0b',
+    'Sin reportar': '#9ca3af',
 };
 
-const badgeEstado = (estado: string) => {
+const badgeRevision = (estado: string) => {
     switch (estado) {
-        case 'Aprobada':  return 'bg-green-100 text-green-700';
-        case 'Aceptado':  return 'bg-blue-100 text-blue-700';
-        case 'Parcial':   return 'bg-violet-100 text-violet-700';
-        case 'Devuelta':  return 'bg-orange-100 text-orange-700';
-        case 'Pendiente': return 'bg-red-100 text-red-700';
-        default:          return 'bg-gray-100 text-gray-600';
+        case 'Revisado':              return 'bg-green-100 text-green-700';
+        case 'Revisado parcial':      return 'bg-blue-100 text-blue-700';
+        case 'Pendiente por revisar': return 'bg-amber-100 text-amber-700';
+        default:                      return 'bg-gray-100 text-gray-500';
     }
 };
 
@@ -91,12 +89,25 @@ export default function DashboardRevision() {
     // Las métricas se calculan sobre MI parte de la revisión, no sobre la
     // agenda completa: al revisor de Investigación no le sirve saber que
     // al docente le falta que el Director apruebe docencia.
-    const conteo = (estado: string) => filtradas.filter(a => a.estado_mi_revision === estado).length;
-    const porRevisar = filtradas.filter(a =>
-        ['Pendiente', 'Aceptado', 'Devuelta', 'Parcial'].includes(a.estado_mi_revision)
-    ).length;
+    //
+    // Y se miden sobre los cortes: un docente "aprobado" en la agenda de
+    // semana 0 sigue pendiente de revisión en la semana 8.
+    const corteDe = (a: any, s: '8' | '16') =>
+        (s === '8' ? a.corte_8 : a.corte_16) || { reportados: 0, total: 0, revision: 'Sin reportar' };
+    const reporto = (a: any, s: '8' | '16') => (corteDe(a, s).reportados || 0) > 0;
+    const revisionDe = (a: any, s: '8' | '16') =>
+        reporto(a, s) ? (corteDe(a, s).revision || 'Pendiente por revisar') : 'Sin reportar';
 
-    const datosEstado = ['Aprobada', 'Aceptado', 'Pendiente', 'Devuelta', 'Parcial']
+    // El dashboard resume el corte que está en curso; si ninguno está abierto,
+    // el último con reportes.
+    const semanaFoco: '8' | '16' = filtradas.some(a => reporto(a, '16')) ? '16' : '8';
+
+    const conteo = (estado: string) =>
+        filtradas.filter(a => revisionDe(a, semanaFoco) === estado).length;
+    const reportaron = filtradas.filter(a => reporto(a, semanaFoco)).length;
+    const porRevisar = conteo('Pendiente por revisar') + conteo('Revisado parcial');
+
+    const datosEstado = ['Revisado', 'Revisado parcial', 'Pendiente por revisar', 'Sin reportar']
         .map(e => ({ name: e, value: conteo(e) }))
         .filter(d => d.value > 0);
 
@@ -166,9 +177,9 @@ export default function DashboardRevision() {
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
                         {[
                             { label: 'Docentes a mi cargo', value: filtradas.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+                            { label: `Reportaron semana ${semanaFoco}`, value: reportaron, icon: ClipboardList, color: 'text-blue-600', bg: 'bg-blue-50' },
                             { label: 'Por revisar', value: porRevisar, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
-                            { label: 'Ya diligenciadas', value: conteo('Aceptado'), icon: ClipboardList, color: 'text-blue-600', bg: 'bg-blue-50' },
-                            { label: 'Aprobadas por mí', value: conteo('Aprobada'), icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
+                            { label: 'Revisados por mí', value: conteo('Revisado'), icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
                         ].map(m => (
                             <div key={m.label} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md hover:-translate-y-0.5 transition-all">
                                 <div className={`w-10 h-10 ${m.bg} rounded-xl flex items-center justify-center mb-3`}>
@@ -219,14 +230,16 @@ export default function DashboardRevision() {
                                             <th className="px-5 py-3 text-left font-bold">Programa</th>
                                             {/* El nombre sale del rol activo: con otro revisor dirá "Horas Docencia", etc. */}
                                             <th className="px-5 py-3 text-center font-bold">Horas {funciones.join(' / ') || 'de mi función'}</th>
-                                            <th className="px-5 py-3 text-center font-bold">Mi revisión</th>
+                                            {/* La revisión es por corte: la semana 8 no cuenta para la 16 */}
+                                            <th className="px-5 py-3 text-center font-bold">Semana 8</th>
+                                            <th className="px-5 py-3 text-center font-bold">Semana 16</th>
                                             <th className="px-5 py-3 text-center font-bold"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-50">
                                         {filtradas.length === 0 ? (
                                             <tr>
-                                                <td colSpan={6} className="px-5 py-12 text-center text-gray-400 text-sm">
+                                                <td colSpan={7} className="px-5 py-12 text-center text-gray-400 text-sm">
                                                     {agendas.length === 0
                                                         ? 'Ningún docente tiene asignada tu función en este periodo.'
                                                         : 'No se encontraron docentes con ese filtro.'}
@@ -235,6 +248,14 @@ export default function DashboardRevision() {
                                         ) : filtradas.map(a => {
                                             const mias = (a.funciones || []).filter((f: any) => f.en_alcance);
                                             const horasMias = mias.reduce((s: number, f: any) => s + (f.horas_funcion || 0), 0);
+                                            // Solo se entra a revisar el corte que el docente ya guardó;
+                                            // si no reportó nada, no hay qué marcar como revisado.
+                                            const semanaRevisable: '8' | '16' | null =
+                                                reporto(a, '8') && revisionDe(a, '8') !== 'Revisado' ? '8'
+                                                : reporto(a, '16') && revisionDe(a, '16') !== 'Revisado' ? '16'
+                                                : reporto(a, '16') ? '16'
+                                                : reporto(a, '8') ? '8'
+                                                : null;
                                             return (
                                                 <tr key={a.id_usuario} className="hover:bg-blue-50/40 transition-colors">
                                                     <td className="px-5 py-3.5">
@@ -253,18 +274,24 @@ export default function DashboardRevision() {
                                                         <span className="text-sm font-bold text-gray-700">{horasMias}h</span>
                                                         <div className="text-[10px] text-gray-400">{mias.length} func.</div>
                                                     </td>
+                                                    {(['8', '16'] as const).map(s => (
+                                                        <td key={s} className="px-5 py-3.5 text-center">
+                                                            <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${badgeRevision(revisionDe(a, s))}`}>
+                                                                {revisionDe(a, s)}
+                                                            </span>
+                                                        </td>
+                                                    ))}
                                                     <td className="px-5 py-3.5 text-center">
-                                                        <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${badgeEstado(a.estado_mi_revision)}`}>
-                                                            {a.estado_mi_revision}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-5 py-3.5 text-center">
-                                                        <button
-                                                            onClick={() => navigate(`/revision/agendas/${a.id_usuario}`)}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
-                                                        >
-                                                            <Eye className="w-3.5 h-3.5" /> Revisar
-                                                        </button>
+                                                        {semanaRevisable ? (
+                                                            <button
+                                                                onClick={() => navigate(`/revision/semanas/${semanaRevisable}/docente/${a.id_usuario}`)}
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+                                                            >
+                                                                <Eye className="w-3.5 h-3.5" /> Revisar semana {semanaRevisable}
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-xs text-gray-400">Sin avance reportado</span>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             );
@@ -280,7 +307,7 @@ export default function DashboardRevision() {
                                 <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">
                                     <PieIcon className="w-4 h-4 text-blue-500" /> Estado de mi revisión
                                 </h3>
-                                <p className="text-xs text-gray-400 mb-3">Solo la función a tu cargo</p>
+                                <p className="text-xs text-gray-400 mb-3">Semana {semanaFoco} · solo la función a tu cargo</p>
                                 {datosEstado.length > 0 ? (
                                     <>
                                         <div className="h-44">

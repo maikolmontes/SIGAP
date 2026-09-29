@@ -1,7 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { agendaDiligenciada } from './agendaDiligenciada';
 import { Search, RefreshCw, Eye, Clock, Lock, Unlock } from 'lucide-react';
+
+const badgeRevision = (estado: string) => {
+    switch (estado) {
+        case 'Revisado':              return 'bg-green-100 text-green-700';
+        case 'Revisado parcial':      return 'bg-blue-100 text-blue-700';
+        case 'Pendiente por revisar': return 'bg-amber-100 text-amber-700';
+        default:                      return 'bg-gray-100 text-gray-500';
+    }
+};
 
 const badgeCorte = (estado: string) => {
     switch (estado) {
@@ -23,12 +33,13 @@ const num = (v: any) => {
 // ─────────────────────────────────────────────────────────────
 // Panel de un corte (semana 8 o 16): qué reportó cada docente.
 // ─────────────────────────────────────────────────────────────
-export default function PanelSemana({ semana }: { semana: '8' | '16' }) {
+export default function PanelSemana({ semana, modulo = 'director' }: { semana: '8' | '16'; modulo?: 'director' | 'revision' }) {
     const [agendas, setAgendas] = useState<any[]>([]);
     const [periodo, setPeriodo] = useState<any>(null);
     const [semanaInfo, setSemanaInfo] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [busqueda, setBusqueda] = useState('');
+    const [filtroPrograma, setFiltroPrograma] = useState('');
     const navigate = useNavigate();
 
     const cargar = useCallback(async () => {
@@ -55,17 +66,34 @@ export default function PanelSemana({ semana }: { semana: '8' | '16' }) {
 
     const corteDe = (a: any) => (semana === '8' ? a.corte_8 : a.corte_16) || { estado: 'Sin indicadores', reportados: 0, total: 0 };
 
-    // El corte solo aplica a docentes que ya diligenciaron su agenda:
-    // sin indicadores definidos en semana 0 no hay nada que reportar.
+    // El corte solo aplica a docentes que ya aceptaron su agenda: es el mismo
+    // criterio de la semana 0, para que las tres pestañas listen a los mismos
+    // docentes. Además hacen falta indicadores, o no hay nada que reportar.
+    //
+    // Al revisor de una función además solo le interesan los que YA subieron
+    // algo en este corte: lo que no se ha reportado no es suyo por revisar.
     const conAgenda = useMemo(
-        () => agendas.filter(a => (a.total_indicadores || 0) > 0),
-        [agendas]
+        () => agendas.filter(a => {
+            if (!agendaDiligenciada(a)) return false;
+            if ((a.total_indicadores || 0) === 0) return false;
+            if (modulo !== 'revision') return true;
+            const c = semana === '8' ? a.corte_8 : a.corte_16;
+            return (c?.reportados || 0) > 0;
+        }),
+        [agendas, modulo, semana]
     );
 
-    const filtradas = conAgenda.filter(a =>
-        a.nombre_docente?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase())
+    const programas = useMemo(
+        () => [...new Set(conAgenda.map(a => a.nombre_programa).filter(Boolean))].sort(),
+        [conAgenda]
     );
+
+    const filtradas = conAgenda.filter(a => {
+        const coincide = a.nombre_docente?.toLowerCase().includes(busqueda.toLowerCase())
+            || a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase());
+        const delPrograma = !filtroPrograma || a.nombre_programa === filtroPrograma;
+        return coincide && delPrograma;
+    });
 
     const periodoLabel = periodo ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}` : 'Sin periodo';
 
@@ -120,7 +148,8 @@ export default function PanelSemana({ semana }: { semana: '8' | '16' }) {
             <div className="grid grid-cols-3 gap-4 mb-6">
                 {[
                     { label: 'Docentes con agenda', value: conAgenda.length, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-                    { label: `Reportaron semana ${semana}`, value: completados, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
+                    { label: modulo === 'revision' ? 'Reportaron completo' : `Reportaron semana ${semana}`,
+                      value: completados, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
                     // Con el corte cerrado un pendiente es un incumplimiento;
                     // con el corte sin abrir, simplemente todavía no les toca.
                     { label: estadoCorte === 'sin_abrir' ? 'Aún no reportan' : 'Sin reportar', value: pendientes,
@@ -146,6 +175,15 @@ export default function PanelSemana({ semana }: { semana: '8' | '16' }) {
                             className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
                         />
                     </div>
+                    <div className="flex items-center gap-2">
+                    <select
+                        value={filtroPrograma}
+                        onChange={e => setFiltroPrograma(e.target.value)}
+                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:border-blue-400"
+                    >
+                        <option value="">Todos los programas</option>
+                        {programas.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
                     <button
                         onClick={cargar}
                         disabled={loading}
@@ -153,6 +191,7 @@ export default function PanelSemana({ semana }: { semana: '8' | '16' }) {
                     >
                         <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Actualizar
                     </button>
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -165,11 +204,17 @@ export default function PanelSemana({ semana }: { semana: '8' | '16' }) {
                             <Clock className="w-12 h-12 mx-auto mb-3 opacity-30" />
                             <p className="font-medium">
                                 {conAgenda.length === 0
-                                    ? 'Ningún docente ha diligenciado su agenda todavía'
+                                    ? (modulo === 'revision'
+                                        ? `Ningún docente ha subido su avance de la semana ${semana} todavía`
+                                        : 'Ningún docente ha diligenciado su agenda todavía')
                                     : 'No se encontraron docentes'}
                             </p>
                             {conAgenda.length === 0 && (
-                                <p className="text-sm mt-1">El corte se puede revisar cuando definan sus indicadores.</p>
+                                <p className="text-sm mt-1">
+                                    {modulo === 'revision'
+                                        ? 'Aparecerán aquí en cuanto guarden su avance semanal.'
+                                        : 'El corte se puede revisar cuando definan sus indicadores.'}
+                                </p>
                             )}
                         </div>
                     ) : (
@@ -180,6 +225,7 @@ export default function PanelSemana({ semana }: { semana: '8' | '16' }) {
                                     <th className="px-5 py-3 text-left font-bold">Programa</th>
                                     <th className="px-5 py-3 text-center font-bold">Periodo</th>
                                     <th className="px-5 py-3 text-center font-bold">Reporte S{semana}</th>
+                                    <th className="px-5 py-3 text-center font-bold">Revisión</th>
                                     <th className="px-5 py-3 text-center font-bold">Acciones</th>
                                 </tr>
                             </thead>
@@ -216,8 +262,13 @@ export default function PanelSemana({ semana }: { semana: '8' | '16' }) {
                                                 </div>
                                             </td>
                                             <td className="px-5 py-3.5 text-center">
+                                                <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${badgeRevision(corte.revision || 'Sin reportar')}`}>
+                                                    {corte.revision || 'Sin reportar'}
+                                                </span>
+                                            </td>
+                                            <td className="px-5 py-3.5 text-center">
                                                 <button
-                                                    onClick={() => navigate(`/director/agendas/${a.id_usuario}/semana/${semana}`)}
+                                                    onClick={() => navigate(modulo === 'revision' ? `/revision/semanas/${semana}/docente/${a.id_usuario}` : `/director/agendas/${a.id_usuario}/semana/${semana}`)}
                                                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
                                                 >
                                                     <Eye className="w-3.5 h-3.5" /> Revisar

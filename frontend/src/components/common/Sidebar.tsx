@@ -93,7 +93,9 @@ const menuRevision: MenuItem[] = [
     { label: 'Principal', isHeader: true },
     { label: 'Dashboard', path: '/revision/dashboard', icon: LayoutDashboard },
     { label: 'Supervisión', isHeader: true },
-    { label: 'Agendas por revisar', path: '/revision/agendas', icon: ClipboardList },
+    // Una sola entrada, igual que el Director: los cortes son pestañas
+    // dentro de la página, no un desplegable en el menú.
+    { label: 'Avances por revisar', path: '/revision/semanas', icon: ClipboardList },
 ]
 
 const PATH_TO_PAGINA: Record<string, string> = {
@@ -408,6 +410,10 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                         }
                         if (item.path === '/consultor/agendas') {
                             return location.pathname.startsWith('/consultor/agendas');
+                        }
+                        // La pestaña del corte viaja en la ruta (/revision/semanas/8)
+                        if (item.path === '/revision/semanas') {
+                            return location.pathname.startsWith('/revision/semanas');
                         }
                         return location.pathname === item.path;
                     })();

@@ -17,7 +17,7 @@ import AgendasPorRevisar from './pages/director/AgendasPorRevisar'
 import DetalleAgenda from './pages/director/DetalleAgenda'
 import RevisionSemana from './pages/director/RevisionSemana'
 import DashboardRevision from './pages/revision/DashboardRevision'
-import AgendasRevision from './pages/revision/AgendasRevision'
+import AvancesRevision from './pages/revision/AvancesRevision'
 import ReportesDirector from './pages/director/ReportesDirector'
 import ObservacionesDirector from './pages/director/ObservacionesDirector'
 import DashboardDocente from './pages/docente/Dashboard'
@@ -93,7 +93,9 @@ function App() {
             a cualquier rol con funciones asignadas en rol_funcion. */}
         <Route element={<ProtectedRoute requiereRevisionFuncion />}>
           <Route path="/revision/dashboard" element={<DashboardRevision />} />
-          <Route path="/revision/agendas" element={<AgendasRevision />} />
+          <Route path="/revision/semanas" element={<AvancesRevision />} />
+          <Route path="/revision/semanas/:semana" element={<AvancesRevision />} />
+          <Route path="/revision/semanas/:semana/docente/:id" element={<RevisionSemana modulo="revision" />} />
           <Route path="/revision/agendas/:id" element={<DetalleAgenda modulo="revision" />} />
         </Route>
 

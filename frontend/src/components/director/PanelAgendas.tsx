@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
 import api from '../../services/api';
+import { agendaDiligenciada } from './agendaDiligenciada';
 import {
     Search, RefreshCw, Info, Clock, X, ChevronDown, ChevronRight,
     GraduationCap, BookOpen, FlaskConical, Users, Briefcase, Layers,
@@ -286,12 +287,10 @@ export default function PanelAgendas() {
 
     useEffect(() => { cargar(); }, [cargar]);
 
-    // Solo las que el docente ya terminó de diligenciar. Quedan fuera
-    // las que siguen en Pendiente (aprobadas pero vacías) o Por Aprobar.
-    const completadas = useMemo(
-        () => agendas.filter(a => ['Aceptado', 'Aprobada', 'Parcial'].includes(a.estado_general)),
-        [agendas]
-    );
+    // Solo las que el docente ya terminó de diligenciar. Mismo criterio que
+    // usan los cortes 8 y 16, para que los tres paneles muestren los mismos
+    // docentes.
+    const completadas = useMemo(() => agendas.filter(agendaDiligenciada), [agendas]);
 
     const programas = useMemo(
         () => [...new Set(completadas.map(a => a.nombre_programa).filter(Boolean))].sort(),

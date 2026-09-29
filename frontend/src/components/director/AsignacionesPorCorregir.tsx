@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../../services/api';
 import {
     Search, CheckCircle2, AlertTriangle, Pencil, Save, XCircle,
-    Clock, ClipboardList, RefreshCw, Info, Lock, Check
+    Clock, ClipboardList, RefreshCw, Info, Lock
 } from 'lucide-react';
 
 interface Actividad {
@@ -136,23 +136,15 @@ function TarjetaAsignacion({
     const porAprobar = asignacion.funciones.filter((f: any) => f.estado_agenda === 'Por Aprobar');
     const yaLiberada = porAprobar.length === 0;
 
-    // Visto bueno por función: constancia de revisión, no libera la agenda
-    const [marcando, setMarcando] = useState<number | null>(null);
+    // El candado solo tiene sentido sobre una asignación liberada Y cuadrada.
+    // Si las horas no dan con el contrato, esa liberación no salió de una
+    // aprobación válida (aprobar exige que coincidan), así que el Director tiene
+    // que poder corregirla: si no, la tarjeta pide corrección y a la vez la impide.
+    // El backend aplica exactamente la misma excepción.
+    const horasBloqueadas = yaLiberada && asignacion.coincide;
 
-    const alternarVisto = async (f: Funcion) => {
-        setMarcando(f.id_funciones);
-        try {
-            const res = await api.put(
-                `/director/asignaciones/${asignacion.id_usuario}/funcion/${f.id_funciones}/visto`,
-                { visto: !f.visto_bueno }
-            );
-            onGuardado(res.data.mensaje || 'Visto bueno actualizado.');
-        } catch (err: any) {
-            onError(err.response?.data?.error || 'No se pudo registrar el visto bueno.');
-        } finally {
-            setMarcando(null);
-        }
-    };
+    // El visto bueno por función vive en los cortes de semana 8 y 16, no aquí:
+    // la semana 0 la revisa el Director sobre la agenda completa.
 
     const aprobar = async () => {
         if (!asignacion.coincide) return;
@@ -250,38 +242,11 @@ function TarjetaAsignacion({
                                             DILIGENCIADA
                                         </span>
                                     )}
-                                    {/* Constancia de que su revisor ya la dio por buena */}
-                                    {f.visto_bueno && (
-                                        <span
-                                            className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200 shrink-0"
-                                            title={`Visto bueno de ${f.visto_bueno_nombre || 'su revisor'}`}
-                                        >
-                                            <Check className="w-2.5 h-2.5" /> VISTO
-                                        </span>
-                                    )}
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                     <span className="font-bold text-gray-800">
                                         {f.horas_funcion % 1 === 0 ? f.horas_funcion : f.horas_funcion.toFixed(1)}h
                                     </span>
-                                    {/* Solo aparece para quien revisa esa función (o el Director) */}
-                                    {f.puede_dar_visto && !yaLiberada && (
-                                        <button
-                                            onClick={() => alternarVisto(f)}
-                                            disabled={marcando === f.id_funciones}
-                                            title={f.visto_bueno ? 'Quitar el visto bueno' : 'Dar visto bueno a esta función'}
-                                            className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors disabled:opacity-40 ${
-                                                f.visto_bueno
-                                                    ? 'bg-green-600 border-green-600 text-white hover:bg-green-700'
-                                                    : 'bg-white border-gray-300 text-gray-400 hover:border-green-400 hover:text-green-600'
-                                            }`}
-                                        >
-                                            {marcando === f.id_funciones
-                                                ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                                : <Check className="w-3.5 h-3.5" />
-                                            }
-                                        </button>
-                                    )}
                                 </div>
                             </li>
                         ))}
@@ -416,9 +381,9 @@ function TarjetaAsignacion({
                             horas por detrás le descuadraría lo que esté diligenciando. */}
                         <button
                             onClick={abrirEdicion}
-                            disabled={sinActividades || yaLiberada}
+                            disabled={sinActividades || horasBloqueadas}
                             title={
-                                yaLiberada
+                                horasBloqueadas
                                     ? 'Las asignaciones ya fueron aprobadas y el docente las tiene a la vista: no se pueden modificar'
                                     : sinActividades
                                         ? 'Este docente no tiene actividades que corregir'
@@ -426,8 +391,8 @@ function TarjetaAsignacion({
                             }
                             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-colors shadow-sm disabled:shadow-none"
                         >
-                            {yaLiberada ? <Lock className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
-                            {yaLiberada ? 'Horas bloqueadas' : 'Corregir horas'}
+                            {horasBloqueadas ? <Lock className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                            {horasBloqueadas ? 'Horas bloqueadas' : 'Corregir horas'}
                         </button>
                         </>
                     ) : (
@@ -531,13 +496,12 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                             Estas son las asignaciones que <strong>Planeación</strong> cargó desde Excel.
                             El docente <strong>todavía no las ve</strong>: revisa que las horas cuadren con su contrato,
                             corrígelas si hace falta y pulsa <strong>Aprobar asignaciones</strong> para liberarle la agenda.
-                            El ✓ verde en una función indica que su revisor ya la dio por buena.
                         </>
                     ) : (
                         <>
-                            Da tu <strong>visto bueno</strong> con el ✓ cuando la función esté correcta. Es una
-                            constancia para el Director: <strong>no libera la agenda</strong> al docente, eso lo hace
-                            él con «Aprobar asignaciones».
+                            Estas son las asignaciones que <strong>Planeación</strong> cargó desde Excel.
+                            Es una vista de consulta: quien libera la agenda al docente es el
+                            <strong> Director</strong> con «Aprobar asignaciones».
                         </>
                     )}
                 </p>
