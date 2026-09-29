@@ -187,7 +187,11 @@ const getAsignaciones = async (req, res) => {
 // ================================================================
 const corregirAsignaciones = async (req, res) => {
     const idUsuario = parseInt(req.params.id_usuario, 10);
-    const { actividades } = req.body;
+    // 'forzar' lo manda la pantalla de revisión de la agenda: ahí el Director
+    // está revisando a conciencia lo que el docente diligenció, y si ve unas
+    // horas mal cargadas tiene que poder arreglarlas aunque la agenda ya esté
+    // en manos del docente. Solo vale para el Director (rol comodín).
+    const { actividades, forzar } = req.body;
 
     if (isNaN(idUsuario)) {
         return res.status(400).json({ error: 'ID de docente inválido.' });
@@ -254,13 +258,36 @@ const corregirAsignaciones = async (req, res) => {
         // Una vez aprobadas, las asignaciones ya están en manos del docente:
         // cambiarle las horas por detrás descuadraría lo que esté diligenciando.
         // La corrección solo se permite mientras estén en 'Por Aprobar'.
-        const yaLiberadas = await client.query(`
+        //
+        // Excepción: si las horas no cuadran con el contrato, esa liberación no
+        // pudo salir de una aprobación válida (aprobar exige coincidencia exacta),
+        // así que el Director tiene que poder arreglarla. De lo contrario la
+        // asignación queda marcada como "requiere corrección" y a la vez bloqueada.
+        const balancePrevio = await client.query(`
+            SELECT COALESCE(SUM(af.horas_funcion), 0) AS total, tc.horas_contrato
+            FROM usuario_asignacion ua
+            JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
+            JOIN usuarios u ON u.id_usuario = ua.id_usuario
+            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            WHERE ua.id_usuario = $1
+            GROUP BY tc.horas_contrato
+        `, [idUsuario, idPeriodo]);
+        const totalActual = parseFloat(balancePrevio.rows[0]?.total) || 0;
+        const horasContratoActual = parseFloat(balancePrevio.rows[0]?.horas_contrato) || 0;
+        // Mismo criterio que muestra la tarjeta: "coinciden" es diferencia cero
+        const cuadrada = Math.abs(totalActual - horasContratoActual) <= 0.001;
+
+        const alcanceCorregir = await alcanceFunciones(req);
+        const esDirector = !alcanceCorregir.restringido || !!alcanceCorregir.esComodin;
+        const omitirCandado = forzar === true && esDirector;
+
+        const yaLiberadas = (cuadrada && !omitirCandado) ? await client.query(`
             SELECT DISTINCT af.funcion_sustantiva
             FROM asignacion_actividades aa
             JOIN asignacion_funciones af ON af.id_funciones = aa.id_funciones
             WHERE aa.id_asignacionact = ANY($1)
               AND af.estado_agenda <> 'Por Aprobar'
-        `, [idsAct]);
+        `, [idsAct]) : { rows: [] };
 
         if (yaLiberadas.rows.length > 0) {
             await client.query('ROLLBACK');

@@ -217,6 +217,45 @@ const getAgendas = async (req, res) => {
                 GROUP BY ua.id_usuario
             `, [idPeriodo, idsDocentes]);
 
+            // Estado de revisión del corte, limitado a las funciones que este rol
+            // revisa: al de Investigación le interesa la suya, no la agenda entera.
+            //
+            // Se cuenta sobre las funciones que YA tienen ejecución reportada, con
+            // la fila de revision_corte como dato opcional: un avance guardado sin
+            // fila cuenta como pendiente por revisar, no como "sin reportar".
+            const revRes = await pool.query(`
+                SELECT ua.id_usuario, s.semana,
+                       COUNT(*)::int AS total,
+                       COUNT(*) FILTER (WHERE rc.estado IN ('Visto bueno', 'Aprobado'))::int AS revisadas
+                FROM usuario_asignacion ua
+                JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
+                CROSS JOIN (VALUES (8), (16)) AS s(semana)
+                LEFT JOIN revision_corte rc ON rc.id_funciones = af.id_funciones AND rc.semana = s.semana
+                WHERE ua.id_usuario = ANY($2::int[])
+                  AND ($3::text[] IS NULL OR af.funcion_sustantiva = ANY($3::text[]))
+                  AND (rc.id_funciones IS NOT NULL OR EXISTS (
+                        SELECT 1
+                        FROM asignacion_actividades aa
+                        JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo IS NOT FALSE
+                        JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
+                        WHERE aa.id_funciones = af.id_funciones
+                          AND COALESCE(CASE WHEN s.semana = 8 THEN i.ejecucion_8 ELSE i.ejecucion_16 END, 0) > 0
+                  ))
+                GROUP BY ua.id_usuario, s.semana
+            `, [idPeriodo, idsDocentes, alcanceFunc.restringido ? alcanceFunc.funciones : null]);
+
+            const revPorDocente = new Map();
+            for (const r of revRes.rows) {
+                if (!revPorDocente.has(r.id_usuario)) revPorDocente.set(r.id_usuario, {});
+                revPorDocente.get(r.id_usuario)[r.semana] = r;
+            }
+
+            const estadoRevision = (r) => {
+                if (!r || r.total === 0) return 'Sin reportar';
+                if (r.revisadas === 0) return 'Pendiente por revisar';
+                return r.revisadas < r.total ? 'Revisado parcial' : 'Revisado';
+            };
+
             const porDocente = new Map(cortesRes.rows.map(r => [r.id_usuario, r]));
             const estadoCorte = (total, reportados) => {
                 if (!total) return 'Sin indicadores';
@@ -227,8 +266,17 @@ const getAgendas = async (req, res) => {
             for (const a of agendas) {
                 const c = porDocente.get(a.id_usuario) || { total_indicadores: 0, reportados_8: 0, reportados_16: 0 };
                 a.total_indicadores = c.total_indicadores;
-                a.corte_8  = { reportados: c.reportados_8,  total: c.total_indicadores, estado: estadoCorte(c.total_indicadores, c.reportados_8) };
-                a.corte_16 = { reportados: c.reportados_16, total: c.total_indicadores, estado: estadoCorte(c.total_indicadores, c.reportados_16) };
+                const rev = revPorDocente.get(a.id_usuario) || {};
+                a.corte_8  = {
+                    reportados: c.reportados_8, total: c.total_indicadores,
+                    estado: estadoCorte(c.total_indicadores, c.reportados_8),
+                    revision: estadoRevision(rev[8]),
+                };
+                a.corte_16 = {
+                    reportados: c.reportados_16, total: c.total_indicadores,
+                    estado: estadoCorte(c.total_indicadores, c.reportados_16),
+                    revision: estadoRevision(rev[16]),
+                };
             }
         }
 
@@ -381,8 +429,38 @@ const getAgendaDetalle = async (req, res) => {
                 });
             }
 
+            // Estado de revisión de los cortes (semana 8 y 16) de esta función.
+            //
+            // Lo que abre la revisión es que el docente haya reportado ejecución,
+            // no que exista la fila en revision_corte: los avances guardados antes
+            // de que existiera la tabla no tienen fila y aun así hay que revisarlos.
+            // Por eso se parte de las dos semanas y la fila es opcional.
+            const cortesRes = await pool.query(`
+                SELECT s.semana,
+                       COALESCE(rc.estado, 'Pendiente') AS estado,
+                       rc.observacion,
+                       vb.nombres || ' ' || vb.apellidos AS visto_bueno_nombre,
+                       ap.nombres || ' ' || ap.apellidos AS aprobado_nombre
+                FROM (VALUES (8), (16)) AS s(semana)
+                LEFT JOIN revision_corte rc ON rc.id_funciones = $1 AND rc.semana = s.semana
+                LEFT JOIN usuarios vb ON vb.id_usuario = rc.visto_bueno_por
+                LEFT JOIN usuarios ap ON ap.id_usuario = rc.aprobado_por
+                WHERE rc.id_funciones IS NOT NULL
+                   OR EXISTS (
+                        SELECT 1
+                        FROM asignacion_actividades aa
+                        JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo IS NOT FALSE
+                        JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
+                        WHERE aa.id_funciones = $1
+                          AND COALESCE(CASE WHEN s.semana = 8 THEN i.ejecucion_8 ELSE i.ejecucion_16 END, 0) > 0
+                   )
+            `, [func.id_funciones]);
+            const cortes = {};
+            for (const c of cortesRes.rows) cortes[c.semana] = c;
+
             funciones.push({
                 ...func,
+                revision_cortes: cortes,
                 // false = otro rol la revisa; se muestra como contexto de horas
                 en_alcance: !alcanceFunc.restringido
                     || alcanceFunc.funciones.includes(func.funcion_sustantiva),
@@ -404,6 +482,9 @@ const getAgendaDetalle = async (req, res) => {
             horas_directas: horasDirectas,
             horas_investigacion: horasInvestigacion,
             docencia_indirecta: docenciaIndirecta,
+            // Solo el Director (rol comodín) cierra los cortes; los revisores
+            // de una función se quedan en el visto bueno.
+            puede_aprobar: !alcanceFunc.restringido || !!alcanceFunc.esComodin,
             periodo: periodoRes.rows[0] || null
         });
 
@@ -436,14 +517,17 @@ const aprobarAgenda = async (req, res) => {
         }
         const idPeriodo = periodoRes.rows[0].id_periodo;
 
-        // Solo las funciones que este rol revisa. Antes se aprobaba la agenda
-        // entera de un golpe; ahora el Director no puede aprobar Investigación
-        // ni Investigación puede aprobar docencia.
+        // La semana 0 la aprueba el Director sobre la agenda COMPLETA. El reparto
+        // por función (Investigación y los revisores que se creen después) aplica
+        // solo a los cortes de semana 8 y 16; si se aplicara aquí, la agenda
+        // quedaría media aprobada y con funciones colgadas en 'Pendiente'.
         const alcanceFunc = await alcanceFunciones(req);
         if (alcanceFunc.restringido && alcanceFunc.funciones.length === 0) {
             await client.query('ROLLBACK');
             return res.status(403).json(SIN_PERMISO_FUNCION);
         }
+        const funcionesAlcance = alcanceFunc.esComodin ? null
+            : (alcanceFunc.restringido ? alcanceFunc.funciones : null);
 
         const result = await client.query(`
             UPDATE asignacion_funciones af
@@ -457,7 +541,7 @@ const aprobarAgenda = async (req, res) => {
             AND af.estado_agenda IN ('Pendiente', 'Aceptado', 'Devuelta')
             AND ($4::text[] IS NULL OR af.funcion_sustantiva = ANY($4::text[]))
             RETURNING af.id_funciones
-        `, [directorId, idUsuario, idPeriodo, alcanceFunc.restringido ? alcanceFunc.funciones : null]);
+        `, [directorId, idUsuario, idPeriodo, funcionesAlcance]);
 
         // ¿Quedó aprobada TODA la agenda o solo la parte de este revisor?
         // Con la revisión repartida, cada revisor aprueba su función: avisar en
@@ -525,12 +609,14 @@ const devolverAgenda = async (req, res) => {
         }
         const idPeriodo = periodoRes.rows[0].id_periodo;
 
-        // Igual que al aprobar: solo las funciones de este rol.
+        // Igual que al aprobar: el Director devuelve la agenda completa.
         const alcanceFunc = await alcanceFunciones(req);
         if (alcanceFunc.restringido && alcanceFunc.funciones.length === 0) {
             await client.query('ROLLBACK');
             return res.status(403).json(SIN_PERMISO_FUNCION);
         }
+        const funcionesAlcance = alcanceFunc.esComodin ? null
+            : (alcanceFunc.restringido ? alcanceFunc.funciones : null);
 
         const result = await client.query(`
             UPDATE asignacion_funciones af
@@ -546,7 +632,7 @@ const devolverAgenda = async (req, res) => {
             AND ($5::text[] IS NULL OR af.funcion_sustantiva = ANY($5::text[]))
             RETURNING af.id_funciones
         `, [observacion_general.trim(), directorId, idUsuario, idPeriodo,
-            alcanceFunc.restringido ? alcanceFunc.funciones : null]);
+            funcionesAlcance]);
 
         await client.query('COMMIT');
 
