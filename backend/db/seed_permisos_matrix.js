@@ -87,6 +87,17 @@ const matrixData = [
     ]
   },
   {
+    // Roles que revisan UNA función sustantiva (Investigación y los que se creen
+    // después). Qué función revisan lo define rol_funcion, no esta matriz.
+    modulo: 'Revisión por Función',
+    paginas: [
+      {
+        nombre: 'Avances por Revisar',
+        descripcion: 'Revisión de los cortes de Semana 8 y 16 de la función sustantiva que el rol revisa'
+      }
+    ]
+  },
+  {
     modulo: 'Seguridad y Configuración',
     paginas: [
       {
@@ -187,6 +198,12 @@ async function runSeed(poolInstance = pool) {
         );
       } else if (normRol.includes('consult')) {
         permitidos = allPermisos.filter(p => p.accion === 'Ver');
+      } else {
+        // Revisor de función (Investigación, etc.): su módulo y su perfil
+        permitidos = allPermisos.filter(p =>
+          (p.modulo === 'Revisión por Función' && (p.accion === 'Ver' || p.accion === 'Editar')) ||
+          (p.pagina === 'Perfil de Usuario' && (p.accion === 'Ver' || p.accion === 'Editar'))
+        );
       }
 
       for (const p of permitidos) {

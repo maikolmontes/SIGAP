@@ -2,13 +2,19 @@ const pool = require('../db/connection');
 const xlsx = require('xlsx');
 const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
 const notificaciones = require('../services/notificacionesService');
+const { respaldarAgendas } = require('../services/respaldoAgendasService');
+const auditoria = require('../services/auditoriaService');
 
 const parseSemestre = (semestreStr) => {
     if (!semestreStr) return { numero: '1', grupo: 'A' };
     const str = String(semestreStr).trim();
     const match = str.match(/^(\d+)(.*)$/);
     if (match) {
-        return { numero: match[1], grupo: match[2]?.trim() || 'A' };
+        // "11-M" trae el guion como separador, no como parte del grupo: "-M" → "M".
+        // Los grupos con letra ("1B-M", "9E-N") quedan igual ("B-M", "E-N").
+        let grupo = (match[2] || '').trim();
+        while (grupo.startsWith('-')) grupo = grupo.slice(1).trim();
+        return { numero: match[1], grupo: grupo || 'A' };
     }
     return { numero: str, grupo: 'A' };
 };
@@ -529,7 +535,7 @@ const importarAsignaciones = async (req, res) => {
             String(req.query.notificar || req.body.notificar).toLowerCase() === 'true';
 
         if (notificarCarga && docentesAfectados.size > 0) {
-            notificaciones.background.asignacionesCargadas([...docentesAfectados]);
+            notificaciones.background.asignacionesCargadas([...docentesAfectados], null, req.user?.id);
         }
 
         res.status(200).json({
@@ -762,11 +768,18 @@ const actualizarImportacion = async (req, res) => {
                         }
                     }
 
-                    // Verificar si esta actividad ya existe (por nombre de materia)
-                    const actExiste = await client.query(`
-                        SELECT id_asignacionact FROM asignacion_actividades 
-                        WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
-                    `, [idFunciones, rolToInsert]);
+                    // Verificar si esta actividad ya existe. Si tiene espacio académico
+                    // (Docencia Directa) la identidad es espacio + grupo: comparar solo por
+                    // rol_seleccionado colapsaba todas las materias con rol '' en una sola.
+                    const actExiste = idEspacioAca
+                        ? await client.query(`
+                            SELECT id_asignacionact FROM asignacion_actividades
+                            WHERE id_funciones = $1 AND id_espacio_aca = $2 AND id_grupos = $3
+                        `, [idFunciones, idEspacioAca, idGrupo])
+                        : await client.query(`
+                            SELECT id_asignacionact FROM asignacion_actividades
+                            WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
+                        `, [idFunciones, rolToInsert]);
 
                     if (actExiste.rows.length > 0) {
                         // Actualizar el grupo y las horas de la materia existente
@@ -1070,6 +1083,24 @@ const eliminarAgendas = async (req, res) => {
     try {
         await client.query('BEGIN');
 
+        // Borrar TODAS las agendas de un programa exige escribir su nombre: evita el
+        // clic accidental sobre una acción que no se puede deshacer.
+        const progRes = await client.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [idPrograma]);
+        if (progRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'El programa académico seleccionado no existe.' });
+        }
+        const nombrePrograma = progRes.rows[0].nombre_programa;
+        const confirmacion = String(req.body?.confirmacion || '').trim().toLowerCase();
+        if (confirmacion !== String(nombrePrograma).trim().toLowerCase()) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                error: `Para eliminar escribe exactamente el nombre del programa: "${nombrePrograma}".`,
+                requiere_confirmacion: true,
+                nombre_programa: nombrePrograma
+            });
+        }
+
         // 1. Obtener el periodo activo
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         if (periodoRes.rows.length === 0) {
@@ -1088,7 +1119,11 @@ const eliminarAgendas = async (req, res) => {
         `, [idPeriodoActivo, idPrograma]);
         const funcIds = funcRes.rows.map(r => r.id_funciones);
 
+        // Copia de seguridad ANTES de borrar; si falla, la transacción se cancela
+        let respaldo = null;
         if (funcIds.length > 0) {
+            respaldo = await respaldarAgendas(client, funcIds, { motivo: `programa-${nombrePrograma}`, periodo: idPeriodoActivo });
+
             // Obtener todas las actividades asociadas a estas funciones
             const actIdsRes = await client.query('SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = ANY($1)', [funcIds]);
             const actIds = actIdsRes.rows.map(r => r.id_asignacionact);
@@ -1124,11 +1159,22 @@ const eliminarAgendas = async (req, res) => {
             await client.query('DELETE FROM usuario_asignacion WHERE id_funciones = ANY($1)', [funcIds]);
 
             // Eliminar asignacion_funciones
-            await client.query('DELETE FROM asignacion_funciones WHERE id_periodo = $1', [idPeriodoActivo]);
+            // Solo las del programa: filtrar por período borraba (o chocaba con) las de otros programas
+            await client.query('DELETE FROM asignacion_funciones WHERE id_funciones = ANY($1)', [funcIds]);
         }
 
         await client.query('COMMIT');
-        res.status(200).json({ mensaje: 'Todas las agendas del período activo fueron eliminadas correctamente.' });
+
+        await auditoria.registrar(req, {
+            accion: 'eliminar_agendas_programa',
+            entidad: 'programa',
+            detalle: { id_programa: idPrograma, programa: nombrePrograma, id_periodo: idPeriodoActivo, respaldo }
+        });
+
+        res.status(200).json({
+            mensaje: 'Todas las agendas del programa en el período activo fueron eliminadas correctamente.',
+            respaldo
+        });
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -1177,7 +1223,11 @@ const eliminarAgendasDocentes = async (req, res) => {
 
         const funcIds = funcRes.rows.map(r => r.id_funciones);
 
+        // Copia de seguridad ANTES de borrar; si falla, la transacción se cancela
+        let respaldo = null;
         if (funcIds.length > 0) {
+            respaldo = await respaldarAgendas(client, funcIds, { motivo: `docentes-${idsNum.length}`, periodo: idPeriodoActivo });
+
             // Actividades
             const actIdsRes = await client.query(
                 'SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = ANY($1)',
@@ -1215,9 +1265,17 @@ const eliminarAgendasDocentes = async (req, res) => {
         }
 
         await client.query('COMMIT');
+
+        await auditoria.registrar(req, {
+            accion: 'eliminar_agendas_docentes',
+            entidad: 'docente',
+            detalle: { ids_docentes: idsNum, id_periodo: idPeriodoActivo, respaldo }
+        });
+
         res.status(200).json({
             mensaje: `Agendas de ${idsNum.length} docente(s) eliminadas correctamente.`,
-            eliminados: idsNum.length
+            eliminados: idsNum.length,
+            respaldo
         });
 
     } catch (error) {
@@ -1229,5 +1287,5 @@ const eliminarAgendasDocentes = async (req, res) => {
     }
 };
 
-module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDistribucionDocente, eliminarAgendas, eliminarAgendasDocentes };
+module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDistribucionDocente, eliminarAgendas, eliminarAgendasDocentes, parseSemestre };
 

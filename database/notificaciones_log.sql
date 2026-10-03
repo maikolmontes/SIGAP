@@ -21,9 +21,13 @@ CREATE TABLE IF NOT EXISTS notificaciones_log (
     asunto          TEXT,
     estado          VARCHAR(20)  NOT NULL DEFAULT 'enviado',  -- enviado | error
     detalle         TEXT,
+    remitente       VARCHAR(220),                              -- nombre visible del remitente; NULL = institucional
     enviado_en      TIMESTAMP    NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_notificaciones_log_clave  ON notificaciones_log (clave);
 CREATE INDEX IF NOT EXISTS idx_notificaciones_log_tipo   ON notificaciones_log (tipo);
 CREATE INDEX IF NOT EXISTS idx_notificaciones_log_fecha  ON notificaciones_log (enviado_en DESC);
+
+-- Instalaciones existentes: el backend agrega la columna sola, o ejecutar:
+ALTER TABLE notificaciones_log ADD COLUMN IF NOT EXISTS remitente VARCHAR(220);

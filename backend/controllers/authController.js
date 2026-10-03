@@ -1,6 +1,7 @@
 const { OAuth2Client } = require('google-auth-library');
 const pool = require('../db/connection');
 const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../config/jwt');
 
 // Usaremos el Client ID proveído por el frontend, puede ser pasado por .env también en backend.
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '181220771654-oj95kkh2jqkt0glll07c370cqfjgv0p2.apps.googleusercontent.com';
@@ -58,7 +59,7 @@ const loginGoogle = async (req, res) => {
                 facultad: user.facultad,
                 imagen_perfil: user.imagen_perfil 
             },
-            process.env.JWT_SECRET || 'jwt_secret_key_sigap_2026',
+            JWT_SECRET,
             { expiresIn: '8h' } // El token expirará en 8 horas
         );
 
@@ -70,4 +71,30 @@ const loginGoogle = async (req, res) => {
     }
 };
 
-module.exports = { loginGoogle };
+const getPublicStats = async (req, res) => {
+    try {
+        const docRes = await pool.query(`
+            SELECT count(DISTINCT u.id_usuario)::int as count 
+            FROM usuarios u 
+            JOIN usuario_rol ur ON u.id_usuario = ur.id_usuario 
+            JOIN roles r ON ur.id_rol = r.id_rol 
+            WHERE LOWER(r.nombre_rol) LIKE '%docent%' AND u.activo = true
+        `);
+        const progRes = await pool.query(`
+            SELECT count(*)::int as count 
+            FROM programa_academico 
+            WHERE activo = true
+        `);
+
+        res.json({
+            docentesActivos: docRes.rows[0]?.count || 0,
+            programasActivos: progRes.rows[0]?.count || 0
+        });
+    } catch (error) {
+        console.error('Error al obtener estadísticas públicas:', error);
+        res.status(500).json({ error: 'Error al obtener estadísticas públicas' });
+    }
+};
+
+module.exports = { loginGoogle, getPublicStats };
+

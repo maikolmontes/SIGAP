@@ -113,7 +113,7 @@ const create = async (req, res) => {
         // solo sale si está habilitado por configuración o si Planeación lo pide
         // explícitamente con { notificar: true }.
         if (debeAvisarApertura(req)) {
-            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo);
+            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo, req.user?.id);
         }
 
         res.status(201).json(result.rows[0]);
@@ -161,7 +161,7 @@ const habilitar = async (req, res) => {
             return res.status(404).json({ error: 'Período no encontrado.' });
         }
         if (debeAvisarApertura(req)) {
-            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo);
+            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo, req.user?.id);
         }
 
         res.json({

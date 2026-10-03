@@ -602,7 +602,8 @@ const create = async (req, res) => {
             idUsuario: nuevoUsuario.id_usuario,
             correo: nuevoUsuario.correo,
             nombre: `${nuevoUsuario.nombres} ${nuevoUsuario.apellidos}`.trim(),
-            roles: rolesList
+            roles: rolesList,
+            idRemitente: req.user?.id
         });
 
         res.status(201).json({

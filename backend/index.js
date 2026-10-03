@@ -40,8 +40,9 @@ app.use('/api/permisos', require('./routes/permisos'));
 app.use('/api/notificaciones', require('./routes/notificaciones'));
 app.use('/api/analitica', require('./routes/analitica'));
 
-// Servir archivos estáticos de evidencias
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Evidencias: ya no son una carpeta pública. Pasan por token + permiso por docente.
+const { verifyTokenFlexible, servirArchivo } = require('./middleware/accesoEvidencias');
+app.get('/uploads/evidencias/:archivo', verifyTokenFlexible, servirArchivo);
 
 app.get('/api', (req, res) => {
     res.json({
@@ -55,6 +56,8 @@ const PORT = process.env.PORT || 3000;
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
     app.listen(PORT, () => {
         console.log(`Servidor corriendo en http://localhost:${PORT}`);
+        // Recordatorios automáticos de plazo (desactivados salvo EMAIL_RECORDATORIOS_AUTO=true)
+        require('./services/programadorTareas').iniciar();
     });
 }
 
