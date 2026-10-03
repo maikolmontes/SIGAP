@@ -1,6 +1,11 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { getArchivoUrl } from '../../services/api';
-import { X, Download, ExternalLink, FileText, Image as ImageIcon, File, Table, FileX } from 'lucide-react';
+import { X, Download, ExternalLink, FileText, Image as ImageIcon, File, Table, FileX, FileArchive } from 'lucide-react';
+import { tipoPreview, etiquetaTipo } from './tipoArchivo';
+import type { TipoPreview } from './tipoArchivo';
+
+// Word/Excel/ZIP/texto: se carga solo cuando alguien abre uno de esos archivos
+const PreviewDocumento = lazy(() => import('./PreviewDocumento'));
 
 export interface EvidenciaVisor {
     id_evidencias: number;
@@ -13,24 +18,16 @@ export interface EvidenciaVisor {
 }
 
 const esEnlace = (t: string) => t === 'enlace';
-const esPdf = (t: string) => (t || '').includes('pdf');
-const esImagen = (t: string) => (t || '').startsWith('image/');
-const esHoja = (t: string) => (t || '').includes('sheet') || (t || '').includes('excel');
 
-const iconoDe = (t: string, clase = 'w-5 h-5') => {
-    if (esEnlace(t)) return <ExternalLink className={`${clase} text-indigo-300`} />;
-    if (esPdf(t)) return <FileText className={`${clase} text-red-300`} />;
-    if (esImagen(t)) return <ImageIcon className={`${clase} text-emerald-300`} />;
-    if (esHoja(t)) return <Table className={`${clase} text-green-300`} />;
-    return <File className={`${clase} text-blue-300`} />;
-};
-
-const etiquetaDe = (t: string) => {
-    if (esEnlace(t)) return 'Enlace';
-    if (esPdf(t)) return 'PDF';
-    if (esImagen(t)) return 'Imagen';
-    if (esHoja(t)) return 'Hoja de cálculo';
-    return 'Archivo';
+const iconoDe = (tipo: TipoPreview, clase = 'w-5 h-5') => {
+    switch (tipo) {
+        case 'enlace': return <ExternalLink className={`${clase} text-indigo-300`} />;
+        case 'pdf': return <FileText className={`${clase} text-red-300`} />;
+        case 'imagen': return <ImageIcon className={`${clase} text-emerald-300`} />;
+        case 'hoja': return <Table className={`${clase} text-green-300`} />;
+        case 'zip': return <FileArchive className={`${clase} text-amber-300`} />;
+        default: return <File className={`${clase} text-blue-300`} />;
+    }
 };
 
 const tamano = (kb?: number) => {
@@ -73,6 +70,8 @@ export default function VisorEvidenciaModal({
     }, [onClose]);
 
     const tipo = evidencia.tipo_archivo || '';
+    const vista = tipoPreview(evidencia.nombre_archivo, tipo);
+    const etiqueta = etiquetaTipo(evidencia.nombre_archivo, tipo);
 
     useEffect(() => {
         if (esEnlace(tipo)) return;
@@ -98,11 +97,11 @@ export default function VisorEvidenciaModal({
                 {/* Cabecera */}
                 <div className="bg-[#1a2744] px-5 py-4 flex items-center justify-between shrink-0">
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="bg-white/10 p-2 rounded-lg shrink-0">{iconoDe(tipo)}</div>
+                        <div className="bg-white/10 p-2 rounded-lg shrink-0">{iconoDe(vista)}</div>
                         <div className="min-w-0">
                             <h2 className="text-white font-bold text-sm truncate">{evidencia.nombre_archivo}</h2>
                             <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                                <span className="text-blue-300 text-xs font-medium">{etiquetaDe(tipo)}</span>
+                                <span className="text-blue-300 text-xs font-medium">{etiqueta}</span>
                                 {!esEnlace(tipo) && !!evidencia.tamanio_archivo_kb && (
                                     <span className="text-blue-200 text-xs">• {tamano(evidencia.tamanio_archivo_kb)}</span>
                                 )}
@@ -155,14 +154,14 @@ export default function VisorEvidenciaModal({
                             </p>
                             <p className="text-gray-400 text-xs mt-4 break-all max-w-md">{evidencia.ruta_archivo}</p>
                         </div>
-                    ) : esPdf(tipo) ? (
+                    ) : vista === 'pdf' ? (
                         <iframe
                             src={urlDe(evidencia)}
                             className="w-full h-full border-0"
                             style={{ minHeight: '70vh' }}
                             title="Previsualización del PDF"
                         />
-                    ) : esImagen(tipo) ? (
+                    ) : vista === 'imagen' ? (
                         <div className="flex items-center justify-center p-6 min-h-[400px]">
                             <img
                                 src={urlDe(evidencia)}
@@ -170,6 +169,14 @@ export default function VisorEvidenciaModal({
                                 className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg"
                             />
                         </div>
+                    ) : vista === 'docx' || vista === 'hoja' || vista === 'zip' || vista === 'texto' ? (
+                        <Suspense fallback={
+                            <div className="flex items-center justify-center min-h-[400px]">
+                                <div className="animate-spin w-9 h-9 border-4 border-blue-500 border-t-transparent rounded-full" />
+                            </div>
+                        }>
+                            <PreviewDocumento key={urlDe(evidencia)} url={urlDe(evidencia)} tipo={vista} />
+                        </Suspense>
                     ) : esEnlace(tipo) ? (
                         <div className="flex flex-col items-center justify-center p-12 text-center min-h-[400px]">
                             <div className="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center mb-6">
@@ -190,14 +197,14 @@ export default function VisorEvidenciaModal({
                     ) : (
                         <div className="flex flex-col items-center justify-center p-12 text-center min-h-[400px]">
                             <div className="w-20 h-20 bg-gray-200 rounded-2xl flex items-center justify-center mb-6">
-                                {iconoDe(tipo, 'w-10 h-10')}
+                                {iconoDe(vista, 'w-10 h-10')}
                             </div>
                             <h3 className="text-xl font-bold text-gray-800 mb-2">{evidencia.nombre_archivo}</h3>
                             <p className="text-gray-500 text-sm mb-2">
-                                {etiquetaDe(tipo)}{evidencia.tamanio_archivo_kb ? ` • ${tamano(evidencia.tamanio_archivo_kb)}` : ''}
+                                {etiqueta}{evidencia.tamanio_archivo_kb ? ` • ${tamano(evidencia.tamanio_archivo_kb)}` : ''}
                             </p>
                             <p className="text-gray-400 text-xs mb-6">
-                                Este tipo de archivo no se puede previsualizar en el navegador.
+                                Este tipo de archivo (por ejemplo .doc, .ppt o .rar) no se puede previsualizar en el navegador. Descárgalo para abrirlo.
                             </p>
                             <a
                                 href={urlDe(evidencia)}

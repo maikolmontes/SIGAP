@@ -12,7 +12,11 @@ export const getArchivoUrl = (ruta) => {
     if (!ruta) return '';
     if (ruta.startsWith('http://') || ruta.startsWith('https://')) return ruta;
     const cleanRuta = ruta.startsWith('/') ? ruta : `/${ruta}`;
-    return `${SERVER_URL}${cleanRuta}`;
+    // Los archivos de evidencia están protegidos: un <a>/<iframe> no puede enviar
+    // la cabecera Authorization, así que el token viaja en la URL.
+    let token = '';
+    try { token = localStorage.getItem('sigap_token') || ''; } catch { /* sin acceso a storage */ }
+    return `${SERVER_URL}${cleanRuta}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 };
 
 export const getStaticFileUrl = getArchivoUrl;

@@ -40,6 +40,8 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
     const [loading, setLoading] = useState(true);
     const [busqueda, setBusqueda] = useState('');
     const [filtroPrograma, setFiltroPrograma] = useState('');
+    const [paginaActual, setPaginaActual] = useState(1);
+    const [regPorPag, setRegPorPag] = useState(10);
     const navigate = useNavigate();
 
     const cargar = useCallback(async () => {
@@ -88,12 +90,16 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
         [conAgenda]
     );
 
-    const filtradas = conAgenda.filter(a => {
+    const filtradas = useMemo(() => conAgenda.filter(a => {
         const coincide = a.nombre_docente?.toLowerCase().includes(busqueda.toLowerCase())
             || a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase());
         const delPrograma = !filtroPrograma || a.nombre_programa === filtroPrograma;
         return coincide && delPrograma;
-    });
+    }), [conAgenda, busqueda, filtroPrograma]);
+
+    const totalPaginas = Math.max(1, Math.ceil(filtradas.length / regPorPag));
+    const paginaSegura = Math.min(paginaActual, totalPaginas);
+    const filtPagina = filtradas.slice((paginaSegura - 1) * regPorPag, paginaSegura * regPorPag);
 
     const periodoLabel = periodo ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}` : 'Sin periodo';
 
@@ -194,7 +200,7 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
                     </div>
                 </div>
 
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
                     {loading ? (
                         <div className="flex justify-center py-16">
                             <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
@@ -219,7 +225,7 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
                         </div>
                     ) : (
                         <table className="w-full text-sm">
-                            <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                            <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                                 <tr>
                                     <th className="px-5 py-3 text-left font-bold">Docente</th>
                                     <th className="px-5 py-3 text-left font-bold">Programa</th>
@@ -230,7 +236,7 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                                {filtradas.map(a => {
+                                {filtPagina.map(a => {
                                     const corte = corteDe(a);
                                     return (
                                         <tr key={a.id_usuario} className="hover:bg-blue-50/30 transition-colors">
@@ -281,6 +287,33 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
                         </table>
                     )}
                 </div>
+
+                {/* Paginación */}
+                {filtradas.length > 0 && (
+                    <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <span>Mostrar</span>
+                            <select value={regPorPag} onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
+                                className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-400">
+                                {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                            <span>registros · {filtradas.length} total</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} disabled={paginaSegura === 1}
+                                className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">‹</button>
+                            {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+                                <span key={p}>
+                                    {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                                    <button onClick={() => setPaginaActual(p)}
+                                        className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${p === paginaSegura ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 hover:bg-gray-50'}`}>{p}</button>
+                                </span>
+                            ))}
+                            <button onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))} disabled={paginaSegura === totalPaginas}
+                                className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">›</button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

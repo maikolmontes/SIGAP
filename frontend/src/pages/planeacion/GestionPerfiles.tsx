@@ -547,7 +547,7 @@ export default function GestionPerfiles() {
 
                             {/* Cuerpo de la tabla */}
                             <tbody className="divide-y divide-gray-100 text-xs text-gray-700">
-                                {modulosFiltrados.map((mod) => {
+                                {modulosFiltrados.map((mod, modIdx) => {
                                     return mod.paginas.map((pag, pagIdx) => {
                                         const idsFila = Object.values(pag.acciones).filter((id): id is number => typeof id === 'number')
                                         const activosFilaCount = idsFila.filter(id => permisosRolActivo.has(id)).length
@@ -560,11 +560,11 @@ export default function GestionPerfiles() {
                                         return (
                                             <tr 
                                                 key={`${mod.modulo}-${pag.nombre}`}
-                                                className="hover:bg-blue-50/30 transition-colors group"
+                                                className={`hover:bg-blue-50/30 transition-colors group ${pagIdx === 0 && modIdx > 0 ? 'border-t border-gray-200' : ''}`}
                                             >
-                                                {/* Celda de Módulo (se muestra con estilo distintivo o agrupado) */}
+                                                {/* Celda de Módulo */}
                                                 <td className="py-3 px-6 font-bold text-gray-800 align-middle">
-                                                    {pagIdx === 0 ? (
+                                                    {pagIdx === 0 && (
                                                         <div className="flex items-center justify-between gap-2">
                                                             <div className="flex items-center gap-2">
                                                                 <div className="w-2 h-2 rounded-full bg-blue-600"></div>
@@ -581,10 +581,6 @@ export default function GestionPerfiles() {
                                                                 {todosModuloActivos ? 'Desmarcar' : 'Marcar'}
                                                             </button>
                                                         </div>
-                                                    ) : (
-                                                        <span className="text-gray-300 pl-4 text-[11px] select-none font-medium">
-                                                            ↳ {mod.modulo}
-                                                        </span>
                                                     )}
                                                 </td>
 

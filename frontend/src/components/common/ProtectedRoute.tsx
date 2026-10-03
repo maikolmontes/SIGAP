@@ -44,6 +44,7 @@ const RUTA_PAGINA_MAP: Record<string, string> = {
     '/director/agendas': 'Agendas por Revisar',
     '/director/observaciones': 'Observaciones Docentes',
     '/director/reportes': 'Reportes de Gestión',
+    '/revision/semanas': 'Avances por Revisar',
     '/consultor/dashboard': 'Dashboard Consultor',
 };
 

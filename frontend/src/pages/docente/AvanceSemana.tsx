@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
 import { FileText, CheckCircle, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare } from 'lucide-react';
-import api, { getArchivoUrl } from '../../services/api';
+import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
+import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
+import type { EvidenciaVisor } from '../../components/evidencias/VisorEvidenciaModal';
 
 interface AvanceSemanaProps {
   semana: '8' | '16';
@@ -23,6 +25,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   const [selectedFunctionIndex, setSelectedFunctionIndex] = useState(0);
   const [selectedActivityIndex, setSelectedActivityIndex] = useState(0);
   const [modalEvidencia, setModalEvidencia] = useState({ isOpen: false, idIndicador: 0, nombreIndicador: '' });
+  // Evidencia abierta en el visor (vista previa sin descargar)
+  const [evidenciaVisor, setEvidenciaVisor] = useState<EvidenciaVisor | null>(null);
 
   useEffect(() => {
     setSelectedActivityIndex(0);
@@ -495,17 +499,16 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                             <div className="flex flex-col gap-1.5 mt-2">
                                                                 <span className="text-[10px] font-bold text-gray-400 uppercase">Cargadas:</span>
                                                                 {ind.evidencias.filter((ev: any) => String(ev.semana) === semana).map((ev: any) => (
-                                                                    <a 
+                                                                    <button
+                                                                        type="button"
                                                                         key={ev.id_evidencias}
-                                                                        href={ev.tipo_archivo === 'enlace' ? ev.ruta_archivo : getArchivoUrl(ev.ruta_archivo)}
-                                                                        target="_blank"
-                                                                        rel="noopener noreferrer"
-                                                                        className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline bg-white p-1.5 rounded border border-gray-100 shadow-sm"
-                                                                        title={ev.nombre_archivo}
+                                                                        onClick={() => setEvidenciaVisor(ev)}
+                                                                        className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline bg-white p-1.5 rounded border border-gray-100 shadow-sm text-left"
+                                                                        title={`Ver ${ev.nombre_archivo}`}
                                                                     >
                                                                         {ev.tipo_archivo === 'enlace' ? <ExternalLink className="w-3.5 h-3.5 shrink-0" /> : <Eye className="w-3.5 h-3.5 shrink-0" />}
                                                                         <span className="truncate max-w-[100px]">{ev.nombre_archivo}</span>
-                                                                    </a>
+                                                                    </button>
                                                                 ))}
                                                             </div>
                                                         )}
@@ -586,6 +589,9 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
             cargarData();
         }}
       />
+      {evidenciaVisor && (
+        <VisorEvidenciaModal evidencia={evidenciaVisor} onClose={() => setEvidenciaVisor(null)} />
+      )}
     </Layout>
   );
 }

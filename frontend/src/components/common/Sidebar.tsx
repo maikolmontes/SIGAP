@@ -115,6 +115,9 @@ const PATH_TO_PAGINA: Record<string, string> = {
     '/director/reportes': 'Reportes de Gestión',
     '/director/analitica': 'Reportes de Gestión',
 
+    // Revisores de función (Investigación, …)
+    '/revision/semanas': 'Avances por Revisar',
+
     // Docente
     '/docente/agenda': 'Mi Agenda Académica',
     '/docente/avance-semana-8': 'Avance Semana 8',

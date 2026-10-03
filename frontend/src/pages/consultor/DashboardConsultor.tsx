@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import {
@@ -23,6 +23,8 @@ export default function DashboardConsultor() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [regPorPag, setRegPorPag] = useState(10);
   const navigate = useNavigate();
 
   const cargarDashboard = useCallback(async () => {
@@ -48,10 +50,14 @@ export default function DashboardConsultor() {
   const metricas = data?.metricas || { total: 0, aceptadas: 0, pendientes: 0, total_horas: 0 };
   const distribucion: any[] = data?.distribucion || [];
 
-  const docentesFiltrados = docentes.filter(d =>
+  const docentesFiltrados = useMemo(() => docentes.filter(d =>
     d.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
     d.correo?.toLowerCase().includes(searchQuery.toLowerCase())
-  ).sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
+  ).sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' })), [docentes, searchQuery]);
+
+  const totalPaginas = Math.max(1, Math.ceil(docentesFiltrados.length / regPorPag));
+  const paginaSegura = Math.min(paginaActual, totalPaginas);
+  const docentesPagina = docentesFiltrados.slice((paginaSegura - 1) * regPorPag, paginaSegura * regPorPag);
 
   const periodoLabel = periodoActivo
     ? `${periodoActivo.anio} - ${periodoActivo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`
@@ -154,9 +160,9 @@ export default function DashboardConsultor() {
                   className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-teal-400 w-full sm:w-52"
                 />
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                  <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                     <tr>
                       <th className="px-5 py-3 text-left font-bold">Docente</th>
                       <th className="px-5 py-3 text-left font-bold">Contrato</th>
@@ -173,7 +179,7 @@ export default function DashboardConsultor() {
                           No se encontraron docentes para auditar
                         </td>
                       </tr>
-                    ) : docentesFiltrados.map((d) => {
+                    ) : docentesPagina.map((d) => {
                       const estado = getEstadoDocente(d);
                       const total = parseInt(d.total_funciones);
                       const aceptadas = parseInt(d.funciones_aceptadas);
@@ -230,6 +236,33 @@ export default function DashboardConsultor() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Paginación */}
+              {docentesFiltrados.length > 0 && (
+                <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span>Mostrar</span>
+                    <select value={regPorPag} onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
+                      className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-teal-400">
+                      {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <span>registros · {docentesFiltrados.length} total</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} disabled={paginaSegura === 1}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">‹</button>
+                    {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+                      <span key={p}>
+                        {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                        <button onClick={() => setPaginaActual(p)}
+                          className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${p === paginaSegura ? 'bg-teal-600 text-white border-teal-600' : 'border-gray-200 hover:bg-gray-50'}`}>{p}</button>
+                      </span>
+                    ))}
+                    <button onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))} disabled={paginaSegura === totalPaginas}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">›</button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* GRÁFICAS */}

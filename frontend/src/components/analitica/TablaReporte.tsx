@@ -23,15 +23,16 @@ interface Props<T> {
 }
 
 /**
- * Tabla de reporte genérica: buscador, encabezado y estado vacío comunes.
- * Las columnas se declaran desde fuera para no repetir esta estructura en
- * cada indicador de tipo tabla.
+ * Tabla de reporte genérica: buscador, encabezado, estado vacío,
+ * contenedor scroll delimitado y paginación.
  */
 export default function TablaReporte<T>({
   titulo, descripcion, notaTecnica, columnas, filas,
   buscarEn = [], mensajeVacio = 'No hay registros para este período.', resumen, claveFila
 }: Props<T>) {
   const [busqueda, setBusqueda] = useState('');
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [regPorPag, setRegPorPag] = useState(10);
 
   const visibles = useMemo(() => {
     const q = busqueda.toLowerCase().trim();
@@ -40,6 +41,11 @@ export default function TablaReporte<T>({
       buscarEn.some((campo) => String(f[campo] ?? '').toLowerCase().includes(q))
     );
   }, [filas, busqueda, buscarEn]);
+
+  const totalPaginas = Math.max(1, Math.ceil(visibles.length / regPorPag));
+  const paginaSegura = Math.min(paginaActual, totalPaginas);
+  const inicio = (paginaSegura - 1) * regPorPag;
+  const filasPagina = visibles.slice(inicio, inicio + regPorPag);
 
   // Acceso genérico por nombre de columna cuando no hay `render` propio
   const celda = (fila: T, clave: string) => String((fila as Record<string, unknown>)[clave] ?? '');
@@ -59,13 +65,13 @@ export default function TablaReporte<T>({
             <input
               type="text"
               value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
+              onChange={(e) => { setBusqueda(e.target.value); setPaginaActual(1); }}
               placeholder="Buscar…"
               className="w-56 pl-9 pr-8 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-[#00a896] focus:ring-1 focus:ring-[#00a896]/30"
             />
             {busqueda && (
               <button
-                onClick={() => setBusqueda('')}
+                onClick={() => { setBusqueda(''); setPaginaActual(1); }}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
@@ -83,10 +89,10 @@ export default function TablaReporte<T>({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto border-t border-slate-100">
+        <div className="overflow-x-auto overflow-y-auto max-h-[460px] border-t border-slate-100">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
+              <tr className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 shadow-2xs">
                 {columnas.map((col) => (
                   <th
                     key={col.clave}
@@ -100,7 +106,7 @@ export default function TablaReporte<T>({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {visibles.map((fila, i) => (
+              {filasPagina.map((fila, i) => (
                 <tr key={claveFila(fila, i)} className="hover:bg-slate-50/70 transition-colors">
                   {columnas.map((col) => (
                     <td
@@ -114,6 +120,52 @@ export default function TablaReporte<T>({
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Paginación */}
+      {visibles.length > 0 && (
+        <div className="px-5 py-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>Mostrar</span>
+            <select
+              value={regPorPag}
+              onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
+              className="border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-[#00a896]"
+            >
+              {[10, 20, 30, 50].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <span>registros · {visibles.length} total</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPaginaActual(p => Math.max(1, p - 1))}
+              disabled={paginaSegura === 1}
+              className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              ‹
+            </button>
+            {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+              <span key={p}>
+                {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-slate-400">…</span>}
+                <button
+                  onClick={() => setPaginaActual(p)}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
+                    p === paginaSegura ? 'bg-[#1a2744] text-white border-[#1a2744]' : 'border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {p}
+                </button>
+              </span>
+            ))}
+            <button
+              onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))}
+              disabled={paginaSegura === totalPaginas}
+              className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              ›
+            </button>
+          </div>
         </div>
       )}
 

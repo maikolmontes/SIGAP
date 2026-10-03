@@ -444,6 +444,8 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
     const [busqueda, setBusqueda] = useState('');
     const [soloInconsistentes, setSoloInconsistentes] = useState(false);
     const [toast, setToast] = useState<{ tipo: 'exito' | 'error'; mensaje: string } | null>(null);
+    const [paginaActual, setPaginaActual] = useState(1);
+    const [regPorPag, setRegPorPag] = useState(10);
 
     const cargar = useCallback(async () => {
         setLoading(true);
@@ -468,14 +470,18 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
         return () => clearTimeout(t);
     }, [toast]);
 
-    const filtradas = asignaciones.filter(a => {
+    const filtradas = useMemo(() => asignaciones.filter(a => {
         const coincideBusqueda =
             a.nombre_docente.toLowerCase().includes(busqueda.toLowerCase()) ||
             a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase()) ||
             a.correo?.toLowerCase().includes(busqueda.toLowerCase());
         if (soloInconsistentes) return coincideBusqueda && !a.coincide;
         return coincideBusqueda;
-    }).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' }));
+    }).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' })), [asignaciones, busqueda, soloInconsistentes]);
+
+    const totalPaginas = Math.max(1, Math.ceil(filtradas.length / regPorPag));
+    const paginaSegura = Math.min(paginaActual, totalPaginas);
+    const filtPagina = filtradas.slice((paginaSegura - 1) * regPorPag, paginaSegura * regPorPag);
 
     const totalInconsistentes = asignaciones.filter(a => !a.coincide).length;
     const totalCorrectas = asignaciones.length - totalInconsistentes;
@@ -603,18 +609,47 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {filtradas.map(a => (
-                        <TarjetaAsignacion
-                            key={a.id_usuario}
-                            asignacion={a}
-                            puedeEditar={puedeEditar}
-                            puedeAprobar={puedeAprobar}
-                            onGuardado={manejarGuardado}
-                            onError={(m) => setToast({ tipo: 'error', mensaje: m })}
-                        />
-                    ))}
-                </div>
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {filtPagina.map(a => (
+                            <TarjetaAsignacion
+                                key={a.id_usuario}
+                                asignacion={a}
+                                puedeEditar={puedeEditar}
+                                puedeAprobar={puedeAprobar}
+                                onGuardado={manejarGuardado}
+                                onError={(m) => setToast({ tipo: 'error', mensaje: m })}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Paginación */}
+                    {filtradas.length > 0 && (
+                        <div className="mt-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span>Mostrar</span>
+                                <select value={regPorPag} onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
+                                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-400">
+                                    {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                                <span>registros · {filtradas.length} total</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} disabled={paginaSegura === 1}
+                                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">‹</button>
+                                {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+                                    <span key={p}>
+                                        {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                                        <button onClick={() => setPaginaActual(p)}
+                                            className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${p === paginaSegura ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 hover:bg-gray-50'}`}>{p}</button>
+                                    </span>
+                                ))}
+                                <button onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))} disabled={paginaSegura === totalPaginas}
+                                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">›</button>
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );

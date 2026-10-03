@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '../../services/api';
 import {
   Users, CheckCircle, Clock, TrendingUp, AlertCircle,
   Upload, UploadCloud, X, ClipboardList, Calendar, Lock,
-  FileBarChart2, RefreshCw, Trash2, ChevronDown, ChevronUp, UserX, Info, BookOpen, Search
+  FileBarChart2, RefreshCw, Trash2, ChevronDown, ChevronUp, UserX, Info, BookOpen, Search,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Filter
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
@@ -196,12 +197,17 @@ export default function PanelAgendasTiempoReal({
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [modalEliminarAbierto, setModalEliminarAbierto] = useState(false);
+  const [confirmacionEliminar, setConfirmacionEliminar] = useState('');
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('');
   const [filtroContrato, setFiltroContrato] = useState('');
   const [filtroFacultad, setFiltroFacultad] = useState<number | ''>('');
   const [filtroPrograma, setFiltroPrograma] = useState<number | ''>('');
+  const [mostrarFiltros, setMostrarFiltros] = useState(true);
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [registrosPorPagina, setRegistrosPorPagina] = useState(10);
   const [docenteSeleccionado, setDocenteSeleccionado] = useState<any>(null);
   const [distribucionDocente, setDistribucionDocente] = useState<any[]>([]);
   const [loadingDistribucion, setLoadingDistribucion] = useState(false);
@@ -350,15 +356,26 @@ export default function PanelAgendasTiempoReal({
       alert('Debes seleccionar una facultad y un programa antes de eliminar agendas.');
       return;
     }
+    // La confirmación se hace en un modal donde hay que escribir el nombre del programa
+    setConfirmacionEliminar('');
+    setModalEliminarAbierto(true);
+  };
+
+  const confirmarEliminarAgendas = async () => {
     const progNombre = programas.find(p => p.id_programa === programaSel)?.nombre_programa || 'el programa seleccionado';
-    if (!window.confirm(`¿Está seguro de eliminar TODAS las agendas de "${progNombre}" en este periodo activo?\n\nEsta acción borrará todas las funciones, actividades, metas, indicadores y evidencias asociadas y no se podrá deshacer.`)) {
-      return;
-    }
+    setModalEliminarAbierto(false);
     setUploading(true);
     setUploadResult(null);
     try {
-      await api.delete('/director/eliminar-agendas', { data: { id_programa: programaSel } });
-      setUploadResult({ success: true, data: null, tipo: `Eliminación de agendas (${progNombre})` });
+      const res = await api.delete('/director/eliminar-agendas', {
+        data: { id_programa: programaSel, confirmacion: confirmacionEliminar }
+      });
+      const respaldo = res.data?.respaldo?.archivo;
+      setUploadResult({
+        success: true,
+        data: null,
+        tipo: `Eliminación de agendas (${progNombre})${respaldo ? ` — respaldo: ${respaldo}` : ''}`
+      });
       cargarDashboard();
     } catch (err: any) {
       setUploadResult({ success: false, error: err.response?.data?.error || 'Error de conexión al eliminar las agendas.' });
@@ -387,6 +404,33 @@ export default function PanelAgendasTiempoReal({
     const coincidePrograma = !filtroPrograma || d.id_programa === filtroPrograma;
     return coincideBusqueda && coincideContrato && coincideEstado && coincideFacultad && coincidePrograma;
   }).sort((a: any, b: any) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
+
+  const totalRegistros = docentesFiltrados.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalRegistros / registrosPorPagina));
+  const indiceInicio = (paginaActual - 1) * registrosPorPagina;
+  const indiceFin = Math.min(indiceInicio + registrosPorPagina, totalRegistros);
+
+  const docentesPaginados = useMemo(() => {
+    return docentesFiltrados.slice(indiceInicio, indiceFin);
+  }, [docentesFiltrados, indiceInicio, indiceFin]);
+
+  useEffect(() => {
+    setPaginaActual(1);
+  }, [searchQuery, filtroEstado, filtroContrato, filtroFacultad, filtroPrograma, registrosPorPagina]);
+
+  useEffect(() => {
+    if (paginaActual > totalPaginas) {
+      setPaginaActual(totalPaginas);
+    }
+  }, [paginaActual, totalPaginas]);
+
+  const totalFiltrosActivos = [
+    Boolean(searchQuery.trim()),
+    Boolean(filtroFacultad),
+    Boolean(filtroPrograma),
+    Boolean(filtroEstado),
+    Boolean(filtroContrato)
+  ].filter(Boolean).length;
 
   const hayFiltros = searchQuery || filtroEstado || filtroContrato || filtroFacultad || filtroPrograma;
   const limpiarFiltros = () => {
@@ -556,6 +600,58 @@ export default function PanelAgendasTiempoReal({
         <ImportResultPanel result={uploadResult} onClose={() => setUploadResult(null)} />
       )}
 
+      {/* CONFIRMACIÓN DE ELIMINACIÓN: hay que escribir el nombre del programa */}
+      {modalEliminarAbierto && (() => {
+        const progNombre = programas.find(p => p.id_programa === programaSel)?.nombre_programa || '';
+        const coincide = confirmacionEliminar.trim().toLowerCase() === progNombre.trim().toLowerCase() && progNombre !== '';
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setModalEliminarAbierto(false)}
+          >
+            <div
+              className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="bg-rose-600 px-5 py-4 flex items-center gap-2 text-white">
+                <Trash2 className="w-5 h-5" />
+                <h3 className="font-bold">Eliminar todas las agendas del programa</h3>
+              </div>
+              <div className="p-5 space-y-3 text-sm text-gray-700">
+                <p>
+                  Se eliminarán todas las funciones, actividades, indicadores y evidencias de <strong>{progNombre}</strong> en
+                  el período activo. Antes de borrar, el sistema guarda una copia de seguridad en el servidor.
+                </p>
+                <p>Para confirmar, escribe el nombre del programa:</p>
+                <input
+                  autoFocus
+                  value={confirmacionEliminar}
+                  onChange={e => setConfirmacionEliminar(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && coincide) confirmarEliminarAgendas(); }}
+                  placeholder={progNombre}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-rose-500"
+                />
+              </div>
+              <div className="px-5 py-3 bg-gray-50 flex justify-end gap-2">
+                <button
+                  onClick={() => setModalEliminarAbierto(false)}
+                  className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-200 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  disabled={!coincide}
+                  onClick={confirmarEliminarAgendas}
+                  className="px-4 py-2 text-sm font-bold text-white bg-rose-600 hover:bg-rose-500 disabled:bg-rose-300 disabled:cursor-not-allowed rounded-lg"
+                >
+                  Eliminar definitivamente
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* SIN PERIODO ACTIVO */}
       {!periodoActivo && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center mb-7">
@@ -591,8 +687,8 @@ export default function PanelAgendasTiempoReal({
             {/* TABLA DOCENTES */}
             <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               {/* CABECERA CON FILTROS */}
-              <div className="px-6 py-4 border-b border-gray-100">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
+              <div className="border-b border-gray-100">
+                <div className="px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Estado de Docentes</h2>
                     <p className="text-xs text-gray-500 mt-0.5">Periodo: {periodoLabel}</p>
@@ -618,95 +714,129 @@ export default function PanelAgendasTiempoReal({
                   </div>
                 </div>
 
-                {/* FILA DE FILTROS */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Búsqueda */}
-                  <div className="relative flex-1 min-w-[160px]">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por nombre o correo..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
-                    />
+                {/* BARRA EXTENSIBLE DE FILTROS */}
+                <div 
+                  onClick={() => setMostrarFiltros(v => !v)}
+                  className="px-6 py-2.5 bg-gray-50/80 hover:bg-gray-100/80 border-t border-gray-100 flex items-center justify-between cursor-pointer select-none transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="p-1 rounded-md bg-blue-50 text-blue-600">
+                      <Filter className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Filtros de Búsqueda
+                    </span>
+                    {totalFiltrosActivos > 0 && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 rounded-full">
+                        {totalFiltrosActivos} aplicado{totalFiltrosActivos > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {totalFiltrosActivos > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          limpiarFiltros();
+                        }}
+                        className="text-xs font-semibold text-red-500 hover:text-red-700 hover:underline ml-2"
+                      >
+                        Limpiar filtros
+                      </button>
+                    )}
                   </div>
 
-                  {/* Filtro Facultad */}
-                  <select
-                    value={filtroFacultad}
-                    onChange={e => {
-                      setFiltroFacultad(e.target.value ? parseInt(e.target.value) : '');
-                      setFiltroPrograma('');
-                    }}
-                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
-                  >
-                    <option value="">Todas las facultades</option>
-                    {(facultadesTabla as any[]).map(f => (
-                      <option key={f.id_facultad} value={f.id_facultad}>{f.nombre_facultad}</option>
-                    ))}
-                  </select>
-
-                  {/* Filtro Programa (encadenado a facultad) */}
-                  <select
-                    value={filtroPrograma}
-                    onChange={e => setFiltroPrograma(e.target.value ? parseInt(e.target.value) : '')}
-                    disabled={programasTabla.length === 0}
-                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">Todos los programas</option>
-                    {(programasTabla as any[]).map(p => (
-                      <option key={p.id_programa} value={p.id_programa}>{p.nombre_programa}</option>
-                    ))}
-                  </select>
-
-                  {/* Filtro Estado */}
-                  <select
-                    value={filtroEstado}
-                    onChange={e => setFiltroEstado(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
-                  >
-                    <option value="">Todos los estados</option>
-                    {['Pendiente', 'En progreso', 'Completa', 'Aprobada', 'Devuelta', 'Sin asignar'].map(e => (
-                      <option key={e} value={e}>{e}</option>
-                    ))}
-                  </select>
-
-                  {/* Filtro Contrato */}
-                  <select
-                    value={filtroContrato}
-                    onChange={e => setFiltroContrato(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
-                  >
-                    <option value="">Todos los contratos</option>
-                    {tiposContrato.map((tc: string) => (
-                      <option key={tc} value={tc}>{tc}</option>
-                    ))}
-                  </select>
-
-                  {/* Limpiar filtros */}
-                  {hayFiltros && (
-                    <button
-                      onClick={limpiarFiltros}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-semibold transition-all border border-gray-200"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      Limpiar filtros
-                    </button>
-                  )}
-
-                  {/* Contador de resultados */}
-                  {docentes.length > 0 && (
-                    <span className="text-xs text-gray-400 ml-auto">
-                      {docentesFiltrados.length} de {docentes.length} docentes
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 hover:text-blue-600 transition-colors">
+                    <span>{mostrarFiltros ? 'Ocultar filtros' : 'Extender y mostrar filtros'}</span>
+                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${mostrarFiltros ? 'rotate-180 text-blue-600' : ''}`} />
+                  </div>
                 </div>
+
+                {/* CONTENIDO DE FILTROS DESPLEGABLE */}
+                {mostrarFiltros && (
+                  <div className="px-6 py-3.5 bg-white border-t border-gray-100">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Búsqueda */}
+                      <div className="relative flex-1 min-w-[160px]">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por nombre o correo..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
+                        />
+                      </div>
+
+                      {/* Filtro Facultad */}
+                      <select
+                        value={filtroFacultad}
+                        onChange={e => {
+                          setFiltroFacultad(e.target.value ? parseInt(e.target.value) : '');
+                          setFiltroPrograma('');
+                        }}
+                        className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
+                      >
+                        <option value="">Todas las facultades</option>
+                        {(facultadesTabla as any[]).map(f => (
+                          <option key={f.id_facultad} value={f.id_facultad}>{f.nombre_facultad}</option>
+                        ))}
+                      </select>
+
+                      {/* Filtro Programa */}
+                      <select
+                        value={filtroPrograma}
+                        onChange={e => setFiltroPrograma(e.target.value ? parseInt(e.target.value) : '')}
+                        disabled={programasTabla.length === 0}
+                        className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <option value="">Todos los programas</option>
+                        {(programasTabla as any[]).map(p => (
+                          <option key={p.id_programa} value={p.id_programa}>{p.nombre_programa}</option>
+                        ))}
+                      </select>
+
+                      {/* Filtro Estado */}
+                      <select
+                        value={filtroEstado}
+                        onChange={e => setFiltroEstado(e.target.value)}
+                        className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
+                      >
+                        <option value="">Todos los estados</option>
+                        {['Pendiente', 'En progreso', 'Completa', 'Aprobada', 'Devuelta', 'Sin asignar'].map(e => (
+                          <option key={e} value={e}>{e}</option>
+                        ))}
+                      </select>
+
+                      {/* Filtro Contrato */}
+                      <select
+                        value={filtroContrato}
+                        onChange={e => setFiltroContrato(e.target.value)}
+                        className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 focus:outline-none focus:border-blue-400 bg-white"
+                      >
+                        <option value="">Todos los contratos</option>
+                        {tiposContrato.map((tc: string) => (
+                          <option key={tc} value={tc}>{tc}</option>
+                        ))}
+                      </select>
+
+                      {/* Limpiar filtros */}
+                      {hayFiltros && (
+                        <button
+                          onClick={limpiarFiltros}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-semibold transition-all border border-gray-200"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          Limpiar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* BARRA DE ACCIÓN FLOTANTE cuando hay seleccionados */}
               {modoSeleccion && docentesParaEliminar.size > 0 && (
-                <div className="mx-4 mb-3 flex items-center justify-between gap-3 bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5">
+                <div className="mx-4 my-3 flex items-center justify-between gap-3 bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5">
                   <div className="flex items-center gap-2">
                     <span className="w-6 h-6 flex items-center justify-center bg-rose-600 text-white text-xs font-black rounded-full">
                       {docentesParaEliminar.size}
@@ -729,36 +859,36 @@ export default function PanelAgendasTiempoReal({
                 </div>
               )}
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+              <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
+                <table className="w-full text-sm relative">
+                  <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100 shadow-xs">
                     <tr>
                       {modoSeleccion && (
-                        <th className="px-3 py-3 text-center">
+                        <th className="px-3 py-3 text-center bg-gray-50">
                           <input
                             type="checkbox"
                             className="w-4 h-4 accent-rose-600 cursor-pointer"
-                            checked={docentesFiltrados.length > 0 && docentesParaEliminar.size === docentesFiltrados.length}
-                            onChange={() => toggleSeleccionTodos(docentesFiltrados)}
-                            title="Seleccionar todos"
+                            checked={docentesPaginados.length > 0 && docentesParaEliminar.size === docentesPaginados.length}
+                            onChange={() => toggleSeleccionTodos(docentesPaginados)}
+                            title="Seleccionar todos de esta página"
                           />
                         </th>
                       )}
-                      <th className="px-5 py-3 text-left font-bold">Docente</th>
-                      <th className="px-5 py-3 text-left font-bold">Programa</th>
-                      <th className="px-5 py-3 text-left font-bold">Contrato</th>
-                      <th className="px-5 py-3 text-center font-bold">Horas</th>
-                      <th className="px-5 py-3 text-center font-bold">Estado</th>
+                      <th className="px-5 py-3 text-left font-bold bg-gray-50">Docente</th>
+                      <th className="px-5 py-3 text-left font-bold bg-gray-50">Programa</th>
+                      <th className="px-5 py-3 text-left font-bold bg-gray-50">Contrato</th>
+                      <th className="px-5 py-3 text-center font-bold bg-gray-50">Horas</th>
+                      <th className="px-5 py-3 text-center font-bold bg-gray-50">Estado</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {docentesFiltrados.length === 0 ? (
+                  <tbody className="divide-y divide-gray-50 bg-white">
+                    {docentesPaginados.length === 0 ? (
                       <tr>
                         <td colSpan={modoSeleccion ? 6 : 5} className="px-5 py-10 text-center text-gray-400 text-sm">
                           {importacionRealizada ? 'No se encontraron docentes' : 'Importa un Excel para ver los docentes asignados'}
                         </td>
                       </tr>
-                    ) : docentesFiltrados.map((d) => {
+                    ) : docentesPaginados.map((d) => {
                       const estado = getEstadoDocente(d);
                       const isSelected = docenteSeleccionado?.id_usuario === d.id_usuario;
                       const isChecked = docentesParaEliminar.has(d.id_usuario);
@@ -826,6 +956,108 @@ export default function PanelAgendasTiempoReal({
                   </tbody>
                 </table>
               </div>
+
+              {/* PAGINACIÓN */}
+              {docentesFiltrados.length > 0 && (
+                <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+                  {/* Selector registros e info */}
+                  <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500 font-medium">Mostrar</span>
+                      <select
+                        value={registrosPorPagina}
+                        onChange={(e) => {
+                          setRegistrosPorPagina(Number(e.target.value));
+                          setPaginaActual(1);
+                        }}
+                        className="border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700 font-medium shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                      >
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                        <option value={15}>15</option>
+                        <option value={20}>20</option>
+                        <option value={25}>25</option>
+                      </select>
+                      <span className="text-gray-500 font-medium">por pág.</span>
+                    </div>
+
+                    <div className="text-gray-500">
+                      Mostrando <span className="font-semibold text-gray-800">{totalRegistros === 0 ? 0 : indiceInicio + 1}</span> a <span className="font-semibold text-gray-800">{indiceFin}</span> de <span className="font-semibold text-gray-800">{totalRegistros}</span> docentes
+                    </div>
+                  </div>
+
+                  {/* Botones de navegación */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setPaginaActual(1)}
+                      disabled={paginaActual === 1}
+                      title="Primera página"
+                      className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <ChevronsLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setPaginaActual(prev => Math.max(prev - 1, 1))}
+                      disabled={paginaActual === 1}
+                      title="Página anterior"
+                      className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Anterior</span>
+                    </button>
+
+                    {/* Números de página */}
+                    <div className="flex items-center gap-1 mx-1">
+                      {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+                        .filter(p => {
+                          if (totalPaginas <= 7) return true;
+                          if (p === 1 || p === totalPaginas) return true;
+                          return Math.abs(p - paginaActual) <= 1;
+                        })
+                        .map((p, idx, arr) => {
+                          const prev = arr[idx - 1];
+                          const showEllipsis = prev && p - prev > 1;
+
+                          return (
+                            <div key={p} className="flex items-center">
+                              {showEllipsis && (
+                                <span className="px-1 text-gray-400 select-none">...</span>
+                              )}
+                              <button
+                                onClick={() => setPaginaActual(p)}
+                                className={`w-7 h-7 rounded-md font-semibold text-xs transition-colors ${
+                                  paginaActual === p
+                                    ? 'bg-blue-600 text-white shadow-xs'
+                                    : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            </div>
+                          );
+                        })}
+                    </div>
+
+                    <button
+                      onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginas))}
+                      disabled={paginaActual === totalPaginas}
+                      title="Página siguiente"
+                      className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+                    >
+                      <span className="hidden sm:inline">Siguiente</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setPaginaActual(totalPaginas)}
+                      disabled={paginaActual === totalPaginas}
+                      title="Última página"
+                      className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <ChevronsRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
 

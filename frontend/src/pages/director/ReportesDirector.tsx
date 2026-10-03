@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
-import { BarChart3, PieChart as PieChartIcon, TrendingUp, Users, RefreshCw } from 'lucide-react';
+import {
+    BarChart3, PieChart as PieChartIcon, TrendingUp, Users, RefreshCw,
+    Search, X, Filter
+} from 'lucide-react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend
@@ -12,6 +15,10 @@ const COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ef4444'
 export default function ReportesDirector() {
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [busquedaPrograma, setBusquedaPrograma] = useState('');
+    const [filtroAprobacion, setFiltroAprobacion] = useState<'todos' | 'alto' | 'medio' | 'bajo'>('todos');
+    const [paginaActual, setPaginaActual] = useState(1);
+    const [regPorPag, setRegPorPag] = useState(10);
 
     const cargarReportes = async () => {
         setLoading(true);
@@ -28,6 +35,34 @@ export default function ReportesDirector() {
     useEffect(() => {
         cargarReportes();
     }, []);
+
+    const { periodo, estadisticas_programa, distribucion_perfiles, avance_por_bloque, totales } = data || {};
+    const periodoLabel = periodo ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}` : '';
+
+    // Filtrado y paginación de la tabla de programas
+    const programasFiltrados = useMemo(() => {
+        const list = estadisticas_programa || [];
+        const q = busquedaPrograma.toLowerCase().trim();
+        return list.filter((ep: any) => {
+            const coincide = !q || (ep.nombre_programa || '').toLowerCase().includes(q);
+            if (!coincide) return false;
+
+            if (filtroAprobacion === 'todos') return true;
+            const total = parseInt(ep.total_docentes) || 1;
+            const aprobadas = parseInt(ep.agendas_aprobadas) || 0;
+            const pct = Math.round((aprobadas / total) * 100);
+
+            if (filtroAprobacion === 'alto') return pct >= 80;
+            if (filtroAprobacion === 'medio') return pct >= 50 && pct < 80;
+            if (filtroAprobacion === 'bajo') return pct < 50;
+            return true;
+        });
+    }, [estadisticas_programa, busquedaPrograma, filtroAprobacion]);
+
+    const totalPaginas = Math.max(1, Math.ceil(programasFiltrados.length / regPorPag));
+    const paginaSegura = Math.min(paginaActual, totalPaginas);
+    const inicio = (paginaSegura - 1) * regPorPag;
+    const programasPagina = programasFiltrados.slice(inicio, inicio + regPorPag);
 
     if (loading) {
         return (
@@ -50,9 +85,6 @@ export default function ReportesDirector() {
             </Layout>
         );
     }
-
-    const { periodo, estadisticas_programa, distribucion_perfiles, avance_por_bloque, totales } = data;
-    const periodoLabel = `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}`;
 
     // Datos para gráfico de torta de estados
     const datosEstados = [
@@ -90,7 +122,7 @@ export default function ReportesDirector() {
                 </div>
                 <button
                     onClick={cargarReportes}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium rounded-xl transition-colors border border-blue-200"
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium rounded-xl transition-colors border border-blue-200 cursor-pointer"
                 >
                     <RefreshCw className="w-4 h-4" /> Actualizar
                 </button>
@@ -211,14 +243,64 @@ export default function ReportesDirector() {
             {/* Tabla de estadísticas por programa */}
             {estadisticas_programa && estadisticas_programa.length > 0 && (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-100">
-                        <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                            <Users className="w-4 h-4 text-indigo-500" /> Estadísticas por Programa
-                        </h3>
+                    <div className="px-6 py-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                                <Users className="w-4 h-4 text-indigo-500" /> Estadísticas por Programa
+                            </h3>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                                {programasFiltrados.length} de {estadisticas_programa.length} programas
+                            </p>
+                        </div>
+
+                        {/* Filtros y búsqueda */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Buscar programa..."
+                                    value={busquedaPrograma}
+                                    onChange={(e) => { setBusquedaPrograma(e.target.value); setPaginaActual(1); }}
+                                    className="pl-8 pr-7 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-indigo-400 w-44"
+                                />
+                                {busquedaPrograma && (
+                                    <button
+                                        onClick={() => { setBusquedaPrograma(''); setPaginaActual(1); }}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+                                {[
+                                    { valor: 'todos', texto: 'Todos' },
+                                    { valor: 'alto', texto: '≥80%' },
+                                    { valor: 'medio', texto: '50-79%' },
+                                    { valor: 'bajo', texto: '<50%' },
+                                ].map(op => (
+                                    <button
+                                        key={op.valor}
+                                        onClick={() => { setFiltroAprobacion(op.valor as any); setPaginaActual(1); }}
+                                        className={`px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                                            filtroAprobacion === op.valor
+                                                ? 'bg-indigo-600 text-white'
+                                                : 'bg-white text-gray-600 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        {op.texto}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
-                    <div className="overflow-x-auto">
+
+                    {/* Contenedor con Scroll vertical delimitado y sticky header */}
+                    <div className="overflow-x-auto overflow-y-auto max-h-[440px]">
                         <table className="w-full text-sm">
-                            <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                            <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100 shadow-2xs">
                                 <tr>
                                     <th className="px-5 py-3 text-left font-bold">Programa</th>
                                     <th className="px-5 py-3 text-center font-bold">Docentes</th>
@@ -230,42 +312,96 @@ export default function ReportesDirector() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                                {estadisticas_programa.map((ep: any, i: number) => {
-                                    const total = parseInt(ep.total_docentes) || 1;
-                                    const aprobadas = parseInt(ep.agendas_aprobadas) || 0;
-                                    const pct = Math.round((aprobadas / total) * 100);
+                                {programasPagina.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={7} className="px-5 py-8 text-center text-gray-400 text-xs">
+                                            No se encontraron programas que coincidan con la búsqueda.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    programasPagina.map((ep: any, i: number) => {
+                                        const total = parseInt(ep.total_docentes) || 1;
+                                        const aprobadas = parseInt(ep.agendas_aprobadas) || 0;
+                                        const pct = Math.round((aprobadas / total) * 100);
 
-                                    return (
-                                        <tr key={i} className="hover:bg-blue-50/30 transition-colors">
-                                            <td className="px-5 py-3.5 font-medium text-gray-900">{ep.nombre_programa}</td>
-                                            <td className="px-5 py-3.5 text-center font-bold text-gray-700">{ep.total_docentes}</td>
-                                            <td className="px-5 py-3.5 text-center text-gray-600">{parseFloat(ep.promedio_horas_directas).toFixed(1)}h</td>
-                                            <td className="px-5 py-3.5 text-center">
-                                                <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_aprobadas}</span>
-                                            </td>
-                                            <td className="px-5 py-3.5 text-center">
-                                                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_devueltas}</span>
-                                            </td>
-                                            <td className="px-5 py-3.5 text-center">
-                                                <span className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_pendientes}</span>
-                                            </td>
-                                            <td className="px-5 py-3.5 text-center">
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <div className="w-16 bg-gray-100 rounded-full h-2 overflow-hidden">
-                                                        <div
-                                                            className="h-full bg-gradient-to-r from-green-400 to-green-600 rounded-full transition-all"
-                                                            style={{ width: `${pct}%` }}
-                                                        />
+                                        return (
+                                            <tr key={i} className="hover:bg-blue-50/30 transition-colors">
+                                                <td className="px-5 py-3.5 font-medium text-gray-900">{ep.nombre_programa}</td>
+                                                <td className="px-5 py-3.5 text-center font-bold text-gray-700">{ep.total_docentes}</td>
+                                                <td className="px-5 py-3.5 text-center text-gray-600">{parseFloat(ep.promedio_horas_directas).toFixed(1)}h</td>
+                                                <td className="px-5 py-3.5 text-center">
+                                                    <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_aprobadas}</span>
+                                                </td>
+                                                <td className="px-5 py-3.5 text-center">
+                                                    <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_devueltas}</span>
+                                                </td>
+                                                <td className="px-5 py-3.5 text-center">
+                                                    <span className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_pendientes}</span>
+                                                </td>
+                                                <td className="px-5 py-3.5 text-center">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        <div className="w-16 bg-gray-100 rounded-full h-2 overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-gradient-to-r from-green-400 to-green-600 rounded-full transition-all"
+                                                                style={{ width: `${pct}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className="text-xs font-bold text-gray-600">{pct}%</span>
                                                     </div>
-                                                    <span className="text-xs font-bold text-gray-600">{pct}%</span>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                )}
                             </tbody>
                         </table>
                     </div>
+
+                    {/* Paginación */}
+                    {programasFiltrados.length > 0 && (
+                        <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span>Mostrar</span>
+                                <select
+                                    value={regPorPag}
+                                    onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
+                                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-400"
+                                >
+                                    {[5, 10, 15, 20].map(n => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                                <span>programas · {programasFiltrados.length} total</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setPaginaActual(p => Math.max(1, p - 1))}
+                                    disabled={paginaSegura === 1}
+                                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50 transition-colors cursor-pointer"
+                                >
+                                    ‹
+                                </button>
+                                {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+                                    <span key={p}>
+                                        {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                                        <button
+                                            onClick={() => setPaginaActual(p)}
+                                            className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
+                                                p === paginaSegura ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            {p}
+                                        </button>
+                                    </span>
+                                ))}
+                                <button
+                                    onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))}
+                                    disabled={paginaSegura === totalPaginas}
+                                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50 transition-colors cursor-pointer"
+                                >
+                                    ›
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </Layout>

@@ -21,7 +21,13 @@ import {
     CheckCircle, 
     AlertCircle,
     Users,
-    UserPlus
+    UserPlus,
+    ChevronLeft,
+    ChevronRight,
+    ChevronsLeft,
+    ChevronsRight,
+    Filter,
+    ChevronDown
 } from 'lucide-react'
 
 interface Periodo {
@@ -64,6 +70,9 @@ export default function DashboardPlaneacion() {
     const [filtroFacultad, setFiltroFacultad] = useState<string>('Todas')
     const [filtroPrograma, setFiltroPrograma] = useState<string>('Todos')
     const [filtroEstado, setFiltroEstado] = useState<'Todos' | 'Activos' | 'Inactivos'>('Todos')
+    const [mostrarFiltros, setMostrarFiltros] = useState(true)
+    const [paginaActual, setPaginaActual] = useState(1)
+    const [registrosPorPagina, setRegistrosPorPagina] = useState(10)
     const [cargando, setCargando] = useState(true)
     const [error, setError] = useState('')
     const [toast, setToast] = useState<{ tipo: 'exito' | 'error'; mensaje: string } | null>(null)
@@ -312,6 +321,34 @@ export default function DashboardPlaneacion() {
 
         return matchBusqueda && matchEstado && matchFacultad && matchPrograma
     }).sort((a, b) => ((a.nombres || '') + ' ' + (a.apellidos || '')).trim().localeCompare(((b.nombres || '') + ' ' + (b.apellidos || '')).trim(), 'es', { sensitivity: 'base' }))
+
+    const totalFiltrosActivos = [
+        Boolean(busqueda.trim()),
+        filtroFacultad !== 'Todas',
+        filtroPrograma !== 'Todos',
+        filtroEstado !== 'Todos'
+    ].filter(Boolean).length
+
+    const totalRegistros = docentesFiltrados.length
+    const totalPaginas = Math.max(1, Math.ceil(totalRegistros / registrosPorPagina))
+    const indiceInicio = (paginaActual - 1) * registrosPorPagina
+    const indiceFin = Math.min(indiceInicio + registrosPorPagina, totalRegistros)
+
+    const docentesPaginados = useMemo(() => {
+        return docentesFiltrados.slice(indiceInicio, indiceFin)
+    }, [docentesFiltrados, indiceInicio, indiceFin])
+
+    // Resetear a página 1 cuando cambian los filtros o la cantidad de registros por página
+    useEffect(() => {
+        setPaginaActual(1)
+    }, [busqueda, filtroFacultad, filtroPrograma, filtroEstado, registrosPorPagina])
+
+    // Asegurar que paginaActual no sobrepase el total de páginas
+    useEffect(() => {
+        if (paginaActual > totalPaginas) {
+            setPaginaActual(totalPaginas)
+        }
+    }, [paginaActual, totalPaginas])
 
     const handleToggle = async (id: number) => {
         try {
@@ -574,81 +611,129 @@ export default function DashboardPlaneacion() {
                         </div>
                     )}
 
-                    {/* ── Barra de Filtros (Búsqueda, Facultad, Programa, Estado) ── */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-                        {/* Buscador */}
-                        <div className="relative">
-                            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            <input
-                                type="text"
-                                placeholder="Buscar docente, correo..."
-                                value={busqueda}
-                                onChange={e => setBusqueda(e.target.value)}
-                                className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-                            />
+                    {/* ── Sección de Filtros de Búsqueda (Extensible / Colapsable) ── */}
+                    <div className="bg-white border border-gray-200 rounded-xl mb-4 shadow-xs overflow-hidden transition-all">
+                        {/* Cabecera para extender/mostrar u ocultar */}
+                        <div 
+                            onClick={() => setMostrarFiltros(!mostrarFiltros)}
+                            className="px-4 py-3 bg-gray-50/70 hover:bg-gray-100/70 flex items-center justify-between cursor-pointer select-none transition-colors"
+                        >
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-1.5 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
+                                    <Filter className="w-4 h-4" />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-gray-800 uppercase tracking-wider">
+                                        Filtros de Búsqueda
+                                    </span>
+                                    {totalFiltrosActivos > 0 && (
+                                        <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 rounded-full">
+                                            {totalFiltrosActivos} aplicado{totalFiltrosActivos > 1 ? 's' : ''}
+                                        </span>
+                                    )}
+                                </div>
+                                {totalFiltrosActivos > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            setBusqueda('')
+                                            setFiltroFacultad('Todas')
+                                            setFiltroPrograma('Todos')
+                                            setFiltroEstado('Todos')
+                                        }}
+                                        className="text-xs font-semibold text-red-500 hover:text-red-700 hover:underline ml-2"
+                                    >
+                                        Limpiar filtros
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 hover:text-blue-600 transition-colors">
+                                <span>{mostrarFiltros ? 'Ocultar filtros' : 'Extender y mostrar filtros'}</span>
+                                <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${mostrarFiltros ? 'rotate-180 text-blue-600' : ''}`} />
+                            </div>
                         </div>
 
-                        {/* Filtro Facultad */}
-                        <div>
-                            <select
-                                value={filtroFacultad}
-                                onChange={e => handleFacultadChange(e.target.value)}
-                                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-                            >
-                                <option value="Todas">Todas las Facultades</option>
-                                {facultades.map((f: any) => (
-                                    <option key={f.id_facultad || f.nombre_facultad} value={f.nombre_facultad}>
-                                        {f.nombre_facultad}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                        {/* Contenido de Filtros */}
+                        {mostrarFiltros && (
+                            <div className="p-4 border-t border-gray-100 bg-white">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                                    {/* Buscador */}
+                                    <div className="relative">
+                                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                        </svg>
+                                        <input
+                                            type="text"
+                                            placeholder="Buscar docente, correo..."
+                                            value={busqueda}
+                                            onChange={e => setBusqueda(e.target.value)}
+                                            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                                        />
+                                    </div>
 
-                        {/* Filtro Programa */}
-                        <div>
-                            <select
-                                value={filtroPrograma}
-                                onChange={e => setFiltroPrograma(e.target.value)}
-                                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-                            >
-                                <option value="Todos">Todos los Programas</option>
-                                {programasDisponibles.map((p: any) => (
-                                    <option key={p.id_programa || p.nombre_programa} value={p.nombre_programa}>
-                                        {p.nombre_programa}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                                    {/* Filtro Facultad */}
+                                    <div>
+                                        <select
+                                            value={filtroFacultad}
+                                            onChange={e => handleFacultadChange(e.target.value)}
+                                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                                        >
+                                            <option value="Todas">Todas las Facultades</option>
+                                            {facultades.map((f: any) => (
+                                                <option key={f.id_facultad || f.nombre_facultad} value={f.nombre_facultad}>
+                                                    {f.nombre_facultad}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
 
-                        {/* Filtro Estado + Limpiar */}
-                        <div className="flex gap-2">
-                            <select
-                                value={filtroEstado}
-                                onChange={e => setFiltroEstado(e.target.value as any)}
-                                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-                            >
-                                <option value="Todos">Todos los Estados</option>
-                                <option value="Activos">Solo Activos</option>
-                                <option value="Inactivos">Solo Inactivos</option>
-                            </select>
+                                    {/* Filtro Programa */}
+                                    <div>
+                                        <select
+                                            value={filtroPrograma}
+                                            onChange={e => setFiltroPrograma(e.target.value)}
+                                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                                        >
+                                            <option value="Todos">Todos los Programas</option>
+                                            {programasDisponibles.map((p: any) => (
+                                                <option key={p.id_programa || p.nombre_programa} value={p.nombre_programa}>
+                                                    {p.nombre_programa}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
 
-                            {(busqueda || filtroFacultad !== 'Todas' || filtroPrograma !== 'Todos' || filtroEstado !== 'Todos') && (
-                                <button
-                                    onClick={() => {
-                                        setBusqueda('')
-                                        setFiltroFacultad('Todas')
-                                        setFiltroPrograma('Todos')
-                                        setFiltroEstado('Todos')
-                                    }}
-                                    className="px-3 py-2 text-xs font-semibold text-gray-500 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 rounded-lg transition-colors whitespace-nowrap"
-                                    title="Restablecer filtros"
-                                >
-                                    Limpiar
-                                </button>
-                            )}
-                        </div>
+                                    {/* Filtro Estado + Limpiar */}
+                                    <div className="flex gap-2">
+                                        <select
+                                            value={filtroEstado}
+                                            onChange={e => setFiltroEstado(e.target.value as any)}
+                                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                                        >
+                                            <option value="Todos">Todos los Estados</option>
+                                            <option value="Activos">Solo Activos</option>
+                                            <option value="Inactivos">Solo Inactivos</option>
+                                        </select>
+
+                                        {totalFiltrosActivos > 0 && (
+                                            <button
+                                                onClick={() => {
+                                                    setBusqueda('')
+                                                    setFiltroFacultad('Todas')
+                                                    setFiltroPrograma('Todos')
+                                                    setFiltroEstado('Todos')
+                                                }}
+                                                className="px-3 py-2 text-xs font-semibold text-gray-500 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 rounded-lg transition-colors whitespace-nowrap"
+                                                title="Restablecer filtros"
+                                            >
+                                                Limpiar
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* ── Tabla de docentes ── */}
@@ -669,22 +754,22 @@ export default function DashboardPlaneacion() {
                                 </p>
                             </div>
                         ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm min-w-[850px]">
-                                    <thead>
+                            <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
+                                <table className="w-full text-sm min-w-[850px] relative">
+                                    <thead className="sticky top-0 z-10 bg-gray-50 shadow-xs border-b border-gray-200">
                                         <tr className="bg-gray-50 border-b border-gray-200">
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Nombres</th>
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Apellidos</th>
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Correo</th>
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Facultad</th>
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Programa</th>
-                                            <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Contrato / Horas</th>
-                                            <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-28">Estado</th>
-                                            <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 w-20">Acciones</th>
+                                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 bg-gray-50">Nombres</th>
+                                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 bg-gray-50">Apellidos</th>
+                                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 bg-gray-50">Correo</th>
+                                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 bg-gray-50">Facultad</th>
+                                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 bg-gray-50">Programa</th>
+                                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 bg-gray-50">Contrato / Horas</th>
+                                            <th className="text-center px-4 py-3 text-xs font-semibold text-gray-600 bg-gray-50 w-28">Estado</th>
+                                            <th className="text-center px-4 py-3 text-xs font-semibold text-gray-600 bg-gray-50 w-20">Acciones</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {docentesFiltrados.map((d) => (
+                                    <tbody className="divide-y divide-gray-100 bg-white">
+                                        {docentesPaginados.map((d) => (
                                             <tr key={d.id_usuario} className="hover:bg-gray-50 transition-colors">
                                                 <td className="px-4 py-3 font-medium text-gray-800">{d.nombres}</td>
                                                 <td className="px-4 py-3 text-gray-700">{d.apellidos}</td>
@@ -749,9 +834,103 @@ export default function DashboardPlaneacion() {
                             </div>
                         )}
                         {!cargando && docentesFiltrados.length > 0 && (
-                            <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-400 flex justify-between">
-                                <span>Mostrando {docentesFiltrados.length} docentes asignados</span>
-                                <span>{docentes.filter(d => d.activo).length} activos</span>
+                            <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+                                {/* Selector de registros por página e info */}
+                                <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500 font-medium">Mostrar</span>
+                                        <select
+                                            value={registrosPorPagina}
+                                            onChange={(e) => {
+                                                setRegistrosPorPagina(Number(e.target.value))
+                                                setPaginaActual(1)
+                                            }}
+                                            className="border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700 font-medium shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                        >
+                                            <option value={5}>5</option>
+                                            <option value={10}>10</option>
+                                            <option value={15}>15</option>
+                                            <option value={20}>20</option>
+                                            <option value={25}>25</option>
+                                        </select>
+                                        <span className="text-gray-500 font-medium">por pág.</span>
+                                    </div>
+                                    
+                                    <div className="text-gray-500">
+                                        Mostrando <span className="font-semibold text-gray-800">{totalRegistros === 0 ? 0 : indiceInicio + 1}</span> a <span className="font-semibold text-gray-800">{indiceFin}</span> de <span className="font-semibold text-gray-800">{totalRegistros}</span> docentes
+                                    </div>
+                                </div>
+
+                                {/* Botones de paginación */}
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => setPaginaActual(1)}
+                                        disabled={paginaActual === 1}
+                                        title="Primera página"
+                                        className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronsLeft className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => setPaginaActual(prev => Math.max(prev - 1, 1))}
+                                        disabled={paginaActual === 1}
+                                        title="Página anterior"
+                                        className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+                                    >
+                                        <ChevronLeft className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline">Anterior</span>
+                                    </button>
+
+                                    {/* Números de página */}
+                                    <div className="flex items-center gap-1 mx-1">
+                                        {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+                                            .filter(p => {
+                                                if (totalPaginas <= 7) return true
+                                                if (p === 1 || p === totalPaginas) return true
+                                                return Math.abs(p - paginaActual) <= 1
+                                            })
+                                            .map((p, idx, arr) => {
+                                                const prev = arr[idx - 1]
+                                                const showEllipsis = prev && p - prev > 1
+
+                                                return (
+                                                    <div key={p} className="flex items-center">
+                                                        {showEllipsis && (
+                                                            <span className="px-1 text-gray-400 select-none">...</span>
+                                                        )}
+                                                        <button
+                                                            onClick={() => setPaginaActual(p)}
+                                                            className={`w-7 h-7 rounded-md font-semibold text-xs transition-colors ${
+                                                                paginaActual === p
+                                                                    ? 'bg-blue-600 text-white shadow-xs'
+                                                                    : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'
+                                                            }`}
+                                                        >
+                                                            {p}
+                                                        </button>
+                                                    </div>
+                                                )
+                                            })}
+                                    </div>
+
+                                    <button
+                                        onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginas))}
+                                        disabled={paginaActual === totalPaginas}
+                                        title="Página siguiente"
+                                        className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+                                    >
+                                        <span className="hidden sm:inline">Siguiente</span>
+                                        <ChevronRight className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                        onClick={() => setPaginaActual(totalPaginas)}
+                                        disabled={paginaActual === totalPaginas}
+                                        title="Última página"
+                                        className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronsRight className="w-4 h-4" />
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>

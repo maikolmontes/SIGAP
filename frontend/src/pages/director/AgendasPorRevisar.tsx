@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import { Search, Filter, Eye, AlertTriangle, CheckCircle2, XCircle, Clock, ChevronDown } from 'lucide-react';
@@ -25,6 +25,8 @@ export default function AgendasPorRevisar() {
     const [filtroPrograma, setFiltroPrograma] = useState('');
     const [busqueda, setBusqueda] = useState('');
     const [showFilters, setShowFilters] = useState(false);
+    const [paginaActual, setPaginaActual] = useState(1);
+    const [registrosPorPagina, setRegistrosPorPagina] = useState(10);
     // 'asignaciones'  = lo que cargó Planeación (aprobar y corregir horas)
     // 'diligenciadas' = agendas ya diligenciadas (aprobar / devolver)
     // 'agendas'       = consulta de la agenda de semana 0
@@ -56,10 +58,15 @@ export default function AgendasPorRevisar() {
         cargarAgendas();
     }, [cargarAgendas]);
 
-    const agendasFiltradas = agendas.filter(a =>
+    const agendasFiltradas = useMemo(() => agendas.filter(a =>
         a.nombre_docente.toLowerCase().includes(busqueda.toLowerCase()) ||
         a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase())
-    ).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' }));
+    ).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' })), [agendas, busqueda]);
+
+    const totalPaginas = Math.max(1, Math.ceil(agendasFiltradas.length / registrosPorPagina));
+    const paginaSegura = Math.min(paginaActual, totalPaginas);
+    const inicio = (paginaSegura - 1) * registrosPorPagina;
+    const agendasPagina = agendasFiltradas.slice(inicio, inicio + registrosPorPagina);
 
     const programas = [...new Set(agendas.map(a => a.nombre_programa).filter(Boolean))];
     const periodoLabel = periodo ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}` : 'Sin periodo';
@@ -208,7 +215,7 @@ export default function AgendasPorRevisar() {
                 )}
 
                 {/* Tabla */}
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
                     {loading ? (
                         <div className="flex justify-center py-16">
                             <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
@@ -221,7 +228,7 @@ export default function AgendasPorRevisar() {
                         </div>
                     ) : (
                         <table className="w-full text-sm">
-                            <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                            <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                                 <tr>
                                     <th className="px-5 py-3 text-left font-bold">Docente</th>
                                     <th className="px-5 py-3 text-left font-bold">Programa</th>
@@ -232,7 +239,7 @@ export default function AgendasPorRevisar() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                                {agendasFiltradas.map((a) => {
+                                {agendasPagina.map((a) => {
                                     const badge = estadoBadge[a.estado_general] || estadoBadge.Pendiente;
                                     const esInconsistencia = a.perfil_docente === 'INCONSISTENCIAS EN AGENDA AC 30';
                                     return (
@@ -278,6 +285,38 @@ export default function AgendasPorRevisar() {
                         </table>
                     )}
                 </div>
+
+                {/* Paginación */}
+                {agendasFiltradas.length > 0 && (
+                    <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <span>Mostrar</span>
+                            <select
+                                value={registrosPorPagina}
+                                onChange={e => { setRegistrosPorPagina(Number(e.target.value)); setPaginaActual(1); }}
+                                className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-400"
+                            >
+                                {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                            <span>registros · {agendasFiltradas.length} total</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} disabled={paginaSegura === 1}
+                                className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50 transition-colors">‹</button>
+                            {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+                                <span key={p}>
+                                    {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                                    <button onClick={() => setPaginaActual(p)}
+                                        className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                                            p === paginaSegura ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 hover:bg-gray-50'
+                                        }`}>{p}</button>
+                                </span>
+                            ))}
+                            <button onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))} disabled={paginaSegura === totalPaginas}
+                                className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50 transition-colors">›</button>
+                        </div>
+                    </div>
+                )}
             </div>
             </>
             )}
