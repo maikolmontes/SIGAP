@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import {
   Users, CheckCircle, Clock, TrendingUp, AlertCircle,
-  X, BookOpen, Calendar, FileBarChart2, RefreshCw
+  X, BookOpen, Calendar, FileBarChart2, RefreshCw,
+  Filter, ChevronDown
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
@@ -37,6 +38,11 @@ export default function DashboardDirector() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('');
+  const [filtroContrato, setFiltroContrato] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [regPorPag, setRegPorPag] = useState(10);
   const [docenteSeleccionado, setDocenteSeleccionado] = useState<any>(null);
   const [distribucionDocente, setDistribucionDocente] = useState<any[]>([]);
   const [loadingDistribucion, setLoadingDistribucion] = useState(false);
@@ -87,10 +93,22 @@ export default function DashboardDirector() {
   const distribucion: any[] = data?.distribucion || [];
   const importacionRealizada = data?.importacionRealizada || false;
 
-  const docentesFiltrados = docentes.filter(d =>
-    d.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    d.correo?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const tiposContrato = useMemo(() => [...new Set(docentes.map(d => d.tipo_contrato).filter(Boolean))].sort(), [docentes]);
+
+  const docentesFiltrados = useMemo(() => docentes.filter(d => {
+    const q = searchQuery.toLowerCase();
+    const coincide = d.nombre.toLowerCase().includes(q) || d.correo?.toLowerCase().includes(q);
+    const coincideContrato = !filtroContrato || d.tipo_contrato === filtroContrato;
+    const estado = getEstadoDocente(d).label;
+    const coincideEstado = !filtroEstado || estado === filtroEstado;
+    return coincide && coincideContrato && coincideEstado;
+  }).sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' })),
+  [docentes, searchQuery, filtroContrato, filtroEstado]);
+
+  const totalPaginas = Math.max(1, Math.ceil(docentesFiltrados.length / regPorPag));
+  const paginaSegura = Math.min(paginaActual, totalPaginas);
+  const docentesPagina = docentesFiltrados.slice((paginaSegura - 1) * regPorPag, paginaSegura * regPorPag);
+  const hayFiltros = !!(filtroEstado || filtroContrato);
 
   const periodoLabel = periodoActivo
     ? `${periodoActivo.anio} - ${periodoActivo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`
@@ -175,23 +193,64 @@ export default function DashboardDirector() {
 
             {/* TABLA DOCENTES */}
             <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-gray-900">Estado de Docentes</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">Periodo: {periodoLabel}</p>
+              <div className="px-6 py-4 border-b border-gray-100">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Estado de Docentes</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Periodo: {periodoLabel} · {docentesFiltrados.length} docentes</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Buscar docente..."
+                      value={searchQuery}
+                      onChange={(e) => { setSearchQuery(e.target.value); setPaginaActual(1); }}
+                      className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-400 w-40"
+                    />
+                    <button
+                      onClick={() => setShowFilters(v => !v)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-colors ${
+                        hayFiltros ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      <Filter className="w-3.5 h-3.5" />
+                      Filtros
+                      {hayFiltros && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />}
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
                 </div>
-                <input
-                  type="text"
-                  placeholder="Buscar docente..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-400 w-full sm:w-48"
-                />
+                {showFilters && (
+                  <div className="pt-3 border-t border-gray-100 flex flex-wrap gap-2 items-center">
+                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Estado:</span>
+                    {['Aprobada', 'Completa', 'En progreso', 'Devuelta', 'Pendiente', 'Sin asignar'].map(e => (
+                      <button key={e} onClick={() => { setFiltroEstado(filtroEstado === e ? '' : e); setPaginaActual(1); }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                          filtroEstado === e ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                        }`}>{e}</button>
+                    ))}
+                    {tiposContrato.length > 0 && (
+                      <>
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-2">Contrato:</span>
+                        {tiposContrato.map(t => (
+                          <button key={t} onClick={() => { setFiltroContrato(filtroContrato === t ? '' : t); setPaginaActual(1); }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                              filtroContrato === t ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                            }`}>{t}</button>
+                        ))}
+                      </>
+                    )}
+                    {hayFiltros && (
+                      <button onClick={() => { setFiltroEstado(''); setFiltroContrato(''); setPaginaActual(1); }}
+                        className="px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors">Limpiar</button>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                  <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                     <tr>
                       <th className="px-5 py-3 text-left font-bold">Docente</th>
                       <th className="px-5 py-3 text-left font-bold">Contrato</th>
@@ -209,7 +268,7 @@ export default function DashboardDirector() {
                             : 'Aún no hay asignaciones cargadas para este periodo. Planeación debe importarlas.'}
                         </td>
                       </tr>
-                    ) : docentesFiltrados.map((d) => {
+                    ) : docentesPagina.map((d) => {
                       const estado = getEstadoDocente(d);
                       const total = parseInt(d.total_funciones);
                       const aceptadas = parseInt(d.funciones_aceptadas);
@@ -266,6 +325,33 @@ export default function DashboardDirector() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Paginación */}
+              {docentesFiltrados.length > 0 && (
+                <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span>Mostrar</span>
+                    <select value={regPorPag} onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
+                      className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-400">
+                      {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <span>registros · {docentesFiltrados.length} total</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} disabled={paginaSegura === 1}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">‹</button>
+                    {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+                      <span key={p}>
+                        {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                        <button onClick={() => setPaginaActual(p)}
+                          className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${p === paginaSegura ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 hover:bg-gray-50'}`}>{p}</button>
+                      </span>
+                    ))}
+                    <button onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))} disabled={paginaSegura === totalPaginas}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">›</button>
+                  </div>
+                </div>
+              )}
             </div>
 
 

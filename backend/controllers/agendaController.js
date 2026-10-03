@@ -40,7 +40,7 @@ const getAgenda = async (req, res) => {
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
             JOIN periodo p ON p.id_periodo = af.id_periodo
-            WHERE ua.id_usuario = $1 AND p.activo = true
+            WHERE ua.id_usuario = $1 AND p.activo = true AND af.estado_agenda <> 'Por Aprobar'
             ORDER BY af.id_funciones
         `, [id_usuario]);
 
@@ -68,7 +68,7 @@ const getAgenda = async (req, res) => {
                 JOIN descripcion d              ON aa.id_asignacionact = d.id_asignacionact
                 JOIN indicadores i              ON i.id_descripcion    = d.id_descripcion
                 JOIN periodo p                  ON p.id_periodo        = af.id_periodo
-                WHERE ua.id_usuario = $1 AND p.activo = true
+                WHERE ua.id_usuario = $1 AND p.activo = true AND af.estado_agenda <> 'Por Aprobar'
             ),
             ejecuciones_s8 AS (
                 SELECT
@@ -173,7 +173,7 @@ const getAgendaBase = async (req, res) => {
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
             JOIN periodo p ON p.id_periodo = af.id_periodo
-            WHERE ua.id_usuario = $1 AND p.activo = true
+            WHERE ua.id_usuario = $1 AND p.activo = true AND af.estado_agenda <> 'Por Aprobar'
             ORDER BY af.id_funciones
         `, [id_usuario]);
 
@@ -238,7 +238,7 @@ const getAgendaBase = async (req, res) => {
             LEFT JOIN descripcion d         ON aa.id_asignacionact = d.id_asignacionact
             LEFT JOIN indicadores i         ON i.id_descripcion    = d.id_descripcion
             JOIN periodo p                  ON p.id_periodo        = af.id_periodo
-            WHERE ua.id_usuario = $1 AND p.activo = true
+            WHERE ua.id_usuario = $1 AND p.activo = true AND af.estado_agenda <> 'Por Aprobar'
             ORDER BY af.id_funciones, aa.id_asignacionact, d.id_descripcion, i.id_indicadores
         `, [id_usuario]);
 
@@ -303,6 +303,19 @@ const guardarFuncionDocente = async (req, res) => {
                 for (let idx = 0; idx < descsToInsert.length; idx++) {
                     const descData = descsToInsert[idx];
                     const existingDesc = existingDescs[idx];
+
+                    // La meta es el denominador del porcentaje de avance: en
+                    // negativo el cálculo queda sin sentido (y llegó a guardarse
+                    // una meta de -7). Se valida aquí, que es donde se escribe.
+                    if (descData.meta !== null && descData.meta !== undefined && descData.meta !== '') {
+                        const metaNum = parseFloat(String(descData.meta));
+                        if (isNaN(metaNum) || metaNum < 0) {
+                            await client.query('ROLLBACK');
+                            return res.status(400).json({
+                                error: `La meta debe ser un número mayor o igual a cero. Se recibió "${descData.meta}".`
+                            });
+                        }
+                    }
 
                     let idDescripcion;
                     if (existingDesc) {
@@ -490,6 +503,36 @@ const guardarAvanceDocente = async (req, res) => {
                 ejec16,
                 ind.id_indicador
             ]);
+
+            // Guardar el avance manda el corte de esa función a revisión.
+            // Si estaba devuelto, vuelve a 'Pendiente' y se limpia el motivo;
+            // si el Director ya lo cerró, no se reabre solo.
+            const funcRes = await client.query(`
+                SELECT af.id_funciones
+                FROM indicadores i
+                JOIN descripcion d ON d.id_descripcion = i.id_descripcion
+                JOIN asignacion_actividades aa ON aa.id_asignacionact = d.id_asignacionact
+                JOIN asignacion_funciones af ON af.id_funciones = aa.id_funciones
+                WHERE i.id_indicadores = $1
+                LIMIT 1
+            `, [ind.id_indicador]);
+
+            if (funcRes.rows.length > 0) {
+                const idFunciones = funcRes.rows[0].id_funciones;
+                for (const [semanaCorte, valor] of [[8, ejec8], [16, ejec16]]) {
+                    if (valor <= 0) continue;
+                    await client.query(`
+                        INSERT INTO revision_corte (id_funciones, semana, estado, actualizado_en)
+                        VALUES ($1, $2, 'Pendiente', NOW())
+                        ON CONFLICT (id_funciones, semana) DO UPDATE
+                        SET estado = CASE WHEN revision_corte.estado = 'Aprobado'
+                                          THEN revision_corte.estado ELSE 'Pendiente' END,
+                            observacion = CASE WHEN revision_corte.estado = 'Devuelto'
+                                               THEN NULL ELSE revision_corte.observacion END,
+                            actualizado_en = NOW()
+                    `, [idFunciones, semanaCorte]);
+                }
+            }
         }
 
         await client.query('COMMIT');

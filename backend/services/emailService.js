@@ -100,9 +100,39 @@ const htmlATexto = (html = '') =>
         .trim();
 
 // ----------------------------------------------------------------
+// Remitente "en nombre de": Gmail solo deja enviar como la cuenta
+// autenticada, así que el correo SIEMPRE sale de EMAIL_USER. Lo que sí
+// cambia es el nombre visible ("Juan Pérez (Dirección de programa · SIGAP)")
+// y el Reply-To, que apunta al correo de quien ejecutó la acción: cuando el
+// destinatario responde, la respuesta le llega a esa persona.
+//
+// remitente = { nombre, correo, etiqueta }. Sin remitente (o con datos
+// inválidos) se usa el remitente institucional.
+// ----------------------------------------------------------------
+const limpiarNombre = (valor) =>
+    [...String(valor || '')]
+        // Sin saltos de línea ni comillas/<>: evitan inyectar cabeceras en el correo
+        .filter((ch) => ch.charCodeAt(0) >= 32 && !'"<>'.includes(ch))
+        .join('')
+        .trim();
+
+const resolverRemitente = (remitente) => {
+    const institucional = { from: `"${EMAIL_FROM_NAME}" <${EMAIL_USER}>`, replyTo: undefined, nombre: null };
+    if (!remitente) return institucional;
+
+    const nombre = limpiarNombre(remitente.nombre);
+    const etiqueta = limpiarNombre(remitente.etiqueta);
+    const [correo] = normalizarDestinatarios(remitente.correo);
+    if (!nombre || !correo) return institucional;
+
+    const visible = etiqueta ? `${nombre} (${etiqueta} · SIGAP)` : `${nombre} (SIGAP)`;
+    return { from: `"${visible}" <${EMAIL_USER}>`, replyTo: correo, nombre: visible };
+};
+
+// ----------------------------------------------------------------
 // Envío principal (await-able). Nunca lanza excepción.
 // ----------------------------------------------------------------
-const sendEmail = async ({ to, subject, html, text, cc, bcc, replyTo }) => {
+const sendEmail = async ({ to, subject, html, text, cc, bcc, replyTo, remitente }) => {
     const destinatarios = normalizarDestinatarios(to);
 
     if (destinatarios.length === 0) {
@@ -123,20 +153,22 @@ const sendEmail = async ({ to, subject, html, text, cc, bcc, replyTo }) => {
         ? `[PRUEBA → ${destinatarios.join(', ')}] ${subject}`
         : subject;
 
+    const envio = resolverRemitente(remitente);
+
     try {
         const info = await getTransporter().sendMail({
-            from: `"${EMAIL_FROM_NAME}" <${EMAIL_USER}>`,
+            from: envio.from,
             to: paraFinal.join(', '),
             cc: redirigir.length > 0 ? undefined : normalizarDestinatarios(cc).join(', ') || undefined,
             bcc: redirigir.length > 0 ? undefined : normalizarDestinatarios(bcc).join(', ') || undefined,
-            replyTo: replyTo || undefined,
+            replyTo: replyTo || envio.replyTo,
             subject: asuntoFinal,
             html,
             text: text || htmlATexto(html)
         });
 
         console.log(`[email] Enviado "${asuntoFinal}" → ${paraFinal.join(', ')} (id: ${info.messageId})`);
-        return { ok: true, messageId: info.messageId };
+        return { ok: true, messageId: info.messageId, remitente: envio.nombre };
     } catch (error) {
         console.error(`[email] Error enviando "${asuntoFinal}" → ${paraFinal.join(', ')}:`, error.message);
         return { ok: false, motivo: 'error_envio', detalle: error.message };
@@ -160,5 +192,6 @@ module.exports = {
     sendEmailAsync,
     verificarConexion,
     normalizarDestinatarios,
+    resolverRemitente,
     estaHabilitado: () => habilitado
 };

@@ -52,7 +52,7 @@ const enviarPrueba = async (req, res) => {
 const enviarRecordatorios = async (req, res) => {
     try {
         const idPrograma = req.body && req.body.id_programa ? parseInt(req.body.id_programa, 10) : null;
-        const resultado = await notificaciones.notificarRecordatorioPlazo({ idPrograma });
+        const resultado = await notificaciones.notificarRecordatorioPlazo({ idPrograma, idRemitente: req.user?.id });
 
         res.json({
             mensaje: resultado.enviados
@@ -70,7 +70,7 @@ const enviarRecordatorios = async (req, res) => {
 const enviarAvisoPeriodo = async (req, res) => {
     try {
         const idPeriodo = parseInt(req.params.id, 10);
-        const resultado = await notificaciones.notificarAperturaPeriodo(idPeriodo);
+        const resultado = await notificaciones.notificarAperturaPeriodo(idPeriodo, req.user?.id);
 
         res.json({
             mensaje: resultado.enviados

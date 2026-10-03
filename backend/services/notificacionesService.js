@@ -11,7 +11,7 @@
 // ================================================================
 
 const pool = require('../db/connection');
-const { sendEmail } = require('./emailService');
+const { sendEmail, resolverRemitente } = require('./emailService');
 const plantillas = require('../utils/emailTemplates');
 
 // ----------------------------------------------------------------
@@ -55,19 +55,41 @@ const getUsuario = async (idUsuario, client = pool) => {
     return res.rows[0] || null;
 };
 
-// Directores activos del programa indicado. Si el programa no tiene
-// director asignado, se usa como respaldo Planeación/Admin para que
-// la radicación no quede sin destinatario.
+// Remitente "en nombre de" quien ejecuta la acción (ver resolverRemitente en
+// emailService): el correo sale de la cuenta institucional pero con su nombre
+// y su Reply-To. Devuelve null si no hay usuario o no tiene correo, y el envío
+// cae al remitente institucional.
+// etiqueta: cargo visible junto al nombre ("Dirección de programa", "Planeación").
+const getRemitente = async (idUsuario, etiqueta) => {
+    if (!idUsuario) return null;
+    try {
+        const usuario = await getUsuario(idUsuario);
+        if (!usuario || !usuario.correo) return null;
+        return { nombre: usuario.nombre_completo, correo: usuario.correo, etiqueta };
+    } catch (error) {
+        console.warn('[notificaciones] No se pudo resolver el remitente:', error.message);
+        return null;
+    }
+};
+
+const ETIQUETA_DIRECTOR = 'Dirección de programa';
+const ETIQUETA_PLANEACION = 'Planeación';
+
+// Directores activos que gestionan el programa indicado (director_programa:
+// un programa puede tener varios y un director varios programas). Si el
+// programa no tiene director asignado, se usa como respaldo Planeación/Admin
+// para que la radicación no quede sin destinatario.
 const getDirectoresDePrograma = async (idPrograma, client = pool) => {
     if (idPrograma) {
         const res = await client.query(
             `SELECT DISTINCT u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
              FROM usuarios u
+             JOIN director_programa dp ON dp.id_usuario = u.id_usuario
              JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
              JOIN roles r ON r.id_rol = ur.id_rol
              WHERE u.activo = TRUE
                AND u.correo IS NOT NULL AND u.correo <> ''
-               AND u.id_programa = $1
+               AND dp.id_programa = $1
                AND LOWER(r.nombre_rol) LIKE '%direct%'`,
             [idPrograma]
         );
@@ -108,6 +130,8 @@ const asegurarBitacora = async () => {
                 enviado_en      TIMESTAMP    NOT NULL DEFAULT NOW()
             )
         `);
+        // Quién envió el correo (nombre visible); NULL = remitente institucional
+        await pool.query('ALTER TABLE notificaciones_log ADD COLUMN IF NOT EXISTS remitente VARCHAR(220)');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_notificaciones_log_clave ON notificaciones_log (clave)');
         bitacoraLista = true;
         return true;
@@ -143,19 +167,20 @@ const reiniciarNotificacion = async (clave) => {
     }
 };
 
-const registrar = async ({ tipo, clave, destinatario, asunto, resultado }) => {
+const registrar = async ({ tipo, clave, destinatario, asunto, resultado, remitente = null }) => {
     if (!(await asegurarBitacora())) return;
     try {
         await pool.query(
-            `INSERT INTO notificaciones_log (tipo, clave, destinatario, asunto, estado, detalle)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
+            `INSERT INTO notificaciones_log (tipo, clave, destinatario, asunto, estado, detalle, remitente)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
             [
                 tipo,
                 clave,
                 destinatario,
                 asunto,
                 resultado.ok ? 'enviado' : 'error',
-                resultado.ok ? null : `${resultado.motivo || ''} ${resultado.detalle || ''}`.trim()
+                resultado.ok ? null : `${resultado.motivo || ''} ${resultado.detalle || ''}`.trim(),
+                remitente
             ]
         );
     } catch (error) {
@@ -164,9 +189,13 @@ const registrar = async ({ tipo, clave, destinatario, asunto, resultado }) => {
 };
 
 // Envía y deja constancia en la bitácora en un solo paso
-const enviarYRegistrar = async ({ tipo, clave, to, subject, html }) => {
-    const resultado = await sendEmail({ to, subject, html });
-    await registrar({ tipo, clave, destinatario: to, asunto: subject, resultado });
+const enviarYRegistrar = async ({ tipo, clave, to, subject, html, remitente = null }) => {
+    const resultado = await sendEmail({ to, subject, html, remitente });
+    // Nombre visible con el que salió (null = remitente institucional)
+    await registrar({
+        tipo, clave, destinatario: to, asunto: subject, resultado,
+        remitente: resolverRemitente(remitente).nombre
+    });
     return resultado;
 };
 
@@ -280,7 +309,8 @@ const notificarAgendaAprobada = async (idUsuario, idDirector) => {
         clave: `agenda_aprobada:${idUsuario}:${periodo ? periodo.id_periodo : 0}:${Date.now()}`,
         to: docente.correo,
         subject,
-        html
+        html,
+        remitente: await getRemitente(idDirector, ETIQUETA_DIRECTOR)
     });
 };
 
@@ -311,14 +341,15 @@ const notificarAgendaDevuelta = async (idUsuario, idDirector, observaciones) => 
         clave: `agenda_devuelta:${idUsuario}:${periodo ? periodo.id_periodo : 0}:${Date.now()}`,
         to: docente.correo,
         subject,
-        html
+        html,
+        remitente: await getRemitente(idDirector, ETIQUETA_DIRECTOR)
     });
 };
 
 // ================================================================
 // 4. Bienvenida de nuevo usuario
 // ================================================================
-const notificarBienvenida = async ({ idUsuario = null, correo, nombre, roles, programa }) => {
+const notificarBienvenida = async ({ idUsuario = null, correo, nombre, roles, programa, idRemitente = null }) => {
     // Si solo llega el id, se completan los datos desde la base
     if (idUsuario && (!correo || !nombre || !programa)) {
         const usuario = await getUsuario(idUsuario);
@@ -342,7 +373,10 @@ const notificarBienvenida = async ({ idUsuario = null, correo, nombre, roles, pr
     const clave = `bienvenida:${idUsuario || correo.toLowerCase()}`;
     if (await yaNotificado(clave)) return { ok: false, motivo: 'ya_notificado' };
 
-    return enviarYRegistrar({ tipo: 'bienvenida', clave, to: correo, subject, html });
+    return enviarYRegistrar({
+        tipo: 'bienvenida', clave, to: correo, subject, html,
+        remitente: await getRemitente(idRemitente, ETIQUETA_PLANEACION)
+    });
 };
 
 // ================================================================
@@ -351,7 +385,8 @@ const notificarBienvenida = async ({ idUsuario = null, correo, nombre, roles, pr
 // Si ya hay docentes asignados al período se notifica a ellos; de lo
 // contrario se avisa a todos los docentes y directores activos.
 // ================================================================
-const notificarAperturaPeriodo = async (idPeriodo) => {
+const notificarAperturaPeriodo = async (idPeriodo, idRemitente = null) => {
+    const remitente = await getRemitente(idRemitente, ETIQUETA_PLANEACION);
     const periodoRes = await pool.query(
         'SELECT id_periodo, anio, semestre, fecha_inicio, fecha_fin FROM periodo WHERE id_periodo = $1',
         [idPeriodo]
@@ -403,7 +438,7 @@ const notificarAperturaPeriodo = async (idPeriodo) => {
             fechaFin: formatearFecha(periodo.fecha_fin),
             enlace: plantillas.url('/login')
         });
-        const r = await enviarYRegistrar({ tipo: 'apertura_periodo', clave, to: persona.correo, subject, html });
+        const r = await enviarYRegistrar({ tipo: 'apertura_periodo', clave, to: persona.correo, subject, html, remitente });
         if (r.ok) enviados++;
     }
 
@@ -413,7 +448,8 @@ const notificarAperturaPeriodo = async (idPeriodo) => {
 // ================================================================
 // 6. Asignaciones cargadas por Planeación  ➔  Docentes afectados
 // ================================================================
-const notificarAsignacionesCargadas = async (idsUsuarios = [], idPeriodo = null) => {
+const notificarAsignacionesCargadas = async (idsUsuarios = [], idPeriodo = null, idRemitente = null) => {
+    const remitente = await getRemitente(idRemitente, ETIQUETA_PLANEACION);
     const ids = [...new Set(idsUsuarios.filter((id) => Number.isInteger(Number(id))).map(Number))];
     if (ids.length === 0) return { ok: false, motivo: 'sin_docentes' };
 
@@ -455,7 +491,8 @@ const notificarAsignacionesCargadas = async (idsUsuarios = [], idPeriodo = null)
             clave: `asignaciones:${docente.id_usuario}:${periodo ? periodo.id_periodo : 0}:${Date.now()}`,
             to: docente.correo,
             subject,
-            html
+            html,
+            remitente
         });
         if (r.ok) enviados++;
     }
@@ -469,7 +506,8 @@ const notificarAsignacionesCargadas = async (idsUsuarios = [], idPeriodo = null)
 // Docentes cuya agenda del período activo tiene alguna función en
 // estado 'Pendiente' o 'Devuelta'. Se puede filtrar por programa.
 // ================================================================
-const notificarRecordatorioPlazo = async ({ idPrograma = null } = {}) => {
+const notificarRecordatorioPlazo = async ({ idPrograma = null, idRemitente = null } = {}) => {
+    const remitente = await getRemitente(idRemitente, ETIQUETA_PLANEACION);
     const periodo = await getPeriodoActivo();
     if (!periodo) return { ok: false, motivo: 'sin_periodo_activo' };
 
@@ -519,7 +557,7 @@ const notificarRecordatorioPlazo = async ({ idPrograma = null } = {}) => {
             diasRestantes: diasRestantes !== null && diasRestantes >= 0 ? diasRestantes : null,
             enlace: plantillas.url('/docente/agenda')
         });
-        const r = await enviarYRegistrar({ tipo: 'recordatorio_plazo', clave, to: docente.correo, subject, html });
+        const r = await enviarYRegistrar({ tipo: 'recordatorio_plazo', clave, to: docente.correo, subject, html, remitente });
         if (r.ok) enviados++;
     }
 
@@ -542,11 +580,11 @@ const enSegundoPlanoAPI = {
     bienvenida: (datos) =>
         enSegundoPlano('bienvenida', () => notificarBienvenida(datos)),
 
-    aperturaPeriodo: (idPeriodo) =>
-        enSegundoPlano('aperturaPeriodo', () => notificarAperturaPeriodo(idPeriodo)),
+    aperturaPeriodo: (idPeriodo, idRemitente) =>
+        enSegundoPlano('aperturaPeriodo', () => notificarAperturaPeriodo(idPeriodo, idRemitente)),
 
-    asignacionesCargadas: (ids, idPeriodo) =>
-        enSegundoPlano('asignacionesCargadas', () => notificarAsignacionesCargadas(ids, idPeriodo))
+    asignacionesCargadas: (ids, idPeriodo, idRemitente) =>
+        enSegundoPlano('asignacionesCargadas', () => notificarAsignacionesCargadas(ids, idPeriodo, idRemitente))
 };
 
 module.exports = {

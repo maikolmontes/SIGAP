@@ -1,12 +1,25 @@
 const pool = require('../db/connection');
 const path = require('path');
 const fs = require('fs');
+const { rolesEfectivos } = require('../utils/rolActivo');
+const {
+    idUsuarioDe, puedeVerDocente, duenoDeIndicador, duenoDeEvidencia,
+} = require('../middleware/accesoEvidencias');
+
+// Borra el archivo que multer ya escribió cuando la petición se rechaza
+const descartarArchivo = (req) => {
+    try { if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path); } catch { /* sin acción */ }
+};
 
 // Obtener evidencias por docente (organizadas por función y actividad)
 const obtenerEvidenciasDocente = async (req, res) => {
     const { id_usuario } = req.params;
 
     try {
+        if (!(await puedeVerDocente(req, id_usuario))) {
+            return res.status(403).json({ error: 'No tienes permiso para ver las evidencias de este docente.' });
+        }
+
         const query = `
             SELECT 
                 af.funcion_sustantiva,
@@ -119,10 +132,38 @@ const subirEvidencia = async (req, res) => {
     const { id_indicador, tipo_evidencia, enlace_texto, semana } = req.body;
 
     if (!id_indicador) {
+        descartarArchivo(req);
         return res.status(400).json({ error: 'Se requiere el id del indicador' });
     }
 
     try {
+        // Solo el docente dueño del indicador puede subirle evidencias
+        const dueno = await duenoDeIndicador(id_indicador);
+        if (!dueno) {
+            descartarArchivo(req);
+            return res.status(404).json({ error: 'El indicador no existe.' });
+        }
+        if (dueno !== idUsuarioDe(req)) {
+            descartarArchivo(req);
+            return res.status(403).json({ error: 'Solo el docente dueño del indicador puede subir evidencias.' });
+        }
+
+        // Solo cortes de evidencia válidos y habilitados por Planeación
+        const semanaNum = String(semana || '8');
+        if (!['8', '16'].includes(semanaNum)) {
+            descartarArchivo(req);
+            return res.status(400).json({ error: 'La semana debe ser 8 o 16.' });
+        }
+        const corte = await pool.query(`
+            SELECT s.habilitada FROM semana s
+            JOIN periodo p ON p.id_periodo = s.id_periodo AND p.activo = true
+            WHERE s.numero_semana = $1 LIMIT 1
+        `, [semanaNum]);
+        if (!corte.rows[0]?.habilitada) {
+            descartarArchivo(req);
+            return res.status(403).json({ error: `La Semana ${semanaNum} no está habilitada para cargar evidencias.` });
+        }
+
         let nombreArchivo = null;
         let rutaArchivo = null;
         let tipoArchivo = null;
@@ -131,6 +172,11 @@ const subirEvidencia = async (req, res) => {
         if (tipo_evidencia === 'link') {
             if (!enlace_texto) {
                 return res.status(400).json({ error: 'El enlace está vacío' });
+            }
+            let protocolo = '';
+            try { protocolo = new URL(String(enlace_texto).trim()).protocol; } catch { /* URL inválida */ }
+            if (protocolo !== 'http:' && protocolo !== 'https:') {
+                return res.status(400).json({ error: 'El enlace debe comenzar con http:// o https://' });
             }
             nombreArchivo = enlace_texto; // Guardar el link como nombre
             rutaArchivo = enlace_texto;
@@ -153,11 +199,12 @@ const subirEvidencia = async (req, res) => {
             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_evidencias
         `;
 
-        const values = [id_indicador, nombreArchivo, rutaArchivo, tipoArchivo, tamanioKb, semana || '8'];
+        const values = [id_indicador, nombreArchivo, rutaArchivo, tipoArchivo, tamanioKb, semanaNum];
         const result = await pool.query(query, values);
 
         res.json({ success: true, id_evidencias: result.rows[0].id_evidencias, mensaje: 'Evidencia subida correctamente' });
     } catch (error) {
+        descartarArchivo(req);
         console.error('Error al subir evidencia:', error);
         res.status(500).json({ error: 'Error interno del servidor al guardar la evidencia' });
     }
@@ -175,11 +222,18 @@ const eliminarEvidencia = async (req, res) => {
             return res.status(404).json({ error: 'Evidencia no encontrada' });
         }
 
+        // Solo el dueño (o Planeación/Admin) puede borrarla
+        const dueno = await duenoDeEvidencia(id_evidencia);
+        const esAdmin = rolesEfectivos(req).some(r => r === 'planeacion' || r === 'admin');
+        if (dueno !== idUsuarioDe(req) && !esAdmin) {
+            return res.status(403).json({ error: 'No tienes permiso para eliminar esta evidencia.' });
+        }
+
         const { ruta_archivo, tipo_archivo } = result.rows[0];
 
         // Si es un archivo físico, intentar eliminarlo del disco
         if (tipo_archivo !== 'enlace' && ruta_archivo) {
-            const filePath = path.join(__dirname, '..', ruta_archivo);
+            const filePath = path.join(__dirname, '..', 'uploads', 'evidencias', path.basename(ruta_archivo));
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
             }

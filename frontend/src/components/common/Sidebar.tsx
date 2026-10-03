@@ -86,6 +86,18 @@ const menuConsultor: MenuItem[] = [
 
 
 
+// Menú genérico de los roles que revisan UNA función sustantiva
+// (Investigación y los que se creen después). No lleva el nombre de ningún
+// rol: la función concreta la resuelve el backend con rol_funcion.
+const menuRevision: MenuItem[] = [
+    { label: 'Principal', isHeader: true },
+    { label: 'Dashboard', path: '/revision/dashboard', icon: LayoutDashboard },
+    { label: 'Supervisión', isHeader: true },
+    // Una sola entrada, igual que el Director: los cortes son pestañas
+    // dentro de la página, no un desplegable en el menú.
+    { label: 'Avances por revisar', path: '/revision/semanas', icon: ClipboardList },
+]
+
 const PATH_TO_PAGINA: Record<string, string> = {
     // Planeación
     '/planeacion/docentes': 'Docentes y Usuarios',
@@ -103,6 +115,9 @@ const PATH_TO_PAGINA: Record<string, string> = {
     '/director/reportes': 'Reportes de Gestión',
     '/director/analitica': 'Reportes de Gestión',
 
+    // Revisores de función (Investigación, …)
+    '/revision/semanas': 'Avances por Revisar',
+
     // Docente
     '/docente/agenda': 'Mi Agenda Académica',
     '/docente/avance-semana-8': 'Avance Semana 8',
@@ -116,8 +131,17 @@ const PATH_TO_PAGINA: Record<string, string> = {
 };
 
 interface SidebarProps {
-    rol: 'planeacion' | 'director' | 'docente' | 'consultor'
+    rol: 'planeacion' | 'director' | 'docente' | 'consultor' | 'revision'
     onClose?: () => void
+}
+
+/** Nombre del rol activo, para rotular el módulo genérico de revisión. */
+const nombreRolActivo = (): string => {
+    try {
+        const stored = localStorage.getItem('sigap_active_role')
+        if (stored) return JSON.parse(stored).nombre_rol || 'Revisión'
+    } catch { /* sin rol guardado */ }
+    return 'Revisión'
 }
 
 export default function Sidebar({ rol, onClose }: SidebarProps) {
@@ -128,20 +152,24 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
     const location = useLocation()
     const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
 
-    const menu = rol === 'planeacion' 
-        ? menuPlaneacion 
-        : rol === 'director' 
-            ? menuDirector 
-            : rol === 'consultor' 
-                ? menuConsultor 
-                : menuDocente
-    const rolLabel = rol === 'planeacion' 
-        ? 'Planeación' 
-        : rol === 'director' 
-            ? 'Director' 
-            : rol === 'consultor' 
-                ? 'Consultor' 
-                : 'Docente'
+    const menu = rol === 'planeacion'
+        ? menuPlaneacion
+        : rol === 'director'
+            ? menuDirector
+            : rol === 'consultor'
+                ? menuConsultor
+                : rol === 'revision'
+                    ? menuRevision
+                    : menuDocente
+    const rolLabel = rol === 'planeacion'
+        ? 'Planeación'
+        : rol === 'director'
+            ? 'Director'
+            : rol === 'consultor'
+                ? 'Consultor'
+                : rol === 'revision'
+                    ? nombreRolActivo()
+                    : 'Docente'
 
     // Cargar permisos activos asignados al rol actual
     const cargarPermisos = async () => {
@@ -385,6 +413,10 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                         }
                         if (item.path === '/consultor/agendas') {
                             return location.pathname.startsWith('/consultor/agendas');
+                        }
+                        // La pestaña del corte viaja en la ruta (/revision/semanas/8)
+                        if (item.path === '/revision/semanas') {
+                            return location.pathname.startsWith('/revision/semanas');
                         }
                         return location.pathname === item.path;
                     })();

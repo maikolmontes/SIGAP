@@ -704,9 +704,14 @@ export default function AgendaDocente() {
                                                                     </label>
                                                                     <input
                                                                         type="number"
+                                                                        min={0}
                                                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white disabled:opacity-60 disabled:bg-gray-100"
                                                                         value={actividad.meta}
-                                                                        onChange={(e) => cambiarActividad(fIndex, aIndex, 'meta', parseInt(e.target.value) || '')}
+                                                                        onChange={(e) => {
+                                                                            // La meta es el denominador del avance: nunca negativa
+                                                                            const v = parseInt(e.target.value);
+                                                                            cambiarActividad(fIndex, aIndex, 'meta', isNaN(v) ? '' : Math.max(0, v));
+                                                                        }}
                                                                         placeholder="100"
                                                                         disabled={!semanaActiva || !periodoAbierto}
                                                                     />

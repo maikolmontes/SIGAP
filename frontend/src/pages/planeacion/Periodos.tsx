@@ -1,5 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import Layout from '../../components/common/Layout'
+import { 
+    Filter, 
+    ChevronDown, 
+    ChevronLeft, 
+    ChevronRight, 
+    ChevronsLeft, 
+    ChevronsRight, 
+    Search, 
+    X 
+} from 'lucide-react'
 // @ts-ignore
 import { getPeriodos, createPeriodo, cerrarPeriodo, habilitarPeriodo, getDocentesPeriodo, asignarDocentesPeriodo, desasignarDocentePeriodo } from '../../services/periodosService'
 // @ts-ignore
@@ -31,6 +41,15 @@ export default function Periodos() {
     const [error, setError] = useState('')
     const [exito, setExito] = useState('')
     const [busquedaHistorial, setBusquedaHistorial] = useState('')
+    const [mostrarFiltrosHistorial, setMostrarFiltrosHistorial] = useState(true)
+
+    // Paginación de Historial
+    const [paginaHistorial, setPaginaHistorial] = useState(1)
+    const [registrosPorPaginaHistorial, setRegistrosPorPaginaHistorial] = useState(5)
+
+    // Filtros de búsqueda en modales
+    const [busquedaDocenteAsignar, setBusquedaDocenteAsignar] = useState('')
+    const [busquedaDocenteReporte, setBusquedaDocenteReporte] = useState('')
 
     // Modal crear período
     const [modalCrear, setModalCrear] = useState(false)
@@ -83,13 +102,48 @@ export default function Periodos() {
 
     const periodoActivo = periodos.find(p => p.activo)
     const periodosInactivos = periodos.filter(p => !p.activo)
-    const periodosInactivosFiltrados = periodosInactivos.filter(p => {
-        if (!busquedaHistorial.trim()) return true
-        const q = busquedaHistorial.toLowerCase()
-        const etiqueta = etiquetaPeriodo(p).toLowerCase()
-        const anioStr = String(p.anio)
-        return etiqueta.includes(q) || anioStr.includes(q)
-    })
+    const periodosInactivosFiltrados = useMemo(() => {
+        return periodosInactivos.filter(p => {
+            if (!busquedaHistorial.trim()) return true
+            const q = busquedaHistorial.toLowerCase()
+            const etiqueta = etiquetaPeriodo(p).toLowerCase()
+            const anioStr = String(p.anio)
+            return etiqueta.includes(q) || anioStr.includes(q)
+        })
+    }, [periodosInactivos, busquedaHistorial])
+
+    // Reset de página al cambiar búsqueda o registros por página
+    useEffect(() => {
+        setPaginaHistorial(1)
+    }, [busquedaHistorial, registrosPorPaginaHistorial])
+
+    const totalPaginasHistorial = Math.ceil(periodosInactivosFiltrados.length / registrosPorPaginaHistorial) || 1
+    const indiceInicioHistorial = (paginaHistorial - 1) * registrosPorPaginaHistorial
+    const indiceFinHistorial = Math.min(indiceInicioHistorial + registrosPorPaginaHistorial, periodosInactivosFiltrados.length)
+
+    const periodosInactivosPaginados = useMemo(() => {
+        return periodosInactivosFiltrados.slice(indiceInicioHistorial, indiceFinHistorial)
+    }, [periodosInactivosFiltrados, indiceInicioHistorial, indiceFinHistorial])
+
+    // Docentes disponibles filtrados en modal asignar
+    const docentesDisponiblesFiltrados = useMemo(() => {
+        if (!busquedaDocenteAsignar.trim()) return docentesDisponibles
+        const q = busquedaDocenteAsignar.toLowerCase()
+        return docentesDisponibles.filter(d => 
+            `${d.nombres} ${d.apellidos}`.toLowerCase().includes(q) ||
+            d.correo.toLowerCase().includes(q)
+        )
+    }, [docentesDisponibles, busquedaDocenteAsignar])
+
+    // Docentes en modal reportes filtrados
+    const docentesReporteFiltrados = useMemo(() => {
+        if (!busquedaDocenteReporte.trim()) return docentesReporte
+        const q = busquedaDocenteReporte.toLowerCase()
+        return docentesReporte.filter(d => 
+            `${d.nombres} ${d.apellidos}`.toLowerCase().includes(q) ||
+            d.correo.toLowerCase().includes(q)
+        )
+    }, [docentesReporte, busquedaDocenteReporte])
 
     const handleCrear = async () => {
         if (!formPeriodo.fecha_inicio || !formPeriodo.fecha_fin) {
@@ -164,11 +218,14 @@ export default function Periodos() {
             ])
             const todosDocentes: Docente[] = resUsuarios.data
             const asignados: Docente[] = resAsignados.data
-            setDocentesAsignados(asignados)
+            const sortDocentes = (lista: Docente[]) => [...lista].sort((a, b) =>
+                ((a.nombres || '') + ' ' + (a.apellidos || '')).trim().localeCompare(((b.nombres || '') + ' ' + (b.apellidos || '')).trim(), 'es', { sensitivity: 'base' })
+            );
+            setDocentesAsignados(sortDocentes(asignados));
 
             // Filtrar: solo activos y que no estén ya asignados
-            const idsAsignados = new Set(asignados.map((d: Docente) => d.id_usuario))
-            setDocentesDisponibles(todosDocentes.filter(d => d.activo && !idsAsignados.has(d.id_usuario)))
+            const idsAsignados = new Set(asignados.map((d: Docente) => d.id_usuario));
+            setDocentesDisponibles(sortDocentes(todosDocentes.filter(d => d.activo && !idsAsignados.has(d.id_usuario))));
         } catch {
             setError('Error al cargar los docentes.')
         } finally {
@@ -233,7 +290,10 @@ export default function Periodos() {
         setDocenteSeleccionadoReporte(null)
         try {
             const res = await getDocentesPeriodo(periodo.id_periodo)
-            setDocentesReporte(res.data)
+            const listaReporte = (res.data || []).sort((a: Docente, b: Docente) =>
+                ((a.nombres || '') + ' ' + (a.apellidos || '')).trim().localeCompare(((b.nombres || '') + ' ' + (b.apellidos || '')).trim(), 'es', { sensitivity: 'base' })
+            );
+            setDocentesReporte(listaReporte)
         } catch {
             setError('Error al cargar los docentes del período.')
         } finally {
@@ -349,74 +409,191 @@ export default function Periodos() {
 
                     {/* ══════ HISTORIAL DE PERÍODOS ══════ */}
                     {periodosInactivos.length > 0 && (
-                        <div>
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-                                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Historial de Períodos ({periodosInactivos.length})</h3>
-                                <div className="relative w-full sm:w-64">
-                                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                                    <input
-                                        type="text"
-                                        placeholder="Buscar período (ej: 2025-I)"
-                                        value={busquedaHistorial}
-                                        onChange={e => setBusquedaHistorial(e.target.value)}
-                                        className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-                                    />
+                        <div className="mt-8">
+                            {/* Filtros colapsables del Historial */}
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-4 overflow-hidden transition-all">
+                                <div 
+                                    onClick={() => setMostrarFiltrosHistorial(!mostrarFiltrosHistorial)}
+                                    className="flex items-center justify-between px-5 py-3.5 bg-gray-50/70 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors select-none"
+                                >
+                                    <div className="flex items-center gap-2.5">
+                                        <Filter className="w-4 h-4 text-purple-600" />
+                                        <span className="text-sm font-bold text-gray-700">Filtros de Historial ({periodosInactivos.length})</span>
+                                        {busquedaHistorial && (
+                                            <span className="px-2 py-0.5 text-xs font-bold bg-purple-100 text-purple-700 rounded-full">
+                                                1 activo
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs text-gray-400 font-medium">
+                                            {mostrarFiltrosHistorial ? 'Ocultar filtros' : 'Mostrar filtros'}
+                                        </span>
+                                        <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${mostrarFiltrosHistorial ? 'rotate-180' : ''}`} />
+                                    </div>
                                 </div>
+
+                                {mostrarFiltrosHistorial && (
+                                    <div className="p-4 sm:p-5 border-t border-gray-100 bg-white">
+                                        <div className="flex flex-col sm:flex-row gap-4 items-end">
+                                            <div className="flex-1 w-full">
+                                                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
+                                                    Buscar período en historial
+                                                </label>
+                                                <div className="relative">
+                                                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Buscar por año o semestre (ej: 2024 o 2025-I)..."
+                                                        value={busquedaHistorial}
+                                                        onChange={(e) => setBusquedaHistorial(e.target.value)}
+                                                        className="w-full pl-9 pr-9 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                                                    />
+                                                    {busquedaHistorial && (
+                                                        <button 
+                                                            onClick={() => setBusquedaHistorial('')} 
+                                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5"
+                                                        >
+                                                            <X className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {busquedaHistorial && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setBusquedaHistorial('')}
+                                                    className="px-3 py-2 text-xs font-bold text-purple-600 hover:text-purple-800 transition-colors"
+                                                >
+                                                    Limpiar
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {periodosInactivosFiltrados.length === 0 ? (
                                 <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-400">
                                     <p className="text-sm">No se encontraron períodos que coincidan con "{busquedaHistorial}"</p>
-                                    <button onClick={() => setBusquedaHistorial('')} className="text-blue-500 text-xs mt-2 hover:underline">Limpiar búsqueda</button>
+                                    <button onClick={() => setBusquedaHistorial('')} className="text-purple-600 text-xs mt-2 hover:underline font-semibold">Limpiar búsqueda</button>
                                 </div>
                             ) : (
-                                <div className="space-y-3">
-                                    {periodosInactivosFiltrados.map(p => (
-                                        <div key={p.id_periodo} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm hover:shadow-md transition-shadow">
-                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="p-2.5 bg-gray-100 text-gray-500 rounded-lg">
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                                    {/* Contenedor de tarjetas con scroll vertical interno */}
+                                    <div className="p-4 space-y-3 max-h-[460px] overflow-y-auto">
+                                        {periodosInactivosPaginados.map(p => (
+                                            <div key={p.id_periodo} className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-xs hover:shadow-md transition-shadow">
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="p-2.5 bg-gray-100 text-gray-500 rounded-lg">
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="text-base font-black text-gray-800">{etiquetaPeriodo(p)}</h4>
+                                                            <p className="text-xs text-gray-500 mt-0.5">
+                                                                {formatFecha(p.fecha_inicio)} — {formatFecha(p.fecha_fin)}
+                                                            </p>
+                                                        </div>
                                                     </div>
-                                                    <div>
-                                                        <h4 className="text-base font-black text-gray-800">{etiquetaPeriodo(p)}</h4>
-                                                        <p className="text-xs text-gray-500 mt-0.5">
-                                                            {formatFecha(p.fecha_inicio)} — {formatFecha(p.fecha_fin)}
-                                                        </p>
-                                                    </div>
-                                                </div>
 
-                                                <div className="flex items-center gap-3 flex-wrap">
-                                                    <div className="flex items-center gap-1.5 bg-blue-50 px-3 py-1.5 rounded-lg">
-                                                        <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                                        <span className="text-xs font-bold text-blue-700">{p.total_docentes} docentes</span>
+                                                    <div className="flex items-center gap-3 flex-wrap">
+                                                        <div className="flex items-center gap-1.5 bg-blue-50 px-3 py-1.5 rounded-lg">
+                                                            <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                                            <span className="text-xs font-bold text-blue-700">{p.total_docentes} docentes</span>
+                                                        </div>
+                                                        <span className="bg-gray-100 text-gray-500 px-2.5 py-1 rounded-md text-xs font-semibold">Cerrado</span>
+                                                        <button
+                                                            onClick={() => abrirModalAsignar(p)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white border border-blue-300 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors font-medium"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                                            Docentes
+                                                        </button>
+                                                        <button
+                                                            onClick={() => abrirModalReportes(p)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white border border-emerald-300 text-emerald-600 rounded-lg hover:bg-emerald-50 transition-colors font-medium"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                                            Ver reportes
+                                                        </button>
+                                                        <button
+                                                            onClick={() => { setPeriodoHabilitar(p); setModalHabilitar(true) }}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600 border border-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium shadow-sm ml-auto"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                                            Habilitar
+                                                        </button>
                                                     </div>
-                                                    <span className="bg-gray-100 text-gray-500 px-2.5 py-1 rounded-md text-xs font-semibold">Cerrado</span>
-                                                    <button
-                                                        onClick={() => abrirModalAsignar(p)}
-                                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white border border-blue-300 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors font-medium"
-                                                    >
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                                        Docentes
-                                                    </button>
-                                                    <button
-                                                        onClick={() => abrirModalReportes(p)}
-                                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white border border-emerald-300 text-emerald-600 rounded-lg hover:bg-emerald-50 transition-colors font-medium"
-                                                    >
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                                        Ver reportes
-                                                    </button>
-                                                    <button
-                                                        onClick={() => { setPeriodoHabilitar(p); setModalHabilitar(true) }}
-                                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600 border border-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium shadow-sm ml-auto"
-                                                    >
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                                        Habilitar
-                                                    </button>
                                                 </div>
                                             </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Footer de Paginación para Historial */}
+                                    <div className="px-6 py-3.5 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+                                        <div className="flex items-center gap-2">
+                                            <span>Mostrar</span>
+                                            <select
+                                                value={registrosPorPaginaHistorial}
+                                                onChange={(e) => setRegistrosPorPaginaHistorial(Number(e.target.value))}
+                                                className="border border-gray-300 rounded px-2 py-1 font-semibold text-gray-700 bg-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+                                            >
+                                                <option value={5}>5</option>
+                                                <option value={10}>10</option>
+                                                <option value={15}>15</option>
+                                                <option value={20}>20</option>
+                                                <option value={25}>25</option>
+                                            </select>
+                                            <span>períodos por página</span>
                                         </div>
-                                    ))}
+
+                                        <div className="flex items-center gap-4">
+                                            <span>
+                                                Mostrando {periodosInactivosFiltrados.length === 0 ? 0 : indiceInicioHistorial + 1} - {indiceFinHistorial} de {periodosInactivosFiltrados.length}
+                                            </span>
+
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    onClick={() => setPaginaHistorial(1)}
+                                                    disabled={paginaHistorial === 1 || periodosInactivosFiltrados.length === 0}
+                                                    className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 transition-colors"
+                                                    title="Primera página"
+                                                >
+                                                    <ChevronsLeft className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => setPaginaHistorial(prev => Math.max(prev - 1, 1))}
+                                                    disabled={paginaHistorial === 1 || periodosInactivosFiltrados.length === 0}
+                                                    className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 transition-colors"
+                                                    title="Página anterior"
+                                                >
+                                                    <ChevronLeft className="w-4 h-4" />
+                                                </button>
+
+                                                <span className="px-2 font-bold text-gray-800">
+                                                    {paginaHistorial} / {totalPaginasHistorial}
+                                                </span>
+
+                                                <button
+                                                    onClick={() => setPaginaHistorial(prev => Math.min(prev + 1, totalPaginasHistorial))}
+                                                    disabled={paginaHistorial === totalPaginasHistorial || periodosInactivosFiltrados.length === 0}
+                                                    className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 transition-colors"
+                                                    title="Página siguiente"
+                                                >
+                                                    <ChevronRight className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => setPaginaHistorial(totalPaginasHistorial)}
+                                                    disabled={paginaHistorial === totalPaginasHistorial || periodosInactivosFiltrados.length === 0}
+                                                    className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 transition-colors"
+                                                    title="Última página"
+                                                >
+                                                    <ChevronsRight className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -649,26 +826,61 @@ export default function Periodos() {
                                     {/* Docentes disponibles para asignar */}
                                     {periodoSeleccionado.activo && (
                                         <div>
-                                            <div className="flex items-center justify-between mb-2">
+                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                                                 <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                                                    Docentes disponibles ({docentesDisponibles.length})
+                                                    Docentes disponibles ({docentesDisponiblesFiltrados.length}{docentesDisponiblesFiltrados.length !== docentesDisponibles.length ? ` de ${docentesDisponibles.length}` : ''})
                                                 </h4>
-                                                {docentesDisponibles.length > 0 && (
+                                                {docentesDisponiblesFiltrados.length > 0 && (
                                                     <button
-                                                        onClick={handleSelectAll}
-                                                        className="text-xs text-blue-600 hover:underline font-medium"
+                                                        onClick={() => {
+                                                            const idsFiltrados = docentesDisponiblesFiltrados.map(d => d.id_usuario);
+                                                            const todosSeleccionados = idsFiltrados.every(id => seleccionados.includes(id));
+                                                            if (todosSeleccionados) {
+                                                                setSeleccionados(prev => prev.filter(id => !idsFiltrados.includes(id)));
+                                                            } else {
+                                                                setSeleccionados(prev => Array.from(new Set([...prev, ...idsFiltrados])));
+                                                            }
+                                                        }}
+                                                        className="text-xs text-blue-600 hover:underline font-medium self-end sm:self-auto"
                                                     >
-                                                        {seleccionados.length === docentesDisponibles.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                                                        {docentesDisponiblesFiltrados.every(d => seleccionados.includes(d.id_usuario)) ? 'Deseleccionar mostrados' : 'Seleccionar mostrados'}
                                                     </button>
                                                 )}
                                             </div>
+
+                                            {/* Buscador de docentes en modal */}
+                                            {docentesDisponibles.length > 0 && (
+                                                <div className="relative mb-2">
+                                                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Filtrar por nombre o correo institucional..."
+                                                        value={busquedaDocenteAsignar}
+                                                        onChange={(e) => setBusquedaDocenteAsignar(e.target.value)}
+                                                        className="w-full pl-8 pr-7 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                    />
+                                                    {busquedaDocenteAsignar && (
+                                                        <button 
+                                                            onClick={() => setBusquedaDocenteAsignar('')}
+                                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                        >
+                                                            <X className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+
                                             {docentesDisponibles.length === 0 ? (
                                                 <div className="text-center text-gray-400 text-sm py-6 bg-gray-50 rounded-lg border border-gray-100">
                                                     Todos los docentes activos ya están asignados a este período.
                                                 </div>
+                                            ) : docentesDisponiblesFiltrados.length === 0 ? (
+                                                <div className="text-center text-gray-400 text-xs py-4 bg-gray-50 rounded-lg border border-gray-100">
+                                                    No se encontraron docentes con "{busquedaDocenteAsignar}"
+                                                </div>
                                             ) : (
-                                                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-56 overflow-y-auto">
-                                                    {docentesDisponibles.map(d => (
+                                                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                                                    {docentesDisponiblesFiltrados.map(d => (
                                                         <label
                                                             key={d.id_usuario}
                                                             className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-blue-50/50 transition-colors ${seleccionados.includes(d.id_usuario) ? 'bg-blue-50' : ''
@@ -756,27 +968,58 @@ export default function Periodos() {
                             ) : !docenteSeleccionadoReporte ? (
                                 /* ── Lista de Docentes para elegir ── */
                                 <div className="p-5">
-                                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-3">Seleccione un docente para ver su reporte</p>
-                                    <div className="space-y-2">
-                                        {docentesReporte.map(d => (
-                                            <button
-                                                key={d.id_usuario}
-                                                onClick={() => setDocenteSeleccionadoReporte(d)}
-                                                className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-100 rounded-lg hover:border-emerald-300 hover:bg-emerald-50/50 transition-all text-left group"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-sm font-bold flex-shrink-0">
-                                                        {d.nombres.charAt(0)}{d.apellidos.charAt(0)}
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-sm font-medium text-gray-800">{d.nombres} {d.apellidos}</p>
-                                                        <p className="text-xs text-gray-500">{d.correo}</p>
-                                                    </div>
-                                                </div>
-                                                <svg className="w-4 h-4 text-gray-400 group-hover:text-emerald-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                                            </button>
-                                        ))}
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                                        <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">
+                                            Seleccione un docente ({docentesReporteFiltrados.length}{docentesReporteFiltrados.length !== docentesReporte.length ? ` de ${docentesReporte.length}` : ''})
+                                        </p>
                                     </div>
+
+                                    {/* Buscador de docentes en reportes */}
+                                    <div className="relative mb-3">
+                                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                        <input
+                                            type="text"
+                                            placeholder="Buscar docente por nombre o correo..."
+                                            value={busquedaDocenteReporte}
+                                            onChange={(e) => setBusquedaDocenteReporte(e.target.value)}
+                                            className="w-full pl-8 pr-7 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                        />
+                                        {busquedaDocenteReporte && (
+                                            <button 
+                                                onClick={() => setBusquedaDocenteReporte('')}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {docentesReporteFiltrados.length === 0 ? (
+                                        <div className="text-center text-gray-400 text-xs py-8 bg-gray-50 rounded-lg border border-gray-100">
+                                            No se encontraron docentes con "{busquedaDocenteReporte}"
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                                            {docentesReporteFiltrados.map(d => (
+                                                <button
+                                                    key={d.id_usuario}
+                                                    onClick={() => setDocenteSeleccionadoReporte(d)}
+                                                    className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-100 rounded-lg hover:border-emerald-300 hover:bg-emerald-50/50 transition-all text-left group"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                                                            {d.nombres.charAt(0)}{d.apellidos.charAt(0)}
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm font-medium text-gray-800">{d.nombres} {d.apellidos}</p>
+                                                            <p className="text-xs text-gray-500">{d.correo}</p>
+                                                        </div>
+                                                    </div>
+                                                    <svg className="w-4 h-4 text-gray-400 group-hover:text-emerald-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 /* ── Vista de Reporte del Docente Seleccionado ── */

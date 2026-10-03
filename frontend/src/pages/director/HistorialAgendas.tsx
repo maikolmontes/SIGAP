@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import { History, Search, Eye, Filter, ChevronDown, CheckCircle2, XCircle, AlertTriangle, Clock } from 'lucide-react';
@@ -20,6 +20,9 @@ export default function HistorialAgendas() {
     const [filtroPeriodo, setFiltroPeriodo] = useState('');
     const [busqueda, setBusqueda] = useState('');
     const [showFilters, setShowFilters] = useState(false);
+    const [paginaHist, setPaginaHist] = useState(1);
+    const [pagRevision, setPagRevision] = useState(1);
+    const [regPorPag, setRegPorPag] = useState(10);
     const navigate = useNavigate();
 
     // Cargar periodos disponibles
@@ -58,17 +61,25 @@ export default function HistorialAgendas() {
     const agendasFiltradas = agendas.filter(a =>
         a.nombre_docente?.toLowerCase().includes(busqueda.toLowerCase()) ||
         a.tipo_contrato?.toLowerCase().includes(busqueda.toLowerCase())
-    );
+    ).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' }));
 
     // Historial: agendas que ya tienen acción de revisión (aprobadas o devueltas)
-    const historialItems = agendasFiltradas.filter(a =>
+    const historialItems = useMemo(() => agendasFiltradas.filter(a =>
         a.estado_general === 'Aprobada' || a.estado_general === 'Devuelta' || a.fecha_revision
-    );
+    ), [agendasFiltradas]);
 
     // Agendas aún en proceso
-    const enRevision = agendasFiltradas.filter(a =>
+    const enRevision = useMemo(() => agendasFiltradas.filter(a =>
         a.estado_general === 'Pendiente' || a.estado_general === 'Aceptado'
-    );
+    ), [agendasFiltradas]);
+
+    const totalPagHist = Math.max(1, Math.ceil(historialItems.length / regPorPag));
+    const pagHistSeg = Math.min(paginaHist, totalPagHist);
+    const histPagina = historialItems.slice((pagHistSeg - 1) * regPorPag, pagHistSeg * regPorPag);
+
+    const totalPagRev = Math.max(1, Math.ceil(enRevision.length / regPorPag));
+    const pagRevSeg = Math.min(pagRevision, totalPagRev);
+    const revPagina = enRevision.slice((pagRevSeg - 1) * regPorPag, pagRevSeg * regPorPag);
 
     const periodoLabel = periodo
         ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}`
@@ -174,23 +185,23 @@ export default function HistorialAgendas() {
                 )}
 
                 {/* Sección: Revisadas */}
-                <div className="overflow-x-auto">
-                    {loading ? (
-                        <div className="flex justify-center py-16">
-                            <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
-                        </div>
-                    ) : (
-                        <>
-                            {historialItems.length > 0 && (
-                                <>
-                                    <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                                        <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">
-                                            Agendas Revisadas ({historialItems.length})
-                                        </span>
-                                    </div>
+                {loading ? (
+                    <div className="flex justify-center py-16">
+                        <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
+                    </div>
+                ) : (
+                    <>
+                        {historialItems.length > 0 && (
+                            <>
+                                <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+                                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                    <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">
+                                        Agendas Revisadas ({historialItems.length})
+                                    </span>
+                                </div>
+                                <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
                                     <table className="w-full text-sm">
-                                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                                        <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                                             <tr>
                                                 <th className="px-5 py-3 text-left font-bold">Docente</th>
                                                 <th className="px-5 py-3 text-center font-bold">Contrato</th>
@@ -202,7 +213,7 @@ export default function HistorialAgendas() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
-                                            {historialItems.map((a) => {
+                                            {histPagina.map((a) => {
                                                 const badge = estadoBadge[a.estado_general] || estadoBadge.Pendiente;
                                                 const observacion = a.funciones?.find((f: any) => f.estado_agenda === 'Devuelta')?.observaciones_generales;
                                                 return (
@@ -260,20 +271,46 @@ export default function HistorialAgendas() {
                                             })}
                                         </tbody>
                                     </table>
-                                </>
-                            )}
-
-                            {/* Sección: En proceso (sin revisión aún) */}
-                            {enRevision.length > 0 && (
-                                <>
-                                    <div className="px-5 py-3 bg-yellow-50 border-t border-b border-yellow-100 flex items-center gap-2">
-                                        <Clock className="w-4 h-4 text-yellow-500" />
-                                        <span className="text-xs font-bold text-yellow-700 uppercase tracking-wider">
-                                            Pendientes de Revisión ({enRevision.length})
-                                        </span>
+                                </div>
+                                {/* Paginación revisadas */}
+                                <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                                        <span>Mostrar</span>
+                                        <select value={regPorPag} onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaHist(1); setPagRevision(1); }}
+                                            className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-400">
+                                            {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                                        </select>
+                                        <span>registros · {historialItems.length} total</span>
                                     </div>
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => setPaginaHist(p => Math.max(1, p - 1))} disabled={pagHistSeg === 1}
+                                            className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">‹</button>
+                                        {Array.from({ length: totalPagHist }, (_, i) => i + 1).filter(p => p === 1 || p === totalPagHist || Math.abs(p - pagHistSeg) <= 1).map((p, idx, arr) => (
+                                            <span key={p}>
+                                                {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                                                <button onClick={() => setPaginaHist(p)}
+                                                    className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${p === pagHistSeg ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 hover:bg-gray-50'}`}>{p}</button>
+                                            </span>
+                                        ))}
+                                        <button onClick={() => setPaginaHist(p => Math.min(totalPagHist, p + 1))} disabled={pagHistSeg === totalPagHist}
+                                            className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">›</button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Sección: En proceso (sin revisión aún) */}
+                        {enRevision.length > 0 && (
+                            <>
+                                <div className="px-5 py-3 bg-yellow-50 border-t border-b border-yellow-100 flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-yellow-500" />
+                                    <span className="text-xs font-bold text-yellow-700 uppercase tracking-wider">
+                                        Pendientes de Revisión ({enRevision.length})
+                                    </span>
+                                </div>
+                                <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
                                     <table className="w-full text-sm">
-                                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
+                                        <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                                             <tr>
                                                 <th className="px-5 py-3 text-left font-bold">Docente</th>
                                                 <th className="px-5 py-3 text-center font-bold">Contrato</th>
@@ -283,7 +320,7 @@ export default function HistorialAgendas() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
-                                            {enRevision.map((a) => {
+                                            {revPagina.map((a) => {
                                                 const badge = estadoBadge[a.estado_general] || estadoBadge.Pendiente;
                                                 return (
                                                     <tr key={a.id_usuario} className="hover:bg-yellow-50/30 transition-colors">
@@ -311,7 +348,6 @@ export default function HistorialAgendas() {
                                                             </span>
                                                         </td>
                                                         <td className="px-5 py-3.5 text-center">
-                                                            {/* Si se abre desde historial pero está pendiente, permitimos navegar a su detalle en historial manteniendo el contexto */}
                                                             <button
                                                                 onClick={() => navigate(`/director/historial/${a.id_usuario}`, { state: { modo: 'historial', volverA: '/director/historial' } })}
                                                                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
@@ -325,19 +361,43 @@ export default function HistorialAgendas() {
                                             })}
                                         </tbody>
                                     </table>
-                                </>
-                            )}
-
-                            {historialItems.length === 0 && enRevision.length === 0 && (
-                                <div className="text-center py-16 text-gray-400">
-                                    <History className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                                    <p className="font-medium">No hay agendas en este periodo</p>
-                                    <p className="text-sm mt-1">Los docentes aún no han configurado sus agendas.</p>
                                 </div>
-                            )}
-                        </>
-                    )}
-                </div>
+                                {/* Paginación pendientes */}
+                                <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                                        <span>Mostrar</span>
+                                        <select value={regPorPag} onChange={e => { setRegPorPag(Number(e.target.value)); setPagRevision(1); setPaginaHist(1); }}
+                                            className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-400">
+                                            {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                                        </select>
+                                        <span>registros · {enRevision.length} total</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => setPagRevision(p => Math.max(1, p - 1))} disabled={pagRevSeg === 1}
+                                            className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">‹</button>
+                                        {Array.from({ length: totalPagRev }, (_, i) => i + 1).filter(p => p === 1 || p === totalPagRev || Math.abs(p - pagRevSeg) <= 1).map((p, idx, arr) => (
+                                            <span key={p}>
+                                                {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                                                <button onClick={() => setPagRevision(p)}
+                                                    className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${p === pagRevSeg ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 hover:bg-gray-50'}`}>{p}</button>
+                                            </span>
+                                        ))}
+                                        <button onClick={() => setPagRevision(p => Math.min(totalPagRev, p + 1))} disabled={pagRevSeg === totalPagRev}
+                                            className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">›</button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {historialItems.length === 0 && enRevision.length === 0 && (
+                            <div className="text-center py-16 text-gray-400">
+                                <History className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                                <p className="font-medium">No hay agendas en este periodo</p>
+                                <p className="text-sm mt-1">Los docentes aún no han configurado sus agendas.</p>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
         </Layout>
     );

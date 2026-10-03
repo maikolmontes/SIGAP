@@ -7,7 +7,7 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import {
   ShieldCheck, BookOpen, AlertCircle, Clock,
-  GraduationCap, Users, BarChart3, X, Lock, FileText
+  GraduationCap, Users, X, Lock, FileText
 } from 'lucide-react';
 
 export default function Login() {
@@ -17,6 +17,20 @@ export default function Login() {
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [showPrivacidad, setShowPrivacidad] = useState(false);
   const [showTerminos, setShowTerminos] = useState(false);
+  const [stats, setStats] = useState({ docentes: 23, programas: 6 });
+
+  useEffect(() => {
+    api.get('/auth/stats')
+      .then((res: any) => {
+        if (res.data) {
+          setStats({
+            docentes: res.data.docentesActivos ?? 23,
+            programas: res.data.programasActivos ?? 6,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (location.state?.mensajeInactividad) {
@@ -110,13 +124,12 @@ export default function Login() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-4 bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-sm">
+              <div className="grid grid-cols-2 gap-4 bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-sm">
                 {[
-                  { icon: Users, value: '24+', label: 'Docentes' },
-                  { icon: GraduationCap, value: '4', label: 'Programas' },
-                  { icon: BarChart3, value: '98%', label: 'Eficiencia' },
+                  { icon: Users, value: stats.docentes, label: 'Docentes Activos' },
+                  { icon: GraduationCap, value: stats.programas, label: 'Programas' },
                 ].map(({ icon: Icon, value, label }, i) => (
-                  <div key={label} className={`text-center ${i === 1 ? 'border-x border-white/10' : ''}`}>
+                  <div key={label} className={`text-center ${i === 0 ? 'border-r border-white/10' : ''}`}>
                     <Icon className="w-5 h-5 text-cyan-300 mx-auto mb-1.5" />
                     <div className="text-3xl font-black text-white">{value}</div>
                     <div className="text-[11px] text-blue-200/60 font-semibold uppercase tracking-wider mt-0.5">{label}</div>

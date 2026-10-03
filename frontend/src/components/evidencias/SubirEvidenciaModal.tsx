@@ -202,7 +202,7 @@ const SubirEvidenciaModal: React.FC<SubirEvidenciaModalProps> = ({ isOpen, onClo
                                         ref={fileInputRef}
                                         className="hidden"
                                         onChange={handleFileChange}
-                                        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,image/*"
+                                        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv,image/*"
                                     />
                                     <div className="w-16 h-16 bg-white shadow-sm rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-100">
                                         <UploadCloud className={`w-8 h-8 ${dragActive ? 'text-blue-600' : 'text-gray-400'}`} />

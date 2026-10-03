@@ -84,12 +84,22 @@ function getEstadoBadge(estado: string) {
     }
 }
 
-export default function DetalleAgenda() {
+interface DetalleAgendaProps {
+    /** Módulo desde el que se abre: cambia el menú lateral y el botón de volver. */
+    modulo?: 'director' | 'revision';
+    /** Consulta pura: oculta aprobar y devolver (menú "Agendas" del Director). */
+    soloLectura?: boolean;
+}
+
+export default function DetalleAgenda({ modulo = 'director', soloLectura = false }: DetalleAgendaProps) {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const location = useLocation();
 
-    const rutaVolver = '/director/agendas';
+    // Se deriva también de la URL: así la pantalla no depende de que la prop
+    // llegue bien desde el árbol de rutas.
+    const esRevision = modulo === 'revision' || location.pathname.startsWith('/revision');
+    const rutaVolver = esRevision ? '/revision/agendas' : '/director/agendas';
     const etiquetaVolver = 'Volver a Agendas por Revisar';
 
     const [data, setData] = useState<any>(null);
@@ -108,6 +118,13 @@ export default function DetalleAgenda() {
     const [obsGuardando, setObsGuardando] = useState<Record<string, boolean>>({});
     const [obsEditando, setObsEditando] = useState<Record<string, boolean>>({});
     const [obsPanelAbierto, setObsPanelAbierto] = useState<Record<number, boolean>>({});
+
+    // Corrección de horas por actividad desde la propia revisión: el Director
+    // detecta aquí que Planeación cargó mal unas horas y las arregla sin salir
+    // de la agenda. Solo él; un revisor de una función no toca horas.
+    const [horasEditando, setHorasEditando] = useState<number | null>(null);
+    const [horasValor, setHorasValor] = useState<string>('');
+    const [horasGuardando, setHorasGuardando] = useState(false);
 
     const cargarDetalle = useCallback(async () => {
         setLoading(true);
@@ -245,9 +262,39 @@ export default function DetalleAgenda() {
         }
     };
 
+    const abrirEditorHoras = (act: any) => {
+        setHorasEditando(act.id_asignacionact);
+        setHorasValor(String(parseFloat(act.horas_rol) || 0));
+    };
+
+    const guardarHorasActividad = async (act: any) => {
+        const horas = parseFloat(horasValor);
+        if (isNaN(horas) || horas < 0) {
+            setActionResult({ tipo: 'error', msg: 'Las horas deben ser un número mayor o igual a cero.' });
+            return;
+        }
+
+        setHorasGuardando(true);
+        try {
+            // 'forzar' porque aquí la agenda ya está en manos del docente: es
+            // justamente el momento en que el Director interviene.
+            const res = await api.put(`/director/asignaciones/${data.docente.id_usuario}`, {
+                actividades: [{ id_asignacionact: act.id_asignacionact, horas_rol: horas }],
+                forzar: true,
+            });
+            setHorasEditando(null);
+            setActionResult({ tipo: 'success', msg: res.data?.mensaje || 'Horas actualizadas.' });
+            cargarDetalle();
+        } catch (e: any) {
+            setActionResult({ tipo: 'error', msg: e.response?.data?.error || 'No se pudieron actualizar las horas.' });
+        } finally {
+            setHorasGuardando(false);
+        }
+    };
+
     if (loading) {
         return (
-            <Layout rol="director" path="Supervisión / Detalle de Agenda">
+            <Layout rol={modulo} path="Supervisión / Detalle de Agenda">
                 <div className="flex flex-col justify-center items-center h-80 space-y-4">
                     <div className="animate-spin w-12 h-12 border-4 border-[#063759] border-t-transparent rounded-full shadow-md" />
                     <p className="text-sm font-medium text-slate-500 animate-pulse">Cargando agenda académica...</p>
@@ -258,7 +305,7 @@ export default function DetalleAgenda() {
 
     if (!data) {
         return (
-            <Layout rol="director" path="Supervisión / Detalle de Agenda">
+            <Layout rol={modulo} path="Supervisión / Detalle de Agenda">
                 <div className="max-w-md mx-auto my-16 p-8 text-center bg-white rounded-2xl shadow-sm border border-slate-200">
                     <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
                         <AlertTriangle className="w-6 h-6" />
@@ -276,10 +323,23 @@ export default function DetalleAgenda() {
         );
     }
 
-    const { docente, funciones, perfil_docente } = data;
+    const { docente, perfil_docente } = data;
     const esInconsistencia = perfil_docente === 'INCONSISTENCIAS EN AGENDA AC 30';
-    const todasAprobadas = funciones && funciones.length > 0 && funciones.every((f: any) => f.estado_agenda === 'Aprobada');
-    const algunaDevuelta = funciones && funciones.some((f: any) => f.estado_agenda === 'Devuelta');
+
+    // La agenda se reparte entre revisores. Un revisor de función ve ÚNICAMENTE
+    // la suya: las demás no son asunto suyo y mostrarlas (con sus horas y el
+    // total del contrato) filtraría información de otro responsable.
+    const funciones = esRevision
+        ? (data.funciones || []).filter((f: any) => f.en_alcance !== false)
+        : (data.funciones || []);
+
+    const todasAprobadas = funciones.length > 0 && funciones.every((f: any) => f.estado_agenda === 'Aprobada');
+    const algunaDevuelta = funciones.some((f: any) => f.estado_agenda === 'Devuelta');
+
+    // Horas de las funciones que este rol revisa (para el revisor, su total)
+    const horasDeMisFunciones = funciones.reduce(
+        (s: number, f: any) => s + (parseFloat(f.horas_funcion) || 0), 0
+    );
     const todasExpandidas = funciones && funciones.length > 0 && funciones.every((f: any) => expandedFunciones[f.id_funciones]);
 
     // Horas estimadas por contrato
@@ -294,7 +354,7 @@ export default function DetalleAgenda() {
         : 100;
 
     return (
-        <Layout rol="director" path={`Supervisión / Agenda de ${docente.nombre_completo}`}>
+        <Layout rol={modulo} path={`Supervisión / Agenda de ${docente.nombre_completo}`}>
             <div className="max-w-7xl mx-auto pb-16 space-y-6">
                 
                 {/* Barra de navegación superior con botón Volver y Breadcrumbs visuales */}
@@ -380,13 +440,49 @@ export default function DetalleAgenda() {
                                 {todasAprobadas ? 'Agenda aprobada' : algunaDevuelta ? 'Agenda devuelta' : 'En revisión'}
                             </div>
 
-                            <div className={`flex items-center gap-2 text-xs font-semibold ${esInconsistencia ? 'text-rose-700' : 'text-emerald-700'}`}>
-                                {esInconsistencia ? <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> : <ShieldCheck className="w-3.5 h-3.5 shrink-0" />}
-                                {esInconsistencia ? 'Inconsistencias AC 30' : 'Agenda correcta AC 30'}
-                            </div>
+                            {/* El cumplimiento del Acuerdo 030 se mide sobre la agenda
+                                completa; un revisor de función no la ve entera. */}
+                            {!esRevision && (
+                                <div className={`flex items-center gap-2 text-xs font-semibold ${esInconsistencia ? 'text-rose-700' : 'text-emerald-700'}`}>
+                                    {esInconsistencia ? <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> : <ShieldCheck className="w-3.5 h-3.5 shrink-0" />}
+                                    {esInconsistencia ? 'Inconsistencias AC 30' : 'Agenda correcta AC 30'}
+                                </div>
+                            )}
                         </div>
 
-                        {/* Carga académica resumida */}
+                        {/* Carga académica.
+                            Al revisor de una función solo le corresponden SUS horas: el total
+                            del contrato y el desglose de las otras funciones son de otro
+                            responsable, así que no se le muestran. */}
+                        {esRevision ? (
+                        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Horas a tu cargo</span>
+                                <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                    {Math.round(horasDeMisFunciones)}h
+                                </span>
+                            </div>
+                            <div className="pt-1 space-y-1.5">
+                                {funciones.map((f: any) => {
+                                    const meta = getFuncionMeta(f.funcion_sustantiva);
+                                    const Icono = meta.icon;
+                                    return (
+                                        <div key={f.id_funciones} className="flex items-center justify-between gap-2">
+                                            <span className="flex items-center gap-2 text-xs text-slate-600 min-w-0">
+                                                <span className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 ${meta.bgIcon}`}>
+                                                    <Icono className="w-3.5 h-3.5" />
+                                                </span>
+                                                <span className="truncate">{f.funcion_sustantiva}</span>
+                                            </span>
+                                            <span className="text-sm font-extrabold text-slate-900 shrink-0">
+                                                {Math.round(parseFloat(f.horas_funcion) || 0)}h
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        ) : (
                         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-3">
                             <div className="flex items-center justify-between">
                                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Carga académica</span>
@@ -430,9 +526,11 @@ export default function DetalleAgenda() {
                                 ))}
                             </div>
                         </div>
+                        )}
 
-                        {/* Alerta de inconsistencia horaria */}
-                        {esInconsistencia && (
+                        {/* Alerta de inconsistencia horaria — es una validación del
+                            contrato completo, competencia de quien revisa la agenda entera */}
+                        {!esRevision && esInconsistencia && (
                             <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-2.5 text-xs text-rose-800">
                                 <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
                                 <span>
@@ -442,7 +540,7 @@ export default function DetalleAgenda() {
                         )}
 
                 {/* Acciones de Revisión (Aprobar o Devolver) si aún no está aprobada */}
-                {!todasAprobadas && (
+                {!soloLectura && !todasAprobadas && (
                     <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 space-y-3">
                         <div>
                             <h3 className="font-extrabold text-slate-900 text-sm">Decisión de Revisión</h3>
@@ -667,10 +765,50 @@ export default function DetalleAgenda() {
                                                             </div>
 
                                                             <div className="shrink-0">
-                                                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-extrabold">
-                                                                    <Clock className="w-3.5 h-3.5" />
-                                                                    {parseFloat(act.horas_rol).toFixed(0)} horas semanales
-                                                                </span>
+                                                                {horasEditando === act.id_asignacionact ? (
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            step="0.5"
+                                                                            autoFocus
+                                                                            value={horasValor}
+                                                                            onChange={e => setHorasValor(e.target.value)}
+                                                                            className="w-20 px-2 py-1.5 border border-blue-300 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-500"
+                                                                        />
+                                                                        <span className="text-xs text-slate-500">h</span>
+                                                                        <button
+                                                                            onClick={() => guardarHorasActividad(act)}
+                                                                            disabled={horasGuardando}
+                                                                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-lg transition-colors"
+                                                                        >
+                                                                            {horasGuardando ? '...' : 'Guardar'}
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => setHorasEditando(null)}
+                                                                            className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors"
+                                                                        >
+                                                                            Cancelar
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-extrabold">
+                                                                            <Clock className="w-3.5 h-3.5" />
+                                                                            {parseFloat(act.horas_rol).toFixed(0)} horas semanales
+                                                                        </span>
+                                                                        {/* Corregir horas es del Director, no del revisor de una función */}
+                                                                        {!esRevision && (
+                                                                            <button
+                                                                                onClick={() => abrirEditorHoras(act)}
+                                                                                title="Corregir las horas de esta actividad"
+                                                                                className="w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-600 flex items-center justify-center transition-colors"
+                                                                            >
+                                                                                <Pencil className="w-3.5 h-3.5" />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
 

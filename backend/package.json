@@ -4,13 +4,16 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "respaldo": "node scripts/respaldo.js",
+    "test": "node --test \"tests/**/*.test.js\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@google/genai": "^2.23.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "exceljs": "^4.4.0",

@@ -3,7 +3,7 @@ import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import {
     MessageSquare, Search, Eye, Filter, ChevronDown, Calendar,
-    BookOpen, Clock, User, X
+    BookOpen, Clock, User, X, LayoutGrid, List
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -29,8 +29,7 @@ interface GrupoDocente {
     sem16: number;
 }
 
-// Nombres que llegan en MAYÚSCULAS o en minúsculas se normalizan
-// a "Tipo Título" para que la lista se vea pareja.
+// Normaliza nombres a Tipo Título
 const formatearNombre = (nombre: string) =>
     (nombre || '')
         .toLowerCase()
@@ -63,6 +62,10 @@ export default function ObservacionesDirector() {
     const [filtroFuncion, setFiltroFuncion] = useState('');
     const [showFilters, setShowFilters] = useState(false);
     const [docentesAbiertos, setDocentesAbiertos] = useState<Record<number, boolean>>({});
+    const [paginaActual, setPaginaActual] = useState(1);
+    const [regPorPag, setRegPorPag] = useState(10);
+    const [modoVista, setModoVista] = useState<'tarjetas' | 'lista'>('tarjetas');
+    const [filtroCorteDocente, setFiltroCorteDocente] = useState<Record<number, string>>({});
     const navigate = useNavigate();
 
     const cargarObservaciones = useCallback(async () => {
@@ -100,9 +103,6 @@ export default function ObservacionesDirector() {
         });
     }, [observaciones, busqueda, filtroFuncion]);
 
-    // Las observaciones se agrupan por docente: así el director lee la
-    // retroalimentación de una persona junta, en vez de saltar entre
-    // tarjetas sueltas que repiten el mismo nombre y programa.
     const grupos = useMemo<GrupoDocente[]>(() => {
         const mapa = new Map<number, GrupoDocente>();
 
@@ -125,9 +125,23 @@ export default function ObservacionesDirector() {
         return [...mapa.values()].sort((a, b) => a.docente_nombre.localeCompare(b.docente_nombre, 'es'));
     }, [observacionesFiltradas]);
 
-    // Con pocos docentes se muestran abiertos; con muchos, plegados para
-    // que la lista completa quepa en pantalla sin desplazarse.
+    const totalPaginas = Math.max(1, Math.ceil(grupos.length / regPorPag));
+    const paginaSegura = Math.min(paginaActual, totalPaginas);
+    const gruposPagina = grupos.slice((paginaSegura - 1) * regPorPag, paginaSegura * regPorPag);
+
     const abiertoPorDefecto = grupos.length <= 4;
+
+    const expandirTodos = () => {
+        const nuevo: Record<number, boolean> = {};
+        gruposPagina.forEach(g => { nuevo[g.id_usuario] = true; });
+        setDocentesAbiertos(prev => ({ ...prev, ...nuevo }));
+    };
+
+    const colapsarTodos = () => {
+        const nuevo: Record<number, boolean> = {};
+        gruposPagina.forEach(g => { nuevo[g.id_usuario] = false; });
+        setDocentesAbiertos(prev => ({ ...prev, ...nuevo }));
+    };
 
     const periodoLabel = periodo
         ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}`
@@ -165,15 +179,21 @@ export default function ObservacionesDirector() {
                 </div>
             </div>
 
-            {/* Resumen compacto */}
+            {/* Resumen interactivo */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                 {[
-                    { label: 'Total', value: totalObs, icon: MessageSquare, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-                    { label: 'Corte I · Sem 8', value: obsSem8, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-                    { label: 'Corte II · Sem 16', value: obsSem16, icon: Clock, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-                    { label: 'Docentes', value: docentesUnicos, icon: User, color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100' },
+                    { label: 'Total', value: totalObs, icon: MessageSquare, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100', active: !filtroSemana, onClick: () => setFiltroSemana('') },
+                    { label: 'Corte I · Sem 8', value: obsSem8, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', active: filtroSemana === '8', onClick: () => setFiltroSemana(filtroSemana === '8' ? '' : '8') },
+                    { label: 'Corte II · Sem 16', value: obsSem16, icon: Clock, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100', active: filtroSemana === '16', onClick: () => setFiltroSemana(filtroSemana === '16' ? '' : '16') },
+                    { label: 'Docentes', value: docentesUnicos, icon: User, color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100', active: false, onClick: undefined },
                 ].map(m => (
-                    <div key={m.label} className={`bg-white rounded-2xl px-4 py-3 shadow-xs border ${m.border} flex items-center gap-3`}>
+                    <div
+                        key={m.label}
+                        onClick={m.onClick}
+                        className={`bg-white rounded-2xl px-4 py-3 shadow-xs border transition-all ${m.border} flex items-center gap-3 ${
+                            m.onClick ? 'cursor-pointer hover:shadow-md hover:border-indigo-300' : ''
+                        } ${m.active && m.onClick ? 'ring-2 ring-indigo-500 bg-indigo-50/20' : ''}`}
+                    >
                         <div className={`w-9 h-9 ${m.bg} rounded-xl flex items-center justify-center shrink-0`}>
                             <m.icon className={`w-4 h-4 ${m.color}`} />
                         </div>
@@ -185,7 +205,7 @@ export default function ObservacionesDirector() {
                 ))}
             </div>
 
-            {/* Buscador + filtro rápido de corte */}
+            {/* Buscador + filtro rápido de corte + alternador de vista */}
             <div className="bg-white rounded-2xl shadow-xs border border-gray-100 mb-5">
                 <div className="px-4 py-3 flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
                     <div className="relative flex-1 max-w-md">
@@ -209,7 +229,7 @@ export default function ObservacionesDirector() {
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
-                        {/* Corte como botones: el filtro más usado, a un clic */}
+                        {/* Corte como botones: filtro rápido */}
                         <div className="inline-flex rounded-xl border border-gray-200 overflow-hidden">
                             {[
                                 { valor: '', texto: 'Todos' },
@@ -230,6 +250,7 @@ export default function ObservacionesDirector() {
                             ))}
                         </div>
 
+                        {/* Filtro función sustantiva */}
                         <button
                             onClick={() => setShowFilters(!showFilters)}
                             className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-colors cursor-pointer border ${
@@ -242,6 +263,34 @@ export default function ObservacionesDirector() {
                             Función
                             <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
                         </button>
+
+                        {/* Alternador de Modo de Vista */}
+                        <div className="hidden sm:inline-flex rounded-xl border border-gray-200 p-0.5 bg-gray-50">
+                            <button
+                                onClick={() => setModoVista('tarjetas')}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                                    modoVista === 'tarjetas'
+                                        ? 'bg-white text-indigo-700 shadow-2xs font-bold'
+                                        : 'text-gray-500 hover:text-gray-800'
+                                }`}
+                                title="Vista en tarjetas organizadas"
+                            >
+                                <LayoutGrid className="w-3.5 h-3.5" />
+                                <span>Tarjetas</span>
+                            </button>
+                            <button
+                                onClick={() => setModoVista('lista')}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                                    modoVista === 'lista'
+                                        ? 'bg-white text-indigo-700 shadow-2xs font-bold'
+                                        : 'text-gray-500 hover:text-gray-800'
+                                }`}
+                                title="Vista en lista compacta estructurada"
+                            >
+                                <List className="w-3.5 h-3.5" />
+                                <span>Lista</span>
+                            </button>
+                        </div>
 
                         {hayFiltros && (
                             <button
@@ -283,6 +332,30 @@ export default function ObservacionesDirector() {
                 )}
             </div>
 
+            {/* Barra de control de acordeones */}
+            {grupos.length > 0 && !loading && (
+                <div className="flex items-center justify-between mb-3 px-1">
+                    <span className="text-xs font-medium text-gray-500">
+                        Mostrando <strong className="text-gray-800">{gruposPagina.length}</strong> de {grupos.length} docentes con observaciones
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={expandirTodos}
+                            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                        >
+                            Expandir todos
+                        </button>
+                        <span className="text-gray-300">·</span>
+                        <button
+                            onClick={colapsarTodos}
+                            className="text-xs font-semibold text-gray-500 hover:text-gray-700 hover:underline cursor-pointer"
+                        >
+                            Colapsar todos
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Listado agrupado por docente */}
             {loading ? (
                 <div className="flex justify-center py-16">
@@ -299,128 +372,295 @@ export default function ObservacionesDirector() {
                     </p>
                 </div>
             ) : (
-                <div className="space-y-3">
-                    {grupos.map(grupo => {
-                        const abierto = docentesAbiertos[grupo.id_usuario] ?? abiertoPorDefecto;
+                <>
+                    <div className="space-y-4">
+                        {gruposPagina.map(grupo => {
+                            const abierto = docentesAbiertos[grupo.id_usuario] ?? abiertoPorDefecto;
+                            const subfiltro = filtroCorteDocente[grupo.id_usuario] || '';
+                            const observacionesVisibles = grupo.observaciones.filter(o => {
+                                if (!subfiltro) return true;
+                                return String(o.semana) === subfiltro;
+                            });
 
-                        return (
-                            <div key={grupo.id_usuario} className="bg-white rounded-2xl shadow-xs border border-gray-100 overflow-hidden">
+                            return (
+                                <div key={grupo.id_usuario} className="bg-white rounded-2xl shadow-xs border border-gray-200/80 overflow-hidden transition-all">
 
-                                {/* Cabecera del docente */}
-                                <div className={`flex items-center gap-3 px-4 py-3 ${abierto ? 'border-b border-gray-100 bg-gray-50/60' : ''}`}>
-                                    <button
-                                        onClick={() => setDocentesAbiertos(prev => ({ ...prev, [grupo.id_usuario]: !abierto }))}
-                                        className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer group"
-                                    >
-                                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0">
-                                            {iniciales(grupo.docente_nombre)}
+                                    {/* Cabecera del docente */}
+                                    <div className={`flex items-center gap-3 px-4 py-3.5 ${abierto ? 'border-b border-gray-100 bg-slate-50/70' : 'hover:bg-gray-50/50'}`}>
+                                        <button
+                                            onClick={() => setDocentesAbiertos(prev => ({ ...prev, [grupo.id_usuario]: !abierto }))}
+                                            className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer group"
+                                        >
+                                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs font-black flex items-center justify-center shadow-xs shrink-0">
+                                                {iniciales(grupo.docente_nombre)}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <h3 className="text-sm font-extrabold text-gray-900 truncate group-hover:text-indigo-600 transition-colors">
+                                                    {grupo.docente_nombre}
+                                                </h3>
+                                                <p className="text-xs text-gray-500 font-medium">
+                                                    {grupo.observaciones.length} {grupo.observaciones.length === 1 ? 'observación registrada' : 'observaciones registradas'}
+                                                </p>
+                                            </div>
+                                        </button>
+
+                                        <div className="hidden sm:flex items-center gap-2 shrink-0">
+                                            {grupo.sem8 > 0 && (
+                                                <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200/80">
+                                                    Corte I · {grupo.sem8}
+                                                </span>
+                                            )}
+                                            {grupo.sem16 > 0 && (
+                                                <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+                                                    Corte II · {grupo.sem16}
+                                                </span>
+                                            )}
                                         </div>
-                                        <div className="min-w-0">
-                                            <h3 className="text-sm font-extrabold text-gray-900 truncate group-hover:text-indigo-700 transition-colors">
-                                                {grupo.docente_nombre}
-                                            </h3>
-                                            <p className="text-xs text-gray-500">
-                                                {grupo.observaciones.length} {grupo.observaciones.length === 1 ? 'observación' : 'observaciones'}
-                                            </p>
-                                        </div>
-                                    </button>
 
-                                    <div className="hidden sm:flex items-center gap-1.5 shrink-0">
-                                        {grupo.sem8 > 0 && (
-                                            <span className="text-[11px] font-bold px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
-                                                Corte I · {grupo.sem8}
-                                            </span>
-                                        )}
-                                        {grupo.sem16 > 0 && (
-                                            <span className="text-[11px] font-bold px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100">
-                                                Corte II · {grupo.sem16}
-                                            </span>
-                                        )}
+                                        <button
+                                            onClick={() => navigate(`/director/agendas/${grupo.id_usuario}`)}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-200/70 whitespace-nowrap cursor-pointer shrink-0"
+                                            title="Abrir la agenda completa de este docente"
+                                        >
+                                            <Eye className="w-3.5 h-3.5" />
+                                            <span className="hidden md:inline">Ver agenda</span>
+                                        </button>
+
+                                        <button
+                                            onClick={() => setDocentesAbiertos(prev => ({ ...prev, [grupo.id_usuario]: !abierto }))}
+                                            className="w-8 h-8 rounded-lg hover:bg-gray-200/60 flex items-center justify-center text-gray-400 hover:text-gray-700 transition-colors cursor-pointer shrink-0"
+                                            title={abierto ? 'Plegar' : 'Desplegar'}
+                                        >
+                                            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${abierto ? '' : '-rotate-90'}`} />
+                                        </button>
                                     </div>
 
-                                    <button
-                                        onClick={() => navigate(`/director/agendas/${grupo.id_usuario}`)}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-100 whitespace-nowrap cursor-pointer shrink-0"
-                                        title="Abrir la agenda completa de este docente"
-                                    >
-                                        <Eye className="w-3.5 h-3.5" />
-                                        <span className="hidden md:inline">Ver agenda</span>
-                                    </button>
-
-                                    <button
-                                        onClick={() => setDocentesAbiertos(prev => ({ ...prev, [grupo.id_usuario]: !abierto }))}
-                                        className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400 transition-colors cursor-pointer shrink-0"
-                                        title={abierto ? 'Plegar' : 'Desplegar'}
-                                    >
-                                        <ChevronDown className={`w-4 h-4 transition-transform ${abierto ? '' : '-rotate-90'}`} />
-                                    </button>
-                                </div>
-
-                                {/* Observaciones del docente */}
-                                {abierto && (
-                                    <div className="divide-y divide-gray-100">
-                                        {grupo.observaciones.map(obs => {
-                                            const esCorteI = Number(obs.semana) === 8;
-                                            return (
-                                                <div
-                                                    key={obs.id}
-                                                    className={`px-4 py-3.5 border-l-4 hover:bg-gray-50/60 transition-colors ${
-                                                        esCorteI ? 'border-l-blue-400' : 'border-l-emerald-400'
-                                                    }`}
-                                                >
-                                                    {/* Etiquetas y fecha */}
-                                                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
-                                                            esCorteI
-                                                                ? 'bg-blue-50 text-blue-700 border-blue-100'
-                                                                : 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                                        }`}>
-                                                            {esCorteI ? 'Corte I · Semana 8' : 'Corte II · Semana 16'}
-                                                        </span>
-                                                        {obs.funcion_sustantiva && (
-                                                            <span className="text-[11px] font-semibold px-2 py-0.5 bg-gray-100 text-gray-600 rounded-md flex items-center gap-1">
-                                                                <BookOpen className="w-3 h-3" />
-                                                                {obs.funcion_sustantiva}
-                                                            </span>
-                                                        )}
-                                                        <span className="text-[11px] text-gray-400 flex items-center gap-1 ml-auto shrink-0">
-                                                            <Calendar className="w-3 h-3" />
-                                                            {formatearFecha(obs.ultima_edicion)}
-                                                        </span>
-                                                    </div>
-
-                                                    {/* Texto de la observación */}
-                                                    <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-line">
-                                                        {obs.texto}
-                                                    </p>
-
-                                                    {/* Contexto: actividad y autor */}
-                                                    <div className="mt-1.5 text-[11px] text-gray-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                                        <span className="font-semibold text-gray-600 truncate max-w-full">
-                                                            {obs.rol_seleccionado || 'Actividad sin nombre'}
-                                                        </span>
-                                                        {obs.horas_rol != null && (
-                                                            <>
-                                                                <span className="text-gray-300">·</span>
-                                                                <span>{parseFloat(String(obs.horas_rol)).toFixed(0)}h</span>
-                                                            </>
-                                                        )}
-                                                        {obs.director_nombre && (
-                                                            <>
-                                                                <span className="text-gray-300">·</span>
-                                                                <span>por {formatearNombre(obs.director_nombre)}</span>
-                                                            </>
-                                                        )}
-                                                    </div>
+                                    {/* Observaciones del docente */}
+                                    {abierto && (
+                                        <div className="p-4 bg-gray-50/40">
+                                            {/* Sub-filtro de corte interno cuando tiene de ambos cortes */}
+                                            {grupo.sem8 > 0 && grupo.sem16 > 0 && (
+                                                <div className="flex items-center gap-1.5 mb-3.5 pb-2.5 border-b border-gray-100">
+                                                    <span className="text-xs font-semibold text-gray-500 mr-1">Filtrar:</span>
+                                                    <button
+                                                        onClick={() => setFiltroCorteDocente(prev => ({ ...prev, [grupo.id_usuario]: '' }))}
+                                                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                                                            !subfiltro
+                                                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                                                : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+                                                        }`}
+                                                    >
+                                                        Todas ({grupo.observaciones.length})
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setFiltroCorteDocente(prev => ({ ...prev, [grupo.id_usuario]: '8' }))}
+                                                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                                                            subfiltro === '8'
+                                                                ? 'bg-blue-600 text-white shadow-2xs'
+                                                                : 'bg-white text-blue-700 hover:bg-blue-50 border border-blue-200'
+                                                        }`}
+                                                    >
+                                                        Corte I ({grupo.sem8})
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setFiltroCorteDocente(prev => ({ ...prev, [grupo.id_usuario]: '16' }))}
+                                                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                                                            subfiltro === '16'
+                                                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                                                : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
+                                                        }`}
+                                                    >
+                                                        Corte II ({grupo.sem16})
+                                                    </button>
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                            )}
+
+                                            {/* Contenedor con Scroll vertical si son muchas */}
+                                            <div className="max-h-[540px] overflow-y-auto pr-1">
+                                                {modoVista === 'tarjetas' ? (
+                                                    /* Vista Cuadrícula de Tarjetas */
+                                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+                                                        {observacionesVisibles.map(obs => {
+                                                            const esCorteI = Number(obs.semana) === 8;
+                                                            return (
+                                                                <div
+                                                                    key={obs.id}
+                                                                    className={`bg-white rounded-xl border p-4 flex flex-col justify-between shadow-xs hover:shadow-sm transition-all relative overflow-hidden ${
+                                                                        esCorteI
+                                                                            ? 'border-blue-200/70 hover:border-blue-300'
+                                                                            : 'border-emerald-200/70 hover:border-emerald-300'
+                                                                    }`}
+                                                                >
+                                                                    {/* Borde lateral indicativo de corte */}
+                                                                    <div
+                                                                        className={`absolute left-0 top-0 bottom-0 w-1.5 ${
+                                                                            esCorteI ? 'bg-blue-500' : 'bg-emerald-500'
+                                                                        }`}
+                                                                    />
+
+                                                                    <div className="pl-1">
+                                                                        {/* Encabezado de la tarjeta: Actividad y Corte */}
+                                                                        <div className="flex items-start justify-between gap-2 mb-2.5">
+                                                                            <div className="min-w-0 flex-1">
+                                                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                                                    <span className="font-extrabold text-sm text-gray-900 truncate">
+                                                                                        {obs.rol_seleccionado || 'Actividad sin nombre'}
+                                                                                    </span>
+                                                                                    {obs.horas_rol != null && (
+                                                                                        <span className="px-1.5 py-0.5 text-[11px] font-bold bg-gray-100 text-gray-600 rounded">
+                                                                                            {parseFloat(String(obs.horas_rol)).toFixed(0)}h
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+                                                                                {obs.funcion_sustantiva && (
+                                                                                    <div className="flex items-center gap-1 text-[11px] font-medium text-gray-500 mt-0.5">
+                                                                                        <BookOpen className="w-3 h-3 text-gray-400 shrink-0" />
+                                                                                        <span>{obs.funcion_sustantiva}</span>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+
+                                                                            <span className={`text-[11px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                                                                                esCorteI
+                                                                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                                                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                                            }`}>
+                                                                                {esCorteI ? 'Corte I · Sem 8' : 'Corte II · Sem 16'}
+                                                                            </span>
+                                                                        </div>
+
+                                                                        {/* Caja con el texto de la observación */}
+                                                                        <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-100 text-sm text-gray-800 leading-relaxed font-normal mb-3 whitespace-pre-line">
+                                                                            {obs.texto}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Pie de la tarjeta: Autor y Fecha */}
+                                                                    <div className="pl-1 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500 gap-2">
+                                                                        <div className="flex items-center gap-1.5 truncate">
+                                                                            <div className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-[9px] shrink-0">
+                                                                                D
+                                                                            </div>
+                                                                            <span className="truncate">
+                                                                                {obs.director_nombre ? formatearNombre(obs.director_nombre) : 'Director'}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1 shrink-0 text-gray-400">
+                                                                            <Calendar className="w-3 h-3" />
+                                                                            <span>{formatearFecha(obs.ultima_edicion)}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                ) : (
+                                                    /* Vista Lista Compacta estructurada */
+                                                    <div className="divide-y divide-gray-100 bg-white rounded-xl border border-gray-200/80 overflow-hidden">
+                                                        {observacionesVisibles.map(obs => {
+                                                            const esCorteI = Number(obs.semana) === 8;
+                                                            return (
+                                                                <div
+                                                                    key={obs.id}
+                                                                    className={`p-3.5 hover:bg-gray-50/60 transition-colors border-l-4 ${
+                                                                        esCorteI ? 'border-l-blue-500' : 'border-l-emerald-500'
+                                                                    }`}
+                                                                >
+                                                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-1.5">
+                                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${
+                                                                                esCorteI
+                                                                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                                                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                                            }`}>
+                                                                                {esCorteI ? 'Corte I · Sem 8' : 'Corte II · Sem 16'}
+                                                                            </span>
+                                                                            <span className="font-bold text-xs text-gray-900">
+                                                                                {obs.rol_seleccionado || 'Actividad sin nombre'}
+                                                                            </span>
+                                                                            {obs.horas_rol != null && (
+                                                                                <span className="text-[11px] text-gray-500 font-medium">
+                                                                                    ({parseFloat(String(obs.horas_rol)).toFixed(0)}h)
+                                                                                </span>
+                                                                            )}
+                                                                            {obs.funcion_sustantiva && (
+                                                                                <span className="text-[11px] text-gray-400">
+                                                                                    · {obs.funcion_sustantiva}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <span className="text-[11px] text-gray-400 flex items-center gap-1 shrink-0">
+                                                                            <Calendar className="w-3 h-3" />
+                                                                            {formatearFecha(obs.ultima_edicion)}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-xs sm:text-sm text-gray-800 leading-relaxed font-normal whitespace-pre-line pl-0.5">
+                                                                        {obs.texto}
+                                                                    </p>
+                                                                    <div className="mt-1.5 text-[11px] text-gray-400 pl-0.5">
+                                                                        Emitida por <span className="text-gray-600 font-medium">{obs.director_nombre ? formatearNombre(obs.director_nombre) : 'Director'}</span>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Paginación */}
+                    {grupos.length > 0 && (
+                        <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span>Mostrar</span>
+                                <select
+                                    value={regPorPag}
+                                    onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
+                                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-400"
+                                >
+                                    {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                                <span>docentes · {grupos.length} total</span>
                             </div>
-                        );
-                    })}
-                </div>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setPaginaActual(p => Math.max(1, p - 1))}
+                                    disabled={paginaSegura === 1}
+                                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50 cursor-pointer"
+                                >
+                                    ‹
+                                </button>
+                                {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+                                    <span key={p}>
+                                        {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                                        <button
+                                            onClick={() => setPaginaActual(p)}
+                                            className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
+                                                p === paginaSegura
+                                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                                    : 'border-gray-200 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            {p}
+                                        </button>
+                                    </span>
+                                ))}
+                                <button
+                                    onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))}
+                                    disabled={paginaSegura === totalPaginas}
+                                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50 cursor-pointer"
+                                >
+                                    ›
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
         </Layout>
     );

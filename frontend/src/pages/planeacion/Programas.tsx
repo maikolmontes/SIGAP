@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
 import { usePermisosPagina } from '../../hooks/usePermisos'
@@ -13,7 +13,12 @@ import {
     X,
     Search,
     Filter,
-    Info
+    Info,
+    ChevronLeft,
+    ChevronRight,
+    ChevronsLeft,
+    ChevronsRight,
+    ChevronDown
 } from 'lucide-react'
 import { 
     getProgramas, 
@@ -51,6 +56,9 @@ export default function Programas() {
     // Filtros
     const [busqueda, setBusqueda] = useState<string>('')
     const [facultadFiltro, setFacultadFiltro] = useState<string>('Todas')
+    const [mostrarFiltros, setMostrarFiltros] = useState<boolean>(true)
+    const [paginaActual, setPaginaActual] = useState<number>(1)
+    const [registrosPorPagina, setRegistrosPorPagina] = useState<number>(10)
 
     // Modales
     const [modalCrearOpen, setModalCrearOpen] = useState<boolean>(false)
@@ -243,7 +251,36 @@ export default function Programas() {
         const matchesBusqueda = p.nombre_programa.toLowerCase().includes(busqueda.toLowerCase())
         const matchesFacultad = facultadFiltro === 'Todas' || p.facultad === facultadFiltro
         return matchesBusqueda && matchesFacultad
-    })
+    }).sort((a, b) => a.nombre_programa.localeCompare(b.nombre_programa, 'es', { sensitivity: 'base' }))
+
+    const totalRegistros = programasFiltrados.length
+    const totalPaginas = Math.max(1, Math.ceil(totalRegistros / registrosPorPagina))
+    const indiceInicio = (paginaActual - 1) * registrosPorPagina
+    const indiceFin = Math.min(indiceInicio + registrosPorPagina, totalRegistros)
+
+    const programasPaginados = useMemo(() => {
+        return programasFiltrados.slice(indiceInicio, indiceFin)
+    }, [programasFiltrados, indiceInicio, indiceFin])
+
+    useEffect(() => {
+        setPaginaActual(1)
+    }, [busqueda, facultadFiltro, registrosPorPagina])
+
+    useEffect(() => {
+        if (paginaActual > totalPaginas) {
+            setPaginaActual(totalPaginas)
+        }
+    }, [paginaActual, totalPaginas])
+
+    const totalFiltrosActivos = [
+        Boolean(busqueda.trim()),
+        facultadFiltro !== 'Todas'
+    ].filter(Boolean).length
+
+    const limpiarFiltros = () => {
+        setBusqueda('')
+        setFacultadFiltro('Todas')
+    }
 
     return (
         <Layout rol="planeacion" path="/planeacion/programas">
@@ -285,40 +322,83 @@ export default function Programas() {
                     )}
                 </div>
 
-                {/* Filtros e interacciones */}
-                <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
-                    {/* Búsqueda */}
-                    <div className="w-full md:w-96 relative">
-                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                            <Search className="w-4 h-4" />
-                        </span>
-                        <input
-                            type="text"
-                            placeholder="Buscar programa académico..."
-                            value={busqueda}
-                            onChange={(e) => setBusqueda(e.target.value)}
-                            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#00a896] transition-colors bg-gray-50/50 focus:bg-white"
-                        />
+                {/* Sección de Filtros de Búsqueda (Extensible / Colapsable) */}
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden transition-all">
+                    {/* Cabecera para extender/mostrar u ocultar */}
+                    <div 
+                        onClick={() => setMostrarFiltros(!mostrarFiltros)}
+                        className="px-4 py-3 bg-gray-50/70 hover:bg-gray-100/70 flex items-center justify-between cursor-pointer select-none transition-colors border-b border-gray-100"
+                    >
+                        <div className="flex items-center gap-2.5">
+                            <div className="p-1.5 rounded-lg bg-teal-50 text-[#00a896] border border-teal-100">
+                                <Filter className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                    Filtros de Búsqueda
+                                </span>
+                                {totalFiltrosActivos > 0 && (
+                                    <span className="px-2 py-0.5 text-[10px] font-bold bg-teal-100 text-[#00a896] rounded-full">
+                                        {totalFiltrosActivos} aplicado{totalFiltrosActivos > 1 ? 's' : ''}
+                                    </span>
+                                )}
+                            </div>
+                            {totalFiltrosActivos > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        limpiarFiltros()
+                                    }}
+                                    className="text-xs font-semibold text-rose-500 hover:text-rose-700 hover:underline ml-2"
+                                >
+                                    Limpiar filtros
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 hover:text-[#00a896] transition-colors">
+                            <span>{mostrarFiltros ? 'Ocultar filtros' : 'Extender y mostrar filtros'}</span>
+                            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${mostrarFiltros ? 'rotate-180 text-[#00a896]' : ''}`} />
+                        </div>
                     </div>
 
-                    {/* Selector de Facultades */}
-                    <div className="w-full md:w-72 flex items-center gap-2">
-                        <span className="text-gray-400 flex-shrink-0">
-                            <Filter className="w-4 h-4" />
-                        </span>
-                        <select
-                            value={facultadFiltro}
-                            onChange={(e) => setFacultadFiltro(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#00a896] transition-colors bg-gray-50/50 font-medium text-gray-700 cursor-pointer"
-                        >
-                            <option value="Todas">Filtrar por Facultad (Todas)</option>
-                            {facultades.map(f => (
-                                <option key={f.id_facultad} value={f.nombre_facultad}>
-                                    {f.nombre_facultad}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                    {/* Contenido de Filtros */}
+                    {mostrarFiltros && (
+                        <div className="p-4 bg-white flex flex-col md:flex-row gap-4 items-center justify-between">
+                            {/* Búsqueda */}
+                            <div className="w-full md:w-96 relative">
+                                <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                                    <Search className="w-4 h-4" />
+                                </span>
+                                <input
+                                    type="text"
+                                    placeholder="Buscar programa académico..."
+                                    value={busqueda}
+                                    onChange={(e) => setBusqueda(e.target.value)}
+                                    className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#00a896] transition-colors bg-gray-50/50 focus:bg-white"
+                                />
+                            </div>
+
+                            {/* Selector de Facultades */}
+                            <div className="w-full md:w-72 flex items-center gap-2">
+                                <span className="text-gray-400 flex-shrink-0">
+                                    <Library className="w-4 h-4" />
+                                </span>
+                                <select
+                                    value={facultadFiltro}
+                                    onChange={(e) => setFacultadFiltro(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#00a896] transition-colors bg-gray-50/50 font-medium text-gray-700 cursor-pointer"
+                                >
+                                    <option value="Todas">Filtrar por Facultad (Todas)</option>
+                                    {facultades.map(f => (
+                                        <option key={f.id_facultad} value={f.nombre_facultad}>
+                                            {f.nombre_facultad}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Tabla de Programas */}
@@ -337,19 +417,19 @@ export default function Programas() {
                     </div>
                 ) : (
                     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-gray-50 border-b border-gray-100 text-gray-500 uppercase tracking-wider text-[10px] font-bold">
-                                        <th className="px-6 py-4">Programa Académico</th>
-                                        <th className="px-6 py-4">Facultad</th>
-                                        <th className="px-6 py-4 text-center">Estado</th>
-                                        <th className="px-6 py-4 text-center">Activo</th>
-                                        <th className="px-6 py-4 text-right">Acciones</th>
+                        <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
+                            <table className="w-full text-left border-collapse relative">
+                                <thead className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur-xs border-b border-gray-200 shadow-2xs">
+                                    <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider text-[10px] font-bold">
+                                        <th className="px-6 py-4 bg-gray-50">Programa Académico</th>
+                                        <th className="px-6 py-4 bg-gray-50">Facultad</th>
+                                        <th className="px-6 py-4 text-center bg-gray-50">Estado</th>
+                                        <th className="px-6 py-4 text-center bg-gray-50">Activo</th>
+                                        <th className="px-6 py-4 text-right bg-gray-50">Acciones</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-100 text-sm text-gray-700">
-                                    {programasFiltrados.map((p) => (
+                                <tbody className="divide-y divide-gray-100 text-sm text-gray-700 bg-white">
+                                    {programasPaginados.map((p) => (
                                         <tr key={p.id_programa} className="hover:bg-gray-50/50 transition-colors">
                                             <td className="px-6 py-4 font-semibold text-[#063759]">
                                                 {p.nombre_programa}
@@ -410,6 +490,108 @@ export default function Programas() {
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* Paginación */}
+                        {programasFiltrados.length > 0 && (
+                            <div className="px-6 py-3.5 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+                                {/* Selector de registros por página e info */}
+                                <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500 font-medium">Mostrar</span>
+                                        <select
+                                            value={registrosPorPagina}
+                                            onChange={(e) => {
+                                                setRegistrosPorPagina(Number(e.target.value))
+                                                setPaginaActual(1)
+                                            }}
+                                            className="border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700 font-medium shadow-xs focus:outline-none focus:ring-2 focus:ring-[#00a896] cursor-pointer"
+                                        >
+                                            <option value={5}>5</option>
+                                            <option value={10}>10</option>
+                                            <option value={15}>15</option>
+                                            <option value={20}>20</option>
+                                            <option value={25}>25</option>
+                                        </select>
+                                        <span className="text-gray-500 font-medium">por pág.</span>
+                                    </div>
+                                    
+                                    <div className="text-gray-500">
+                                        Mostrando <span className="font-semibold text-gray-800">{totalRegistros === 0 ? 0 : indiceInicio + 1}</span> a <span className="font-semibold text-gray-800">{indiceFin}</span> de <span className="font-semibold text-gray-800">{totalRegistros}</span> programas
+                                    </div>
+                                </div>
+
+                                {/* Botones de navegación */}
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => setPaginaActual(1)}
+                                        disabled={paginaActual === 1}
+                                        title="Primera página"
+                                        className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronsLeft className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => setPaginaActual(prev => Math.max(prev - 1, 1))}
+                                        disabled={paginaActual === 1}
+                                        title="Página anterior"
+                                        className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+                                    >
+                                        <ChevronLeft className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline">Anterior</span>
+                                    </button>
+
+                                    {/* Números de página */}
+                                    <div className="flex items-center gap-1 mx-1">
+                                        {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+                                            .filter(p => {
+                                                if (totalPaginas <= 7) return true
+                                                if (p === 1 || p === totalPaginas) return true
+                                                return Math.abs(p - paginaActual) <= 1
+                                            })
+                                            .map((p, idx, arr) => {
+                                                const prev = arr[idx - 1]
+                                                const showEllipsis = prev && p - prev > 1
+
+                                                return (
+                                                    <div key={p} className="flex items-center">
+                                                        {showEllipsis && (
+                                                            <span className="px-1 text-gray-400 select-none">...</span>
+                                                        )}
+                                                        <button
+                                                            onClick={() => setPaginaActual(p)}
+                                                            className={`w-7 h-7 rounded-md font-semibold text-xs transition-colors ${
+                                                                paginaActual === p
+                                                                    ? 'bg-[#00a896] text-white shadow-xs'
+                                                                    : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'
+                                                            }`}
+                                                        >
+                                                            {p}
+                                                        </button>
+                                                    </div>
+                                                )
+                                            })}
+                                    </div>
+
+                                    <button
+                                        onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginas))}
+                                        disabled={paginaActual === totalPaginas}
+                                        title="Página siguiente"
+                                        className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+                                    >
+                                        <span className="hidden sm:inline">Siguiente</span>
+                                        <ChevronRight className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                        onClick={() => setPaginaActual(totalPaginas)}
+                                        disabled={paginaActual === totalPaginas}
+                                        title="Última página"
+                                        className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronsRight className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

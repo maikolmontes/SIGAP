@@ -6,7 +6,7 @@ Stack
 Backend: Node.js + Express (API REST) — carpeta /backend
 Frontend: React 19 + TypeScript + Vite + TailwindCSS — carpeta /frontend
 Base de datos: PostgreSQL 15 — scripts en /database
-Analítica: Power BI via DirectQuery sobre PostgreSQL
+Analítica: nativa en React + Recharts sobre /api/analitica, con interpretación descriptiva opcional vía Gemini
 Auth: JWT + bcrypt + Google OAuth (@react-oauth/google)
 
 Estructura de carpetas
@@ -69,7 +69,20 @@ INFORME_GESTION, INFORME_ACTIVIDAD, INFORME_INDICADOR, INFORME_EVIDENCIA
 Convenciones de la BD
 
 PKs: id_Usuario, id_Funciones, id_AsignacionAct, id_Espacio_Aca, id_PensulAca, id_ActSemana, id_Resultados
-Tablas N:N: USUARIO_ROL, ROL_PERMISO, USUARIO_NIVEL, USUARIO_ASIGNACION, SEMESTRES_GRUPOS
+Tablas N:N: USUARIO_ROL, ROL_PERMISO, USUARIO_NIVEL, USUARIO_ASIGNACION, SEMESTRES_GRUPOS, DIRECTOR_PROGRAMA
+
+Directores y programas (database/director_programa.sql)
+
+Un Director gestiona uno o varios programas y un programa puede tener varios directores: tabla N:N director_programa
+usuarios.id_programa se conserva: para un docente es su programa; para un director, su programa principal
+El alcance de un Director se resuelve SIEMPRE con alcanceProgramas(req) / docenteEnAlcance(req, id) de backend/utils/rolActivo.js (filtro `u.id_programa = ANY($n::int[])`)
+Un Director sin programas asignados no ve nada; nunca se cae a "toda la institución" ni a un programa por defecto
+
+Usuarios (backend/controllers/usuariosController.js)
+
+/api/usuarios exige token; crear, editar, listar, borrar y activar es solo Planeación/Admin. El perfil (/:id, /perfil, /perfil-completo) es propio o admin
+Alta y edición pasan por validarDatosUsuario (una sola función): nombres/apellidos, correo, tipo y número de documento, roles existentes, programa existente y activo, contrato, programas del director y duplicados (409). Devuelve la lista completa de errores en `errores`
+Alta y edición usan una transacción real (pool.connect), no pool.query('BEGIN')
 Campo calculado automático — NO editar manualmente: porcentaje_avance en RESULTADOS
 
 Fórmula: porcentaje_avance = (ejecucion / meta) * 100
@@ -81,7 +94,7 @@ Roles y lo que puede hacer cada uno
 Docente: crea agenda, selecciona funciones sustantivas, asigna materias, registra ejecución en Semana 8 y 16, sube evidencias
 Director de Programa: aprueba/rechaza agendas y seguimientos, crea informes de gestión, gestiona periodos y programas
 Planeación / Admin: gestiona usuarios, roles, estructura académica completa (facultades, programas, pensules, espacios)
-consultor/planeacion: solo lectura — consulta dashboards Power BI y exporta reportes
+consultor/planeacion: solo lectura — consulta el panel de analítica y exporta reportes
 
 Flujo del negocio
 
@@ -91,7 +104,7 @@ Docente envía agenda → Director aprueba o rechaza con observaciones
 Semana 8 y Semana 16: Docente registra ejecución → sistema calcula porcentaje_avance automáticamente
 Docente sube evidencias → Director aprueba seguimiento
 Director crea informe de gestión → Docentes completan actividades → Director envía a Planeación
-Power BI conecta via DirectQuery a PostgreSQL para dashboards en tiempo real
+El panel de analítica consulta /api/analitica, que agrega directamente sobre PostgreSQL
 
 Comandos útiles
 bash# Backend
@@ -106,7 +119,19 @@ Lo que NO hacer
 
 No editar porcentaje_avance directamente en la BD — es calculado por el sistema
 No modificar tablas N:N directamente sin pasar por los endpoints correspondientes
-Power BI usa DirectQuery — no cargar datos en caché ni duplicar tablas para reportes
+No usar las vistas v_analitica_* — están obsoletas y defectuosas (ver database/v_analitica_sigap.sql)
+No enviar a Gemini nombres, correos ni documentos — solo métricas agregadas; IND-04 está excluido por diseño
+
+Analítica descriptiva (React + Recharts + Gemini)
+
+Endpoints: /api/analitica/periodos, /catalogo, /resumen, /docentes-detalle, /interpretar, /ia/estado
+Catálogo de indicadores: backend/config/catalogoAnalitica.js (IND-01 a IND-07, con roles autorizados)
+Consultas: backend/controllers/analiticaController.js — parametrizadas, sin vistas SQL
+Interpretación IA: backend/services/geminiService.js — degrada sin romper si falta GEMINI_API_KEY
+Frontend: frontend/src/pages/common/Analitica.tsx + components/analitica/ + services/analiticaService.ts
+El backend entrega datos sin colores ni estilos; la paleta se decide en components/analitica/paleta.ts
+La analítica excluye el catálogo maestro (funciones sin docente) uniendo contra usuario_asignacion
+horas_contrato puede ser 0 (Hora Cátedra, Por Definir): toda división usa NULLIF
 Notificaciones por correo (Gmail / Nodemailer)
 
 Servicio central: backend/services/emailService.js (transporte SMTP, sendEmail, sendEmailAsync, verificarConexion)

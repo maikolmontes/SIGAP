@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import Layout from '../../components/common/Layout';
 import * as XLSX from 'xlsx';
@@ -24,14 +24,21 @@ import {
   UserMinus,
   Briefcase,
   Calendar,
-  Pencil
+  Pencil,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Filter,
+  ChevronDown
 } from 'lucide-react';
 import { 
   getUsuarios, 
   createUsuario, 
   updateUsuario,
   createBulkUsuarios, 
-  toggleActivo 
+  toggleActivo,
+  getRolesAsignables,
 } from '../../services/usuariosService';
 import {
   getPeriodoActivo,
@@ -43,6 +50,8 @@ import { exportarDocentesExcel } from '../../utils/exportExcelDocentes';
 interface ProgramaItem {
   id_programa: number;
   nombre_programa: string;
+  id_facultad?: number;
+  facultad?: string;
   activo?: boolean;
 }
 
@@ -59,7 +68,260 @@ interface Usuario {
   horas_contrato: number;
   programa: string;
   id_programa?: number;
+  // Solo Directores: programas que gestiona (uno o varios)
+  programas_gestion?: number[];
+  programas_gestion_nombres?: string | null;
   roles: string;
+}
+
+interface SelectorUbicacionProps {
+  programas: ProgramaItem[];
+  sinPrograma: boolean;   // solo Consultor/Planeación: no llevan facultad ni programa
+  esDocente: boolean;
+  esDirector: boolean;
+  facultadId: number;
+  onFacultad: (id: number) => void;
+  idPrograma: number;
+  onPrograma: (id: number) => void;
+  programasGestion: number[];
+  onGestion: (ids: number[]) => void;
+  directoresPorPrograma?: Map<number, { id_usuario: number; nombre: string }>;
+  usuarioActualId?: number | null;
+}
+
+const CLASE_ETIQUETA = 'text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1';
+const CLASE_CAMPO =
+  'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 ' +
+  'focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed';
+
+/**
+ * Facultad → Programa(s) según los roles elegidos:
+ *  · Docente   → elige facultad y, dentro de ella, su programa académico.
+ *  · Director  → elige facultad y marca los programas que gestiona. Puede
+ *                cambiar de facultad y seguir marcando: la selección se conserva
+ *                (un director puede gestionar programas de facultades distintas).
+ *                Solo se pueden elegir programas disponibles (los asignados a otro
+ *                director activo se muestran deshabilitados con su responsable).
+ *  · Consultor/Planeación → no aplica.
+ */
+function SelectorUbicacion({
+  programas, sinPrograma, esDocente, esDirector,
+  facultadId, onFacultad, idPrograma, onPrograma, programasGestion, onGestion,
+  directoresPorPrograma, usuarioActualId
+}: SelectorUbicacionProps) {
+  if (sinPrograma) {
+    return (
+      <div className="bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-xs text-gray-500 flex flex-col items-center justify-center gap-2 my-auto">
+        <Shield className="w-8 h-8 text-blue-500/70" />
+        <span className="font-bold text-gray-700 text-sm">Acceso Institucional Global</span>
+        <p className="text-[11px] text-gray-400 max-w-xs">
+          Los roles seleccionados (Consultor / Planeación) no requieren adscripción a una facultad ni programa académico específico.
+        </p>
+      </div>
+    );
+  }
+
+  const activos = programas.filter(p => p.activo !== false && p.id_facultad);
+  const facultades = Array.from(
+    new Map(activos.map(p => [p.id_facultad as number, p.facultad || `Facultad ${p.id_facultad}`])).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+  const deLaFacultad = activos.filter(p => p.id_facultad === facultadId);
+  const seleccionados = programas.filter(p => programasGestion.includes(p.id_programa));
+
+  const alternar = (id: number) => {
+    const ocupante = directoresPorPrograma?.get(id);
+    if (ocupante && (!usuarioActualId || ocupante.id_usuario !== usuarioActualId)) {
+      return; // No permitir alternar programas asignados a otro director activo
+    }
+    onGestion(programasGestion.includes(id) ? programasGestion.filter(x => x !== id) : [...programasGestion, id]);
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className={CLASE_ETIQUETA}>Facultad *</label>
+        <select
+          className={CLASE_CAMPO}
+          value={facultadId || ''}
+          onChange={(e) => onFacultad(Number(e.target.value) || 0)}
+        >
+          <option value="">Seleccione una facultad</option>
+          {facultades.map(([id, nombre]) => (
+            <option key={id} value={id}>{nombre}</option>
+          ))}
+        </select>
+      </div>
+
+      {esDocente && (
+        <div>
+          <label className={CLASE_ETIQUETA}>Programa Académico *</label>
+          <select
+            className={CLASE_CAMPO}
+            disabled={!facultadId}
+            value={idPrograma || ''}
+            onChange={(e) => onPrograma(Number(e.target.value) || 0)}
+          >
+            <option value="">{facultadId ? 'Seleccione un programa' : 'Primero seleccione una facultad'}</option>
+            {deLaFacultad.map(p => (
+              <option key={p.id_programa} value={p.id_programa}>{p.nombre_programa}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {esDirector && (
+        <div>
+          <label className={CLASE_ETIQUETA}>Programas que gestiona como Director *</label>
+          {!facultadId ? (
+            <p className="text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg p-2.5 bg-white">
+              Seleccione una facultad para ver sus programas.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-1 max-h-36 overflow-y-auto border border-gray-300 rounded-lg p-1.5 bg-white">
+              {deLaFacultad.map(p => {
+                const ocupante = directoresPorPrograma?.get(p.id_programa);
+                const ocupadoPorOtro = Boolean(ocupante && (!usuarioActualId || ocupante.id_usuario !== usuarioActualId));
+                return (
+                  <label
+                    key={p.id_programa}
+                    className={`flex items-center justify-between gap-2 text-sm p-1.5 rounded transition-colors ${
+                      ocupadoPorOtro
+                        ? 'opacity-60 bg-gray-50 text-gray-400 cursor-not-allowed select-none'
+                        : 'text-gray-700 font-semibold cursor-pointer hover:bg-gray-50'
+                    }`}
+                    title={ocupadoPorOtro ? `Ya asignado al director ${ocupante?.nombre}` : undefined}
+                  >
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        disabled={ocupadoPorOtro}
+                        checked={programasGestion.includes(p.id_programa)}
+                        onChange={() => alternar(p.id_programa)}
+                      />
+                      <span>{p.nombre_programa}</span>
+                    </span>
+                    {ocupadoPorOtro && (
+                      <span className="text-[10px] text-amber-800 bg-amber-100/90 border border-amber-300/80 px-1.5 py-0.5 rounded font-medium">
+                        Asignado a: {ocupante?.nombre}
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {seleccionados.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {seleccionados.map(p => (
+                <span
+                  key={p.id_programa}
+                  className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                >
+                  {p.nombre_programa}
+                  <button
+                    type="button"
+                    onClick={() => alternar(p.id_programa)}
+                    aria-label={`Quitar ${p.nombre_programa}`}
+                    className="hover:text-red-600 leading-none"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400 mt-1">
+            Solo están disponibles programas sin director asignado. Puede cambiar de facultad y seguir marcando.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const REGEX_NOMBRE = /^[\p{L}][\p{L}\s'.-]*$/u;
+const REGEX_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface CamposUsuario {
+  nombres: string;
+  apellidos: string;
+  correo: string;
+  tipoDocumento: string;
+  numeroDocumento: string;
+  roles: string[];
+  sinPrograma: boolean; // Consultor/Planeación no llevan programa
+  esDocente: boolean;
+  esDirector: boolean;
+  idPrograma: number | null;
+  programasGestion: number[];
+  directoresPorPrograma?: Map<number, { id_usuario: number; nombre: string }>;
+  usuarioActualId?: number | null;
+}
+
+/**
+ * Validación previa al envío. Repite las reglas del backend
+ * (usuariosController.validarDatosUsuario) para avisar sin ir al servidor;
+ * el backend sigue siendo quien decide.
+ * Devuelve TODOS los problemas, no solo el primero.
+ */
+function validarUsuarioCliente(c: CamposUsuario): string[] {
+  const errores: string[] = [];
+  const nombres = c.nombres.trim().replace(/\s+/g, ' ');
+  const apellidos = c.apellidos.trim().replace(/\s+/g, ' ');
+  const correo = c.correo.trim().toLowerCase();
+  const doc = c.numeroDocumento.trim();
+
+  const validarNombre = (valor: string, etiqueta: string) => {
+    if (!valor) errores.push(`${etiqueta} son obligatorios.`);
+    else if (valor.length < 2 || valor.length > 60) errores.push(`${etiqueta} deben tener entre 2 y 60 caracteres.`);
+    else if (!REGEX_NOMBRE.test(valor)) errores.push(`${etiqueta} solo pueden contener letras, espacios, apóstrofes, puntos y guiones.`);
+  };
+  validarNombre(nombres, 'Los nombres');
+  validarNombre(apellidos, 'Los apellidos');
+
+  if (!correo) errores.push('El correo es obligatorio.');
+  else if (correo.length > 100) errores.push('El correo no puede superar los 100 caracteres.');
+  else if (!REGEX_CORREO.test(correo)) errores.push('El correo no tiene un formato válido (ejemplo: nombre@unicesmag.edu.co).');
+
+  if (!doc) {
+    errores.push('El número de documento es obligatorio.');
+  } else if (c.tipoDocumento === 'PA') {
+    if (!/^[A-Za-z0-9]{5,15}$/.test(doc)) errores.push('El pasaporte debe tener entre 5 y 15 caracteres alfanuméricos, sin espacios.');
+  } else if (!/^\d{5,12}$/.test(doc)) {
+    errores.push('El número de documento debe tener entre 5 y 12 dígitos, sin puntos ni espacios.');
+  } else if (/^0+$/.test(doc)) {
+    errores.push('El número de documento no es válido.');
+  }
+
+  if (c.roles.length === 0) errores.push('Debe seleccionar al menos un rol.');
+  if (!c.sinPrograma) {
+    if (c.esDocente && !c.idPrograma) errores.push('Debe seleccionar la facultad y el programa académico del docente.');
+    if (c.esDirector && c.programasGestion.length === 0) errores.push('Debe seleccionar al menos un programa que gestionará como Director.');
+    
+    // Validación de programas ocupados por otro director
+    if (c.esDirector && c.directoresPorPrograma && c.programasGestion.length > 0) {
+      for (const pId of c.programasGestion) {
+        const ocupante = c.directoresPorPrograma.get(pId);
+        if (ocupante && (!c.usuarioActualId || ocupante.id_usuario !== c.usuarioActualId)) {
+          errores.push(`Uno de los programas seleccionados ya se encuentra asignado al director ${ocupante.nombre}.`);
+          break;
+        }
+      }
+    }
+  }
+
+  return errores;
+}
+
+/** Texto para mostrar el error de una petición: la lista completa si el backend la envía. */
+interface ErrorDeApi {
+  response?: { data?: { error?: string; errores?: { mensaje: string }[] } };
+}
+
+function mensajeDeError(error: ErrorDeApi, porDefecto: string): string {
+  const lista = error?.response?.data?.errores;
+  if (Array.isArray(lista) && lista.length > 0) return lista.map(e => e.mensaje).join('\n');
+  return error?.response?.data?.error || porDefecto;
 }
 
 export default function Docentes() {
@@ -77,6 +339,9 @@ export default function Docentes() {
   const [selectedRol, setSelectedRol] = useState('todos');
   const [selectedEstado, setSelectedEstado] = useState('todos');
   const [selectedPrograma, setSelectedPrograma] = useState('todos');
+  const [mostrarFiltros, setMostrarFiltros] = useState(true);
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [registrosPorPagina, setRegistrosPorPagina] = useState(10);
 
   // Control de Modales
   const [showAddModal, setShowAddModal] = useState(false);
@@ -85,12 +350,16 @@ export default function Docentes() {
 
   // Formulario de Creación Individual (Multirrol)
   const [programas, setProgramas] = useState<ProgramaItem[]>([]);
+  // Roles asignables traídos de la BD; si falla la consulta se usan los base.
+  const [rolesDisponibles, setRolesDisponibles] = useState<string[]>(['Docente', 'Director', 'Consultor', 'Planeación']);
   const [nombres, setNombres] = useState('');
   const [apellidos, setApellidos] = useState('');
   const [tipoDocumento, setTipoDocumento] = useState('CC');
   const [numeroDocumento, setNumeroDocumento] = useState('');
   const [correo, setCorreo] = useState('');
-  const [idPrograma, setIdPrograma] = useState(1);
+  const [facultadId, setFacultadId] = useState(0);
+  const [idPrograma, setIdPrograma] = useState(0);
+  const [programasGestion, setProgramasGestion] = useState<number[]>([]);
   const [rolesSeleccionados, setRolesSeleccionados] = useState<string[]>(['Docente']);
   const [formError, setFormError] = useState<string | null>(null);
   const [formWarning, setFormWarning] = useState<string | null>(null);
@@ -103,7 +372,9 @@ export default function Docentes() {
   const [editTipoDocumento, setEditTipoDocumento] = useState('CC');
   const [editNumeroDocumento, setEditNumeroDocumento] = useState('');
   const [editCorreo, setEditCorreo] = useState('');
-  const [editIdPrograma, setEditIdPrograma] = useState(1);
+  const [editFacultadId, setEditFacultadId] = useState(0);
+  const [editIdPrograma, setEditIdPrograma] = useState(0);
+  const [editProgramasGestion, setEditProgramasGestion] = useState<number[]>([]);
   const [editRolesSeleccionados, setEditRolesSeleccionados] = useState<string[]>(['Docente']);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [editWarning, setEditWarning] = useState<string | null>(null);
@@ -117,6 +388,13 @@ export default function Docentes() {
 
   useEffect(() => {
     cargarUsuarios();
+    // El catálogo de roles sale de la BD: un rol nuevo aparece sin tocar código.
+    getRolesAsignables()
+      .then((res: any) => {
+        const nombres = (res.data || []).map((r: any) => r.nombre_rol).filter(Boolean);
+        if (nombres.length > 0) setRolesDisponibles(nombres);
+      })
+      .catch(() => { /* se conservan los roles base */ });
   }, []);
 
   useEffect(() => {
@@ -140,9 +418,6 @@ export default function Docentes() {
 
       const listaProgs = progsRes.data || [];
       setProgramas(listaProgs);
-      if (listaProgs.length > 0) {
-        setIdPrograma(listaProgs[0].id_programa);
-      }
 
       setUsuarios(usuariosRes.data || []);
     } catch (error) {
@@ -158,8 +433,37 @@ export default function Docentes() {
     if (low.includes('planea') || low.includes('admin')) return 'planeacion';
     if (low.includes('direct')) return 'director';
     if (low.includes('consult')) return 'consultor';
-    return 'docente';
+    // Un rol nuevo (Investigación y los que sigan) conserva su nombre. Antes
+    // caía en 'docente' y al guardar se convertía en Docente en silencio.
+    return low || 'docente';
   };
+
+  // Mapa reactivo de programas ocupados por directores activos
+  const directoresPorPrograma = useMemo(() => {
+    const mapa = new Map<number, { id_usuario: number; nombre: string }>();
+    for (const u of usuarios) {
+      if (!u.activo) continue;
+      const rolesList = (u.roles || '').split(',').map(r => normalizarRol(r));
+      if (!rolesList.includes('director')) continue;
+
+      const nombre = u.nombre_completo || `${u.nombres || ''} ${u.apellidos || ''}`.trim() || 'Director asignado';
+
+      if (Array.isArray(u.programas_gestion) && u.programas_gestion.length > 0) {
+        for (const pId of u.programas_gestion) {
+          const idNum = Number(pId);
+          if (idNum && !mapa.has(idNum)) {
+            mapa.set(idNum, { id_usuario: u.id_usuario, nombre });
+          }
+        }
+      } else if (u.id_programa) {
+        const idNum = Number(u.id_programa);
+        if (idNum && !mapa.has(idNum)) {
+          mapa.set(idNum, { id_usuario: u.id_usuario, nombre });
+        }
+      }
+    }
+    return mapa;
+  }, [usuarios]);
 
   const rolEstaSeleccionado = (lista: string[], rolName: string) => {
     const normTarget = normalizarRol(rolName);
@@ -193,16 +497,6 @@ export default function Docentes() {
     }
   };
 
-  const mapProgramaToId = (progName?: string): number => {
-    if (!progName || programas.length === 0) return programas[0]?.id_programa || 1;
-    const low = progName.toLowerCase().trim();
-    const exact = programas.find(p => p.nombre_programa.toLowerCase().trim() === low);
-    if (exact) return exact.id_programa;
-    const partial = programas.find(p => p.nombre_programa.toLowerCase().includes(low) || low.includes(p.nombre_programa.toLowerCase()));
-    if (partial) return partial.id_programa;
-    return programas[0]?.id_programa || 1;
-  };
-
   const handleOpenEditModal = (u: Usuario) => {
     setUsuarioAEditar(u);
     setEditNombres(u.nombres || '');
@@ -210,7 +504,8 @@ export default function Docentes() {
     setEditTipoDocumento(u.tipo_documento || 'CC');
     setEditNumeroDocumento(u.numero_documento || '');
     setEditCorreo(u.correo || '');
-    setEditIdPrograma(mapProgramaToId(u.programa));
+    setEditIdPrograma(u.id_programa || 0);
+    setEditProgramasGestion(u.programas_gestion || []);
 
     const parsedRoles = (u.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean);
     // Normalizar a los nombres estándar de la interfaz
@@ -223,6 +518,12 @@ export default function Docentes() {
     });
     const uniqueMapped = Array.from(new Set(mappedRoles));
     setEditRolesSeleccionados(uniqueMapped.length > 0 ? uniqueMapped : ['Docente']);
+
+    // La facultad se deduce del programa: el del docente o, si solo es director, el primero que gestiona
+    const idReferencia = uniqueMapped.includes('Docente')
+      ? (u.id_programa || 0)
+      : ((u.programas_gestion || [])[0] || u.id_programa || 0);
+    setEditFacultadId(programas.find(p => p.id_programa === idReferencia)?.id_facultad || 0);
     setEditFormError(null);
     setEditWarning(null);
     setShowEditModal(true);
@@ -249,9 +550,9 @@ export default function Docentes() {
     setTipoDocumento('CC');
     setNumeroDocumento('');
     setCorreo('');
-    if (programas.length > 0) {
-      setIdPrograma(programas[0].id_programa);
-    }
+    setFacultadId(0);
+    setIdPrograma(0);
+    setProgramasGestion([]);
     setRolesSeleccionados(['Docente']);
     setFormError(null);
     setFormWarning(null);
@@ -262,17 +563,24 @@ export default function Docentes() {
     setFormError(null);
     setFormWarning(null);
 
-    if (!nombres.trim() || !apellidos.trim() || !correo.trim() || !numeroDocumento.trim()) {
-      setFormError('Por favor diligencie todos los campos obligatorios.');
-      return;
-    }
-
-    if (rolesSeleccionados.length === 0) {
-      setFormError('Debe seleccionar al menos un rol.');
-      return;
-    }
-
     const soloConsultaOPl = esSoloConsultorOPlaneacion(rolesSeleccionados);
+
+    const problemas = validarUsuarioCliente({
+      nombres, apellidos, correo,
+      tipoDocumento, numeroDocumento,
+      roles: rolesSeleccionados,
+      sinPrograma: soloConsultaOPl,
+      esDocente: rolEstaSeleccionado(rolesSeleccionados, 'Docente'),
+      esDirector: rolEstaSeleccionado(rolesSeleccionados, 'Director'),
+      idPrograma,
+      programasGestion,
+      directoresPorPrograma,
+      usuarioActualId: null
+    });
+    if (problemas.length > 0) {
+      setFormError(problemas.join('\n'));
+      return;
+    }
 
     try {
       setCreating(true);
@@ -283,7 +591,8 @@ export default function Docentes() {
         numero_documento: numeroDocumento.trim(),
         correo: correo.trim().toLowerCase(),
         id_contrato: 4,
-        id_programa: soloConsultaOPl ? null : idPrograma,
+        id_programa: soloConsultaOPl ? null : (idPrograma || programasGestion[0]),
+        programas_gestion: rolEstaSeleccionado(rolesSeleccionados, 'Director') ? programasGestion : [],
         roles: rolesSeleccionados
       });
 
@@ -305,8 +614,7 @@ export default function Docentes() {
       setTimeout(() => setMensaje(null), 5000);
     } catch (error: any) {
       console.error('Error al crear usuario:', error);
-      const errMsg = error.response?.data?.error || 'No se pudo registrar el usuario. Verifique los datos o si la identificación/correo ya está registrado.';
-      setFormError(errMsg);
+      setFormError(mensajeDeError(error, 'No se pudo registrar el usuario. Verifique los datos o si la identificación/correo ya está registrado.'));
     } finally {
       setCreating(false);
     }
@@ -319,17 +627,24 @@ export default function Docentes() {
 
     if (!usuarioAEditar) return;
 
-    if (!editNombres.trim() || !editApellidos.trim() || !editCorreo.trim() || !editNumeroDocumento.trim()) {
-      setEditFormError('Por favor diligencie todos los campos obligatorios.');
-      return;
-    }
-
-    if (editRolesSeleccionados.length === 0) {
-      setEditFormError('Debe seleccionar al menos un rol.');
-      return;
-    }
-
     const soloConsultaOPl = esSoloConsultorOPlaneacion(editRolesSeleccionados);
+
+    const problemas = validarUsuarioCliente({
+      nombres: editNombres, apellidos: editApellidos, correo: editCorreo,
+      tipoDocumento: editTipoDocumento, numeroDocumento: editNumeroDocumento,
+      roles: editRolesSeleccionados,
+      sinPrograma: soloConsultaOPl,
+      esDocente: rolEstaSeleccionado(editRolesSeleccionados, 'Docente'),
+      esDirector: rolEstaSeleccionado(editRolesSeleccionados, 'Director'),
+      idPrograma: editIdPrograma,
+      programasGestion: editProgramasGestion,
+      directoresPorPrograma,
+      usuarioActualId: usuarioAEditar.id_usuario
+    });
+    if (problemas.length > 0) {
+      setEditFormError(problemas.join('\n'));
+      return;
+    }
 
     try {
       setUpdating(true);
@@ -339,7 +654,8 @@ export default function Docentes() {
         tipo_documento: editTipoDocumento,
         numero_documento: editNumeroDocumento.trim(),
         correo: editCorreo.trim().toLowerCase(),
-        id_programa: soloConsultaOPl ? null : editIdPrograma,
+        id_programa: soloConsultaOPl ? null : (editIdPrograma || editProgramasGestion[0]),
+        programas_gestion: rolEstaSeleccionado(editRolesSeleccionados, 'Director') ? editProgramasGestion : [],
         roles: editRolesSeleccionados
       });
 
@@ -361,8 +677,7 @@ export default function Docentes() {
       setTimeout(() => setMensaje(null), 5000);
     } catch (error: any) {
       console.error('Error al actualizar usuario:', error);
-      const errMsg = error.response?.data?.error || 'No se pudo actualizar el usuario. Verifique los datos o si la identificación/correo ya existe.';
-      setEditFormError(errMsg);
+      setEditFormError(mensajeDeError(error, 'No se pudo actualizar el usuario. Verifique los datos o si la identificación/correo ya existe.'));
     } finally {
       setUpdating(false);
     }
@@ -497,7 +812,44 @@ export default function Docentes() {
                               (user.programa && user.programa.toLowerCase() === selectedPrograma.toLowerCase());
 
     return coincideBusqueda && coincideRol && coincideEstado && coincidePrograma;
+  }).sort((a, b) => {
+    const nombreA = (a.nombre_completo || `${a.nombres || ''} ${a.apellidos || ''}`).trim();
+    const nombreB = (b.nombre_completo || `${b.nombres || ''} ${b.apellidos || ''}`).trim();
+    return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
   });
+
+  const totalRegistros = usuariosFiltrados.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalRegistros / registrosPorPagina));
+  const indiceInicio = (paginaActual - 1) * registrosPorPagina;
+  const indiceFin = Math.min(indiceInicio + registrosPorPagina, totalRegistros);
+
+  const usuariosPaginados = useMemo(() => {
+    return usuariosFiltrados.slice(indiceInicio, indiceFin);
+  }, [usuariosFiltrados, indiceInicio, indiceFin]);
+
+  useEffect(() => {
+    setPaginaActual(1);
+  }, [searchTerm, selectedRol, selectedEstado, selectedPrograma, registrosPorPagina]);
+
+  useEffect(() => {
+    if (paginaActual > totalPaginas) {
+      setPaginaActual(totalPaginas);
+    }
+  }, [paginaActual, totalPaginas]);
+
+  const totalFiltrosActivos = [
+    Boolean(searchTerm.trim()),
+    selectedRol !== 'todos',
+    selectedEstado !== 'todos',
+    selectedPrograma !== 'todos'
+  ].filter(Boolean).length;
+
+  const limpiarFiltros = () => {
+    setSearchTerm('');
+    setSelectedRol('todos');
+    setSelectedEstado('todos');
+    setSelectedPrograma('todos');
+  };
 
   // Métricas para tarjetas KPI
   const totalUsuariosCount = usuarios.length;
@@ -642,63 +994,116 @@ export default function Docentes() {
       {/* Contenedor Principal: Filtros y Tabla */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         
-        {/* Barra de Búsqueda y Filtros */}
-        <div className="p-4 border-b border-gray-100 flex flex-col md:flex-row gap-3 justify-between items-center bg-gray-50/50">
-          <div className="relative w-full md:w-80">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
-            <input
-              type="text"
-              placeholder="Buscar por nombre o correo..."
-              className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+        {/* Cabecera Extensible de Filtros de Búsqueda */}
+        <div 
+          onClick={() => setMostrarFiltros(!mostrarFiltros)}
+          className="px-6 py-3 bg-gray-50/80 hover:bg-gray-100/80 border-b border-gray-100 flex items-center justify-between cursor-pointer select-none transition-colors"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="p-1 rounded-md bg-blue-50 text-blue-600 border border-blue-100">
+              <Filter className="w-3.5 h-3.5" />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                Filtros de Búsqueda
+              </span>
+              {totalFiltrosActivos > 0 && (
+                <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 rounded-full">
+                  {totalFiltrosActivos} aplicado{totalFiltrosActivos > 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            {totalFiltrosActivos > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  limpiarFiltros();
+                }}
+                className="text-xs font-semibold text-red-500 hover:text-red-700 hover:underline ml-2"
+              >
+                Limpiar filtros
+              </button>
+            )}
           </div>
 
-          <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
-            {/* Filtro por Rol */}
-            <select
-              value={selectedRol}
-              onChange={(e) => setSelectedRol(e.target.value)}
-              className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="todos">Todos los Roles</option>
-              <option value="Docente">Docente</option>
-              <option value="Director">Director</option>
-              <option value="Consultor">Consultor</option>
-              <option value="Planeacion">Planeación</option>
-            </select>
-
-            {/* Filtro por Estado */}
-            <select
-              value={selectedEstado}
-              onChange={(e) => setSelectedEstado(e.target.value)}
-              className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="todos">Todos los Estados</option>
-              <option value="activos">Activos (Habilitados)</option>
-              <option value="inactivos">Inactivos (Bloqueados)</option>
-            </select>
-
-            {/* Filtro por Programa */}
-            <select
-              value={selectedPrograma}
-              onChange={(e) => setSelectedPrograma(e.target.value)}
-              className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="todos">Todos los Programas</option>
-              {programas.map((prog) => (
-                <option key={prog.id_programa} value={prog.nombre_programa}>
-                  {prog.nombre_programa}
-                </option>
-              ))}
-              <option value="Ninguno">No Aplica / Sin Asignar</option>
-            </select>
+          <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 hover:text-blue-600 transition-colors">
+            <span>{mostrarFiltros ? 'Ocultar filtros' : 'Extender y mostrar filtros'}</span>
+            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${mostrarFiltros ? 'rotate-180 text-blue-600' : ''}`} />
           </div>
         </div>
 
+        {/* Contenido de Filtros Desplegable */}
+        {mostrarFiltros && (
+          <div className="p-4 border-b border-gray-100 bg-white">
+            <div className="flex flex-col md:flex-row gap-3 justify-between items-center">
+              <div className="relative w-full md:w-80">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  placeholder="Buscar por nombre o correo..."
+                  className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
+                {/* Filtro por Rol */}
+                <select
+                  value={selectedRol}
+                  onChange={(e) => setSelectedRol(e.target.value)}
+                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                >
+                  <option value="todos">Todos los Roles</option>
+                  <option value="Docente">Docente</option>
+                  <option value="Director">Director</option>
+                  <option value="Consultor">Consultor</option>
+                  <option value="Planeacion">Planeación</option>
+                </select>
+
+                {/* Filtro por Estado */}
+                <select
+                  value={selectedEstado}
+                  onChange={(e) => setSelectedEstado(e.target.value)}
+                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                >
+                  <option value="todos">Todos los Estados</option>
+                  <option value="activos">Activos (Habilitados)</option>
+                  <option value="inactivos">Inactivos (Bloqueados)</option>
+                </select>
+
+                {/* Filtro por Programa */}
+                <select
+                  value={selectedPrograma}
+                  onChange={(e) => setSelectedPrograma(e.target.value)}
+                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                >
+                  <option value="todos">Todos los Programas</option>
+                  {programas.map((prog) => (
+                    <option key={prog.id_programa} value={prog.nombre_programa}>
+                      {prog.nombre_programa}
+                    </option>
+                  ))}
+                  <option value="Ninguno">No Aplica / Sin Asignar</option>
+                </select>
+
+                {totalFiltrosActivos > 0 && (
+                  <button
+                    onClick={limpiarFiltros}
+                    className="flex items-center gap-1 px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-semibold transition-all border border-gray-200"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Limpiar
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Tabla de Usuarios */}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[500px]">
           {loading ? (
             <div className="p-12 text-center text-gray-400 font-medium">
               <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
@@ -711,19 +1116,19 @@ export default function Docentes() {
               <p className="text-gray-400 text-xs mt-1">Prueba cambiando los términos de búsqueda o filtros.</p>
             </div>
           ) : (
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-gray-50/80 border-b border-gray-100 text-left">
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Usuario / Correo</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Roles Asignados</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Programa Académico</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Tipo Contrato</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Acceso (Activo)</th>
-                  <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Acciones</th>
+            <table className="w-full text-left border-collapse relative">
+              <thead className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur-xs border-b border-gray-200 shadow-2xs">
+                <tr className="bg-gray-50 border-b border-gray-200 text-left">
+                  <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Usuario / Correo</th>
+                  <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Roles Asignados</th>
+                  <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Programa Académico</th>
+                  <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Tipo Contrato</th>
+                  <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider text-center bg-gray-50">Acceso (Activo)</th>
+                  <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider text-center bg-gray-50">Acciones</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
-                {usuariosFiltrados.map((user) => {
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {usuariosPaginados.map((user) => {
                   const userRolesList = (user.roles || 'Docente').split(',').map(r=>r.trim());
                   const soloConsult = esSoloConsultorOPlaneacion(userRolesList);
                   return (
@@ -766,6 +1171,11 @@ export default function Docentes() {
                         <div className={`text-sm font-semibold ${soloConsult ? 'text-gray-400 italic' : 'text-gray-800'}`}>
                           {soloConsult ? 'No aplica' : (user.programa || 'Sin Asignar')}
                         </div>
+                        {(user.programas_gestion?.length ?? 0) > 1 && (
+                          <div className="text-[11px] text-gray-500 font-medium mt-0.5">
+                            Gestiona: {user.programas_gestion_nombres}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-700 font-medium flex items-center gap-1.5">
@@ -826,20 +1236,123 @@ export default function Docentes() {
             </table>
           )}
         </div>
+
+        {/* Paginación */}
+        {!loading && usuariosFiltrados.length > 0 && (
+          <div className="px-6 py-3.5 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+            {/* Selector de registros por página e info */}
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 font-medium">Mostrar</span>
+                <select
+                  value={registrosPorPagina}
+                  onChange={(e) => {
+                    setRegistrosPorPagina(Number(e.target.value));
+                    setPaginaActual(1);
+                  }}
+                  className="border border-gray-300 rounded-md px-2 py-1 bg-white text-gray-700 font-medium shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                  <option value={20}>20</option>
+                  <option value={25}>25</option>
+                </select>
+                <span className="text-gray-500 font-medium">por pág.</span>
+              </div>
+              
+              <div className="text-gray-500">
+                Mostrando <span className="font-semibold text-gray-800">{totalRegistros === 0 ? 0 : indiceInicio + 1}</span> a <span className="font-semibold text-gray-800">{indiceFin}</span> de <span className="font-semibold text-gray-800">{totalRegistros}</span> usuarios
+              </div>
+            </div>
+
+            {/* Botones de navegación */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPaginaActual(1)}
+                disabled={paginaActual === 1}
+                title="Primera página"
+                className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronsLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setPaginaActual(prev => Math.max(prev - 1, 1))}
+                disabled={paginaActual === 1}
+                title="Página anterior"
+                className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Anterior</span>
+              </button>
+
+              {/* Números de página */}
+              <div className="flex items-center gap-1 mx-1">
+                {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+                  .filter(p => {
+                    if (totalPaginas <= 7) return true;
+                    if (p === 1 || p === totalPaginas) return true;
+                    return Math.abs(p - paginaActual) <= 1;
+                  })
+                  .map((p, idx, arr) => {
+                    const prev = arr[idx - 1];
+                    const showEllipsis = prev && p - prev > 1;
+
+                    return (
+                      <div key={p} className="flex items-center">
+                        {showEllipsis && (
+                          <span className="px-1 text-gray-400 select-none">...</span>
+                        )}
+                        <button
+                          onClick={() => setPaginaActual(p)}
+                          className={`w-7 h-7 rounded-md font-semibold text-xs transition-colors ${
+                            paginaActual === p
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              <button
+                onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginas))}
+                disabled={paginaActual === totalPaginas}
+                title="Página siguiente"
+                className="px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+              >
+                <span className="hidden sm:inline">Siguiente</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setPaginaActual(totalPaginas)}
+                disabled={paginaActual === totalPaginas}
+                title="Última página"
+                className="p-1.5 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronsRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* MODAL 1: REGISTRO INDIVIDUAL MULTIRROL */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
             
             {/* Encabezado */}
-            <div className="bg-[#1a2744] text-white px-6 py-4 flex justify-between items-center">
-              <h3 className="font-bold text-lg flex items-center gap-2">
+            <div className="bg-[#1a2744] text-white px-6 py-3.5 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-base sm:text-lg flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-blue-400" />
                 Registrar Nuevo Usuario / Docente
               </h3>
               <button 
+                type="button"
                 onClick={() => setShowAddModal(false)} 
                 className="p-1.5 bg-white/10 hover:bg-white/15 rounded-lg transition-colors text-white"
               >
@@ -848,11 +1361,11 @@ export default function Docentes() {
             </div>
 
             {/* Formulario */}
-            <form onSubmit={handleSubmitIndividual} className="p-6 flex flex-col gap-4">
+            <form onSubmit={handleSubmitIndividual} className="p-5 sm:p-6 overflow-y-auto flex-1 flex flex-col gap-4">
               {formError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
                   <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
-                  <div>{formError}</div>
+                  <div className="whitespace-pre-line">{formError}</div>
                 </div>
               )}
 
@@ -863,141 +1376,138 @@ export default function Docentes() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    placeholder="Ej. Juan Carlos"
-                    value={nombres}
-                    onChange={(e) => setNombres(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    placeholder="Ej. Pérez Gómez"
-                    value={apellidos}
-                    onChange={(e) => setApellidos(e.target.value)}
-                  />
-                </div>
-              </div>
+              {/* Layout en 2 columnas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+                
+                {/* Columna 1: Información Personal y Roles */}
+                <div className="flex flex-col gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-blue-900/70 border-b border-gray-200 pb-1">
+                    1. Información Personal y Credenciales
+                  </div>
 
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
-                <input
-                  type="email"
-                  required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  placeholder="ejemplo@unicesmag.edu.co"
-                  value={correo}
-                  onChange={(e) => setCorreo(e.target.value)}
-                />
-              </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        placeholder="Ej. Juan Carlos"
+                        value={nombres}
+                        onChange={(e) => setNombres(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        placeholder="Ej. Pérez Gómez"
+                        value={apellidos}
+                        onChange={(e) => setApellidos(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
-                  <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                    value={tipoDocumento}
-                    onChange={(e) => setTipoDocumento(e.target.value)}
-                  >
-                    <option value="CC">C.C.</option>
-                    <option value="CE">C.E.</option>
-                    <option value="PA">Pasaporte</option>
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    placeholder="Número de identificación"
-                    value={numeroDocumento}
-                    onChange={(e) => setNumeroDocumento(e.target.value)}
-                  />
-                </div>
-              </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
+                    <input
+                      type="email"
+                      required
+                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      placeholder="ejemplo@unicesmag.edu.co"
+                      value={correo}
+                      onChange={(e) => setCorreo(e.target.value)}
+                    />
+                  </div>
 
-              {/* Multiselección de Roles (Checklist) */}
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                  Roles de Acceso (Selecciona uno o varios) *
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
-                    const isChecked = rolEstaSeleccionado(rolesSeleccionados, rItem);
-                    return (
-                      <label
-                        key={rItem}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
-                          isChecked
-                            ? 'bg-blue-50 border-blue-400 text-blue-800 shadow-xs'
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
-                        }`}
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
+                      <select
+                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                        value={tipoDocumento}
+                        onChange={(e) => setTipoDocumento(e.target.value)}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleRol(rItem, false)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
-                        />
-                        <span>{rItem}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
+                        <option value="CC">C.C.</option>
+                        <option value="CE">C.E.</option>
+                        <option value="PA">Pasaporte</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        placeholder="Número de identificación"
+                        value={numeroDocumento}
+                        onChange={(e) => setNumeroDocumento(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              {/* Facultad y Programa Académico */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Facultad
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    value={esSoloConsultorOPlaneacion(rolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
+                  {/* Multiselección de Roles */}
+                  <div>
+                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
+                      Roles de Acceso *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 bg-gray-50/80 p-2.5 rounded-lg border border-gray-200">
+                      {rolesDisponibles.map((rItem) => {
+                        const isChecked = rolEstaSeleccionado(rolesSeleccionados, rItem);
+                        return (
+                          <label
+                            key={rItem}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
+                              isChecked
+                                ? 'bg-blue-50 border-blue-400 text-blue-800 shadow-xs'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleRol(rItem, false)}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                            />
+                            <span>{rItem}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Columna 2: Ubicación y Asignación Académica */}
+                <div className="flex flex-col gap-3 bg-gray-50/60 p-4 rounded-xl border border-gray-200/80">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-blue-900/70 border-b border-gray-200 pb-1">
+                    2. Ubicación y Asignación Académica
+                  </div>
+
+                  <SelectorUbicacion
+                    programas={programas}
+                    sinPrograma={esSoloConsultorOPlaneacion(rolesSeleccionados)}
+                    esDocente={rolEstaSeleccionado(rolesSeleccionados, 'Docente')}
+                    esDirector={rolEstaSeleccionado(rolesSeleccionados, 'Director')}
+                    facultadId={facultadId}
+                    onFacultad={(id) => { setFacultadId(id); setIdPrograma(0); }}
+                    idPrograma={idPrograma}
+                    onPrograma={setIdPrograma}
+                    programasGestion={programasGestion}
+                    onGestion={setProgramasGestion}
+                    directoresPorPrograma={directoresPorPrograma}
+                    usuarioActualId={null}
                   />
                 </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Programa Académico {esSoloConsultorOPlaneacion(rolesSeleccionados) ? '' : '*'}
-                  </label>
-                  <select
-                    disabled={esSoloConsultorOPlaneacion(rolesSeleccionados)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                    value={esSoloConsultorOPlaneacion(rolesSeleccionados) ? '' : idPrograma}
-                    onChange={(e) => setIdPrograma(Number(e.target.value))}
-                  >
-                    {esSoloConsultorOPlaneacion(rolesSeleccionados) ? (
-                      <option value="">Deshabilitado (Sin asignación)</option>
-                    ) : (
-                      programas.map((p) => (
-                        <option key={p.id_programa} value={p.id_programa}>
-                          {p.nombre_programa}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
               </div>
 
-              {/* Botones */}
-              <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
+              {/* Botones Fijos al pie */}
+              <div className="sticky bottom-0 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-2 pt-3 px-5 sm:px-6 bg-gray-50/95 backdrop-blur-xs border-t border-gray-200 flex justify-end gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="bg-gray-100 hover:bg-gray-150 text-gray-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors"
+                  className="bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-xs"
                 >
                   Cancelar
                 </button>
@@ -1026,12 +1536,12 @@ export default function Docentes() {
 
       {/* MODAL EDITAR USUARIO MULTIRROL */}
       {showEditModal && usuarioAEditar && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
             
             {/* Encabezado */}
-            <div className="bg-[#1a2744] text-white px-6 py-4 flex justify-between items-center">
-              <h3 className="font-bold text-lg flex items-center gap-2">
+            <div className="bg-[#1a2744] text-white px-6 py-3.5 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-base sm:text-lg flex items-center gap-2">
                 <Pencil className="w-5 h-5 text-blue-400" />
                 Editar Usuario / Docente
               </h3>
@@ -1045,11 +1555,11 @@ export default function Docentes() {
             </div>
 
             {/* Formulario de Edición */}
-            <form onSubmit={handleEditSubmit} className="p-6 flex flex-col gap-4">
+            <form onSubmit={handleEditSubmit} className="p-5 sm:p-6 overflow-y-auto flex-1 flex flex-col gap-4">
               {editFormError && (
                 <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
                   <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
-                  <div>{editFormError}</div>
+                  <div className="whitespace-pre-line">{editFormError}</div>
                 </div>
               )}
 
@@ -1060,137 +1570,134 @@ export default function Docentes() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    value={editNombres}
-                    onChange={(e) => setEditNombres(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    value={editApellidos}
-                    onChange={(e) => setEditApellidos(e.target.value)}
-                  />
-                </div>
-              </div>
+              {/* Layout en 2 columnas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+                
+                {/* Columna 1: Información Personal y Roles */}
+                <div className="flex flex-col gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-blue-900/70 border-b border-gray-200 pb-1">
+                    1. Información Personal y Credenciales
+                  </div>
 
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
-                <input
-                  type="email"
-                  required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  value={editCorreo}
-                  onChange={(e) => setEditCorreo(e.target.value)}
-                />
-              </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        value={editNombres}
+                        onChange={(e) => setEditNombres(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        value={editApellidos}
+                        onChange={(e) => setEditApellidos(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
-                  <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                    value={editTipoDocumento}
-                    onChange={(e) => setEditTipoDocumento(e.target.value)}
-                  >
-                    <option value="CC">C.C.</option>
-                    <option value="CE">C.E.</option>
-                    <option value="PA">Pasaporte</option>
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    value={editNumeroDocumento}
-                    onChange={(e) => setEditNumeroDocumento(e.target.value)}
-                  />
-                </div>
-              </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
+                    <input
+                      type="email"
+                      required
+                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      value={editCorreo}
+                      onChange={(e) => setEditCorreo(e.target.value)}
+                    />
+                  </div>
 
-              {/* Multiselección de Roles en Edición */}
-              <div>
-                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                  Roles de Acceso (Selecciona uno o varios) *
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  {['Docente', 'Director', 'Consultor', 'Planeación'].map((rItem) => {
-                    const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
-                    return (
-                      <label
-                        key={rItem}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
-                          isChecked
-                            ? 'bg-blue-50 border-blue-400 text-blue-800 shadow-xs'
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
-                        }`}
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
+                      <select
+                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                        value={editTipoDocumento}
+                        onChange={(e) => setEditTipoDocumento(e.target.value)}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleRol(rItem, true)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
-                        />
-                        <span>{rItem}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
+                        <option value="CC">C.C.</option>
+                        <option value="CE">C.E.</option>
+                        <option value="PA">Pasaporte</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número de Documento *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        value={editNumeroDocumento}
+                        onChange={(e) => setEditNumeroDocumento(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              {/* Facultad y Programa Académico en Edición */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Facultad
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
+                  {/* Multiselección de Roles en Edición */}
+                  <div>
+                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
+                      Roles de Acceso *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 bg-gray-50/80 p-2.5 rounded-lg border border-gray-200">
+                      {rolesDisponibles.map((rItem) => {
+                        const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
+                        return (
+                          <label
+                            key={rItem}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
+                              isChecked
+                                ? 'bg-blue-50 border-blue-400 text-blue-800 shadow-xs'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleRol(rItem, true)}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                            />
+                            <span>{rItem}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Columna 2: Ubicación y Asignación Académica */}
+                <div className="flex flex-col gap-3 bg-gray-50/60 p-4 rounded-xl border border-gray-200/80">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-blue-900/70 border-b border-gray-200 pb-1">
+                    2. Ubicación y Asignación Académica
+                  </div>
+
+                  <SelectorUbicacion
+                    programas={programas}
+                    sinPrograma={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
+                    esDocente={rolEstaSeleccionado(editRolesSeleccionados, 'Docente')}
+                    esDirector={rolEstaSeleccionado(editRolesSeleccionados, 'Director')}
+                    facultadId={editFacultadId}
+                    onFacultad={(id) => { setEditFacultadId(id); setEditIdPrograma(0); }}
+                    idPrograma={editIdPrograma}
+                    onPrograma={setEditIdPrograma}
+                    programasGestion={editProgramasGestion}
+                    onGestion={setEditProgramasGestion}
+                    directoresPorPrograma={directoresPorPrograma}
+                    usuarioActualId={usuarioAEditar?.id_usuario || null}
                   />
                 </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                    Programa Académico {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : '*'}
-                  </label>
-                  <select
-                    disabled={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                    value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : editIdPrograma}
-                    onChange={(e) => setEditIdPrograma(Number(e.target.value))}
-                  >
-                    {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? (
-                      <option value="">Deshabilitado (Sin asignación)</option>
-                    ) : (
-                      programas.map((p) => (
-                        <option key={p.id_programa} value={p.id_programa}>
-                          {p.nombre_programa}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
               </div>
 
-              {/* Botones */}
-              <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
+              {/* Botones Fijos al pie */}
+              <div className="sticky bottom-0 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 mt-2 pt-3 px-5 sm:px-6 bg-gray-50/95 backdrop-blur-xs border-t border-gray-200 flex justify-end gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="bg-gray-100 hover:bg-gray-150 text-gray-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors"
+                  className="bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-xs"
                 >
                   Cancelar
                 </button>

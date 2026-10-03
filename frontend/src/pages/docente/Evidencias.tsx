@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
 import api, { getArchivoUrl } from '../../services/api';
+import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
 import { useAuth } from '../../context/AuthContext';
-import { FileText, FileImage, FileArchive, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, AlertCircle, Calendar, Target, X, Eye, FileSpreadsheet } from 'lucide-react';
+import { FileText, FileImage, FileArchive, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, AlertCircle, Calendar, Target, Eye, FileSpreadsheet } from 'lucide-react';
 
 interface Evidencia {
     id_evidencias: number;
@@ -471,109 +472,9 @@ const Evidencias: React.FC = () => {
                 </div>
             )}
 
-            {/* ===== MODAL DE PREVISUALIZACIÓN ===== */}
+            {/* Visor compartido: mismo modal que usa la revisión de cortes */}
             {preview && (
-                <div 
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-                    onClick={() => setPreview(null)}
-                >
-                    <div 
-                        className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col"
-                        style={{ maxHeight: '90vh' }}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* Header del modal */}
-                        <div className="bg-[#1a2744] px-5 py-4 flex items-center justify-between shrink-0">
-                            <div className="flex items-center gap-3 min-w-0">
-                                <div className="bg-white/10 p-2 rounded-lg shrink-0">
-                                    {getFileIcon(preview.tipo_archivo, 'w-5 h-5')}
-                                </div>
-                                <div className="min-w-0">
-                                    <h2 className="text-white font-bold text-sm truncate">{preview.nombre_archivo}</h2>
-                                    <div className="flex items-center gap-3 mt-0.5">
-                                        <span className="text-blue-300 text-xs font-medium">{getFileLabel(preview.tipo_archivo)}</span>
-                                        {preview.tipo_archivo !== 'enlace' && preview.tamanio_archivo_kb > 0 && (
-                                            <span className="text-blue-200 text-xs">• {formatFileSize(preview.tamanio_archivo_kb)}</span>
-                                        )}
-                                        <span className="text-blue-200 text-xs">• {formatDate(preview.fecha_carga)}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0 ml-4">
-                                <a
-                                    href={getFileUrl(preview)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-colors"
-                                >
-                                    {isLink(preview.tipo_archivo) ? <ExternalLink className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
-                                    {isLink(preview.tipo_archivo) ? 'Abrir' : 'Descargar'}
-                                </a>
-                                <button 
-                                    onClick={() => setPreview(null)}
-                                    className="text-blue-200 hover:text-white transition-colors bg-white/10 hover:bg-white/20 rounded-full p-1.5"
-                                >
-                                    <X className="w-5 h-5" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Cuerpo de previsualización */}
-                        <div className="flex-1 overflow-auto bg-gray-100" style={{ minHeight: '400px' }}>
-                            {isPdf(preview.tipo_archivo) ? (
-                                <iframe 
-                                    src={getFileUrl(preview)}
-                                    className="w-full h-full border-0"
-                                    style={{ minHeight: '70vh' }}
-                                    title="Previsualización PDF"
-                                />
-                            ) : isImage(preview.tipo_archivo) ? (
-                                <div className="flex items-center justify-center p-6 min-h-[400px]">
-                                    <img 
-                                        src={getFileUrl(preview)} 
-                                        alt={preview.nombre_archivo}
-                                        className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg"
-                                    />
-                                </div>
-                            ) : isLink(preview.tipo_archivo) ? (
-                                <div className="flex flex-col items-center justify-center p-12 text-center min-h-[400px]">
-                                    <div className="w-20 h-20 bg-indigo-100 rounded-2xl flex items-center justify-center mb-6">
-                                        <ExternalLink className="w-10 h-10 text-indigo-500" />
-                                    </div>
-                                    <h3 className="text-xl font-bold text-gray-800 mb-2">Enlace Web</h3>
-                                    <p className="text-gray-500 text-sm mb-6 max-w-md break-all">{preview.ruta_archivo}</p>
-                                    <a
-                                        href={preview.ruta_archivo}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition-colors shadow-lg shadow-indigo-500/20"
-                                    >
-                                        <ExternalLink className="w-4 h-4" />
-                                        Abrir enlace en nueva pestaña
-                                    </a>
-                                </div>
-                            ) : (
-                                <div className="flex flex-col items-center justify-center p-12 text-center min-h-[400px]">
-                                    <div className="w-20 h-20 bg-gray-200 rounded-2xl flex items-center justify-center mb-6">
-                                        {getFileIcon(preview.tipo_archivo, 'w-10 h-10')}
-                                    </div>
-                                    <h3 className="text-xl font-bold text-gray-800 mb-2">{preview.nombre_archivo}</h3>
-                                    <p className="text-gray-500 text-sm mb-2">{getFileLabel(preview.tipo_archivo)} • {formatFileSize(preview.tamanio_archivo_kb)}</p>
-                                    <p className="text-gray-400 text-xs mb-6">Este tipo de archivo no soporta previsualización directa en el navegador.</p>
-                                    <a
-                                        href={getFileUrl(preview)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition-colors shadow-lg shadow-blue-500/20"
-                                    >
-                                        <Download className="w-4 h-4" />
-                                        Descargar archivo
-                                    </a>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
+                <VisorEvidenciaModal evidencia={preview} onClose={() => setPreview(null)} />
             )}
         </Layout>
     );

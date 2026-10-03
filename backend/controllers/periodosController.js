@@ -61,7 +61,7 @@ const getById = async (req, res) => {
               AND u.activo = TRUE
             GROUP BY u.id_usuario, u.nombres, u.apellidos,
                      u.correo, u.activo, pa.nombre_programa
-            ORDER BY u.apellidos, u.nombres
+            ORDER BY u.nombres, u.apellidos
         `, [id]);
 
         res.json({
@@ -113,7 +113,7 @@ const create = async (req, res) => {
         // solo sale si está habilitado por configuración o si Planeación lo pide
         // explícitamente con { notificar: true }.
         if (debeAvisarApertura(req)) {
-            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo);
+            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo, req.user?.id);
         }
 
         res.status(201).json(result.rows[0]);
@@ -161,7 +161,7 @@ const habilitar = async (req, res) => {
             return res.status(404).json({ error: 'Período no encontrado.' });
         }
         if (debeAvisarApertura(req)) {
-            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo);
+            notificaciones.background.aperturaPeriodo(result.rows[0].id_periodo, req.user?.id);
         }
 
         res.json({
@@ -204,7 +204,7 @@ const getDocentesAsignados = async (req, res) => {
             GROUP BY u.id_usuario, u.nombres, u.apellidos,
                      u.correo, u.tipo_documento, u.numero_documento, u.activo, tc.tipo, tc.horas_contrato,
                      pa.nombre_programa, f.nombre_facultad, dp.fecha_asignacion
-            ORDER BY u.apellidos, u.nombres
+            ORDER BY u.nombres, u.apellidos
         `, [id]);
 
         res.json(result.rows);

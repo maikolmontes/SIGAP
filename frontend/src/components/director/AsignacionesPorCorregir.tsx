@@ -19,6 +19,11 @@ interface Funcion {
     horas_funcion: number;
     estado_agenda: string;
     diligenciada: boolean;
+    /** Constancia de que su revisor ya la dio por buena. No libera nada. */
+    visto_bueno?: boolean;
+    visto_bueno_nombre?: string | null;
+    /** ¿El rol activo puede dar/quitar el visto a esta función? */
+    puede_dar_visto?: boolean;
     actividades: Actividad[];
 }
 
@@ -47,16 +52,20 @@ const iniciales = (nombre: string) =>
 function TarjetaAsignacion({
     asignacion,
     puedeEditar,
+    puedeAprobar,
     onGuardado,
     onError,
 }: {
     asignacion: Asignacion;
     puedeEditar: boolean;
+    /** Solo el Director libera la agenda al docente. */
+    puedeAprobar: boolean;
     onGuardado: (mensaje: string) => void;
     onError: (mensaje: string) => void;
 }) {
     const [editando, setEditando] = useState(false);
     const [guardando, setGuardando] = useState(false);
+    const [aprobando, setAprobando] = useState(false);
     // Borrador de horas por actividad: { [id_asignacionact]: valor como texto }
     const [borrador, setBorrador] = useState<Record<number, string>>({});
 
@@ -123,6 +132,38 @@ function TarjetaAsignacion({
     const coincideActual = editando ? coincideEditado : asignacion.coincide;
     const diferenciaActual = editando ? diferenciaEditada : asignacion.diferencia;
 
+    // Mientras haya funciones en 'Por Aprobar', el docente todavía no ve su agenda
+    const porAprobar = asignacion.funciones.filter((f: any) => f.estado_agenda === 'Por Aprobar');
+    const yaLiberada = porAprobar.length === 0;
+
+    // El candado solo tiene sentido sobre una asignación liberada Y cuadrada.
+    // Si las horas no dan con el contrato, esa liberación no salió de una
+    // aprobación válida (aprobar exige que coincidan), así que el Director tiene
+    // que poder corregirla: si no, la tarjeta pide corrección y a la vez la impide.
+    // El backend aplica exactamente la misma excepción.
+    const horasBloqueadas = yaLiberada && asignacion.coincide;
+
+    // El visto bueno por función vive en los cortes de semana 8 y 16, no aquí:
+    // la semana 0 la revisa el Director sobre la agenda completa.
+
+    const aprobar = async () => {
+        if (!asignacion.coincide) return;
+        if (!window.confirm(
+            `¿Aprobar las asignaciones de ${asignacion.nombre_docente}?\n\n` +
+            `A partir de ese momento el docente podrá ver y diligenciar su agenda.`
+        )) return;
+
+        setAprobando(true);
+        try {
+            const res = await api.put(`/director/asignaciones/${asignacion.id_usuario}/aprobar`);
+            onGuardado(res.data.mensaje || 'Asignaciones aprobadas.');
+        } catch (err: any) {
+            onError(err.response?.data?.error || 'No se pudieron aprobar las asignaciones.');
+        } finally {
+            setAprobando(false);
+        }
+    };
+
     return (
         <div
             className={`bg-white rounded-2xl shadow-sm border transition-all ${
@@ -142,9 +183,19 @@ function TarjetaAsignacion({
                     <div className="min-w-0">
                         <p className="font-bold text-gray-900 text-sm leading-tight truncate">{asignacion.nombre_docente}</p>
                         <p className="text-xs text-gray-400 truncate">{asignacion.nombre_programa}</p>
-                        <span className="inline-block mt-1 text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-semibold border border-blue-100">
-                            {asignacion.tipo_contrato}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                            <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-semibold border border-blue-100">
+                                {asignacion.tipo_contrato}
+                            </span>
+                            {/* Deja claro si el docente ya puede trabajar su agenda */}
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-semibold border ${
+                                yaLiberada
+                                    ? 'bg-green-50 text-green-700 border-green-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}>
+                                {yaLiberada ? 'Visible para el docente' : 'Pendiente de aprobar'}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -192,9 +243,11 @@ function TarjetaAsignacion({
                                         </span>
                                     )}
                                 </div>
-                                <span className="font-bold text-gray-800 shrink-0">
-                                    {f.horas_funcion % 1 === 0 ? f.horas_funcion : f.horas_funcion.toFixed(1)}h
-                                </span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className="font-bold text-gray-800">
+                                        {f.horas_funcion % 1 === 0 ? f.horas_funcion : f.horas_funcion.toFixed(1)}h
+                                    </span>
+                                </div>
                             </li>
                         ))}
                     </ul>
@@ -305,15 +358,43 @@ function TarjetaAsignacion({
             <div className="px-5 py-3 bg-gray-50/70 border-t border-gray-100 flex justify-end gap-2">
                 {!editando ? (
                     puedeEditar ? (
+                        <>
+                        {/* Aprobar libera la agenda al docente. Solo se habilita si las
+                            horas cuadran con el contrato — el backend valida lo mismo. */}
+                        {!yaLiberada && puedeAprobar && (
+                            <button
+                                onClick={aprobar}
+                                disabled={aprobando || !asignacion.coincide}
+                                title={asignacion.coincide
+                                    ? 'Aprobar y liberar la agenda al docente'
+                                    : `Las horas no cuadran (${asignacion.total_horas}h de ${asignacion.horas_contrato}h). Corrígelas antes de aprobar.`}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+                            >
+                                {aprobando
+                                    ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    : <CheckCircle2 className="w-3.5 h-3.5" />
+                                }
+                                {aprobando ? 'Aprobando...' : 'Aprobar asignaciones'}
+                            </button>
+                        )}
+                        {/* Aprobada = el docente ya la tiene a la vista; corregirle las
+                            horas por detrás le descuadraría lo que esté diligenciando. */}
                         <button
                             onClick={abrirEdicion}
-                            disabled={sinActividades}
-                            title={sinActividades ? 'Este docente no tiene actividades que corregir' : 'Corregir las horas de las actividades'}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+                            disabled={sinActividades || horasBloqueadas}
+                            title={
+                                horasBloqueadas
+                                    ? 'Las asignaciones ya fueron aprobadas y el docente las tiene a la vista: no se pueden modificar'
+                                    : sinActividades
+                                        ? 'Este docente no tiene actividades que corregir'
+                                        : 'Corregir las horas de las actividades'
+                            }
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-colors shadow-sm disabled:shadow-none"
                         >
-                            <Pencil className="w-3.5 h-3.5" />
-                            Corregir horas
+                            {horasBloqueadas ? <Lock className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                            {horasBloqueadas ? 'Horas bloqueadas' : 'Corregir horas'}
                         </button>
+                        </>
                     ) : (
                         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400">
                             <Lock className="w-3.5 h-3.5" />
@@ -357,16 +438,21 @@ function TarjetaAsignacion({
 export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeEditar?: boolean }) {
     const [asignaciones, setAsignaciones] = useState<Asignacion[]>([]);
     const [periodo, setPeriodo] = useState<any>(null);
+    // Solo el Director libera la agenda; un revisor de función solo da su visto.
+    const [puedeAprobar, setPuedeAprobar] = useState(false);
     const [loading, setLoading] = useState(true);
     const [busqueda, setBusqueda] = useState('');
     const [soloInconsistentes, setSoloInconsistentes] = useState(false);
     const [toast, setToast] = useState<{ tipo: 'exito' | 'error'; mensaje: string } | null>(null);
+    const [paginaActual, setPaginaActual] = useState(1);
+    const [regPorPag, setRegPorPag] = useState(10);
 
     const cargar = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.get('/director/asignaciones');
             setAsignaciones(res.data.asignaciones || []);
+            setPuedeAprobar(!!res.data.puede_aprobar);
             setPeriodo(res.data.periodo || null);
         } catch (e) {
             console.error('Error cargando asignaciones:', e);
@@ -384,14 +470,18 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
         return () => clearTimeout(t);
     }, [toast]);
 
-    const filtradas = asignaciones.filter(a => {
+    const filtradas = useMemo(() => asignaciones.filter(a => {
         const coincideBusqueda =
             a.nombre_docente.toLowerCase().includes(busqueda.toLowerCase()) ||
             a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase()) ||
             a.correo?.toLowerCase().includes(busqueda.toLowerCase());
         if (soloInconsistentes) return coincideBusqueda && !a.coincide;
         return coincideBusqueda;
-    });
+    }).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' })), [asignaciones, busqueda, soloInconsistentes]);
+
+    const totalPaginas = Math.max(1, Math.ceil(filtradas.length / regPorPag));
+    const paginaSegura = Math.min(paginaActual, totalPaginas);
+    const filtPagina = filtradas.slice((paginaSegura - 1) * regPorPag, paginaSegura * regPorPag);
 
     const totalInconsistentes = asignaciones.filter(a => !a.coincide).length;
     const totalCorrectas = asignaciones.length - totalInconsistentes;
@@ -407,8 +497,19 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
             <div className="mb-5 flex items-start gap-2.5 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
                 <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                 <p className="text-xs text-blue-800 leading-relaxed">
-                    Estas son las asignaciones que <strong>Planeación</strong> cargó desde Excel. Ya están visibles para
-                    los docentes. Si alguna quedó con las horas mal, corrígelas aquí — no requieren tu aprobación.
+                    {puedeAprobar ? (
+                        <>
+                            Estas son las asignaciones que <strong>Planeación</strong> cargó desde Excel.
+                            El docente <strong>todavía no las ve</strong>: revisa que las horas cuadren con su contrato,
+                            corrígelas si hace falta y pulsa <strong>Aprobar asignaciones</strong> para liberarle la agenda.
+                        </>
+                    ) : (
+                        <>
+                            Estas son las asignaciones que <strong>Planeación</strong> cargó desde Excel.
+                            Es una vista de consulta: quien libera la agenda al docente es el
+                            <strong> Director</strong> con «Aprobar asignaciones».
+                        </>
+                    )}
                 </p>
             </div>
 
@@ -508,17 +609,47 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {filtradas.map(a => (
-                        <TarjetaAsignacion
-                            key={a.id_usuario}
-                            asignacion={a}
-                            puedeEditar={puedeEditar}
-                            onGuardado={manejarGuardado}
-                            onError={(m) => setToast({ tipo: 'error', mensaje: m })}
-                        />
-                    ))}
-                </div>
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {filtPagina.map(a => (
+                            <TarjetaAsignacion
+                                key={a.id_usuario}
+                                asignacion={a}
+                                puedeEditar={puedeEditar}
+                                puedeAprobar={puedeAprobar}
+                                onGuardado={manejarGuardado}
+                                onError={(m) => setToast({ tipo: 'error', mensaje: m })}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Paginación */}
+                    {filtradas.length > 0 && (
+                        <div className="mt-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span>Mostrar</span>
+                                <select value={regPorPag} onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
+                                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-400">
+                                    {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                                <span>registros · {filtradas.length} total</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} disabled={paginaSegura === 1}
+                                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">‹</button>
+                                {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaSegura) <= 1).map((p, idx, arr) => (
+                                    <span key={p}>
+                                        {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-400">…</span>}
+                                        <button onClick={() => setPaginaActual(p)}
+                                            className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${p === paginaSegura ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 hover:bg-gray-50'}`}>{p}</button>
+                                    </span>
+                                ))}
+                                <button onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))} disabled={paginaSegura === totalPaginas}
+                                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">›</button>
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );

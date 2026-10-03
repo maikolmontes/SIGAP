@@ -1,14 +1,20 @@
 const pool = require('../db/connection');
 const xlsx = require('xlsx');
-const { calcularAlcance } = require('../utils/rolActivo');
+const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
 const notificaciones = require('../services/notificacionesService');
+const { respaldarAgendas } = require('../services/respaldoAgendasService');
+const auditoria = require('../services/auditoriaService');
 
 const parseSemestre = (semestreStr) => {
     if (!semestreStr) return { numero: '1', grupo: 'A' };
     const str = String(semestreStr).trim();
     const match = str.match(/^(\d+)(.*)$/);
     if (match) {
-        return { numero: match[1], grupo: match[2]?.trim() || 'A' };
+        // "11-M" trae el guion como separador, no como parte del grupo: "-M" → "M".
+        // Los grupos con letra ("1B-M", "9E-N") quedan igual ("B-M", "E-N").
+        let grupo = (match[2] || '').trim();
+        while (grupo.startsWith('-')) grupo = grupo.slice(1).trim();
+        return { numero: match[1], grupo: grupo || 'A' };
     }
     return { numero: str, grupo: 'A' };
 };
@@ -220,6 +226,12 @@ const importarAsignaciones = async (req, res) => {
         return res.status(400).json({ error: 'No se subió ningún archivo Excel' });
     }
 
+    // id_programa obligatorio — viene en el FormData junto con el archivo
+    const idPrograma = parseInt(req.body?.id_programa);
+    if (!idPrograma) {
+        return res.status(400).json({ error: 'Debe seleccionar un programa académico antes de importar.' });
+    }
+
     const normalizeObjectKeys = (obj) => {
         const newObj = {};
         for (let key in obj) {
@@ -233,6 +245,13 @@ const importarAsignaciones = async (req, res) => {
     
     try {
         await client.query('BEGIN');
+
+        // Verificar que el programa existe
+        const progRes = await client.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [idPrograma]);
+        if (progRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'El programa académico seleccionado no existe.' });
+        }
 
         const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
@@ -353,9 +372,18 @@ const importarAsignaciones = async (req, res) => {
                 continue;
             }
 
-            const userRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [String(inscripcion)]);
+            const userRes = await client.query(
+                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND id_programa = $2',
+                [String(inscripcion), idPrograma]
+            );
             if (userRes.rows.length === 0) {
-                errores.push(`Fila ${i+2}: Docente con documento ${inscripcion} no encontrado.`);
+                // Verificar si existe en el sistema pero en otro programa
+                const userGenRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [String(inscripcion)]);
+                if (userGenRes.rows.length > 0) {
+                    errores.push(`Fila ${i+2}: Docente ${inscripcion} no pertenece al programa seleccionado.`);
+                } else {
+                    errores.push(`Fila ${i+2}: Docente con documento ${inscripcion} no encontrado en el sistema.`);
+                }
                 continue;
             }
             const idUsuario = userRes.rows[0].id_usuario;
@@ -433,7 +461,7 @@ const importarAsignaciones = async (req, res) => {
                 const newFunc = await client.query(`
                     INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
                     VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
-                `, [funcionSustantivaStr, 0, 'Pendiente', 'Asignado automáticamente vía Excel', idPeriodoActivo]);
+                `, [funcionSustantivaStr, 0, 'Por Aprobar', 'Asignado automáticamente vía Excel', idPeriodoActivo]);
                 idFunciones = newFunc.rows[0].id_funciones;
                 await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
             }
@@ -507,7 +535,7 @@ const importarAsignaciones = async (req, res) => {
             String(req.query.notificar || req.body.notificar).toLowerCase() === 'true';
 
         if (notificarCarga && docentesAfectados.size > 0) {
-            notificaciones.background.asignacionesCargadas([...docentesAfectados]);
+            notificaciones.background.asignacionesCargadas([...docentesAfectados], null, req.user?.id);
         }
 
         res.status(200).json({
@@ -541,6 +569,12 @@ const actualizarImportacion = async (req, res) => {
         return res.status(400).json({ error: 'No se subió ningún archivo Excel' });
     }
 
+    // id_programa obligatorio
+    const idPrograma = parseInt(req.body?.id_programa);
+    if (!idPrograma) {
+        return res.status(400).json({ error: 'Debe seleccionar un programa académico antes de actualizar.' });
+    }
+
     const normalizeObjectKeys = (obj) => {
         const newObj = {};
         for (let key in obj) {
@@ -554,6 +588,13 @@ const actualizarImportacion = async (req, res) => {
     
     try {
         await client.query('BEGIN');
+
+        // Verificar que el programa existe
+        const progRes = await client.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [idPrograma]);
+        if (progRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'El programa académico seleccionado no existe.' });
+        }
 
         const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
@@ -607,19 +648,22 @@ const actualizarImportacion = async (req, res) => {
                 SELECT u.id_usuario, u.nombres, u.apellidos, tc.horas_contrato 
                 FROM usuarios u
                 LEFT JOIN tipo_contrato tc ON u.id_contrato = tc.id_contrato
-                WHERE u.numero_documento = $1
-            `, [inscripcion]);
+                WHERE u.numero_documento = $1 AND u.id_programa = $2
+            `, [inscripcion, idPrograma]);
 
             if (userRes.rows.length === 0) {
                 const filaRepr = filasDocente[0];
                 const nombreDocenteExcel = filaRepr['docentes'] || filaRepr['nombre'] || filaRepr['docente'] || null;
                 const programasRaw = filaRepr['programas'];
-                
+
+                // Comprobar si existe en otro programa
+                const userGenRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [inscripcion]);
                 docentesNoEncontrados.push({
                     fila: filaRepr._filaExcel,
                     documento: inscripcion,
                     nombre: nombreDocenteExcel ? String(nombreDocenteExcel).trim() : null,
-                    programa: programasRaw ? String(programasRaw).trim() : null
+                    programa: programasRaw ? String(programasRaw).trim() : null,
+                    motivo: userGenRes.rows.length > 0 ? 'No pertenece al programa seleccionado' : 'No encontrado en el sistema'
                 });
                 continue;
             }
@@ -686,7 +730,7 @@ const actualizarImportacion = async (req, res) => {
                         const newFunc = await client.query(`
                             INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
                             VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
-                        `, [funcionSustantivaStr, 0, 'Pendiente', 'Agregado vía actualización Excel', idPeriodoActivo]);
+                        `, [funcionSustantivaStr, 0, 'Por Aprobar', 'Agregado vía actualización Excel', idPeriodoActivo]);
                         idFunciones = newFunc.rows[0].id_funciones;
                         await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
                     }
@@ -724,11 +768,18 @@ const actualizarImportacion = async (req, res) => {
                         }
                     }
 
-                    // Verificar si esta actividad ya existe (por nombre de materia)
-                    const actExiste = await client.query(`
-                        SELECT id_asignacionact FROM asignacion_actividades 
-                        WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
-                    `, [idFunciones, rolToInsert]);
+                    // Verificar si esta actividad ya existe. Si tiene espacio académico
+                    // (Docencia Directa) la identidad es espacio + grupo: comparar solo por
+                    // rol_seleccionado colapsaba todas las materias con rol '' en una sola.
+                    const actExiste = idEspacioAca
+                        ? await client.query(`
+                            SELECT id_asignacionact FROM asignacion_actividades
+                            WHERE id_funciones = $1 AND id_espacio_aca = $2 AND id_grupos = $3
+                        `, [idFunciones, idEspacioAca, idGrupo])
+                        : await client.query(`
+                            SELECT id_asignacionact FROM asignacion_actividades
+                            WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
+                        `, [idFunciones, rolToInsert]);
 
                     if (actExiste.rows.length > 0) {
                         // Actualizar el grupo y las horas de la materia existente
@@ -837,7 +888,10 @@ const getDashboardDirector = async (req, res) => {
                     u.id_usuario,
                     u.nombres || ' ' || u.apellidos AS nombre,
                     u.correo,
+                    pa.id_programa,
                     pa.nombre_programa,
+                    f.id_facultad,
+                    f.nombre_facultad,
                     tc.tipo AS tipo_contrato,
                     tc.horas_contrato,
                     COUNT(af.id_funciones) AS total_funciones,
@@ -852,6 +906,7 @@ const getDashboardDirector = async (req, res) => {
                 FROM usuarios u
                 JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
                 JOIN programa_academico pa ON pa.id_programa = u.id_programa
+                JOIN facultad f ON f.id_facultad = pa.id_facultad
                 JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
                 JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
                 JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
@@ -861,10 +916,18 @@ const getDashboardDirector = async (req, res) => {
             `;
             const docParams = [idPeriodo];
 
+            // Un director solo ve los docentes de sus programas
+            const alcance = await alcanceProgramas(req);
+            if (alcance.restringido) {
+                docentesQuery += ' AND u.id_programa = ANY($2::int[])';
+                docParams.push(alcance.ids);
+            }
+
             docentesQuery += `
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
-                         pa.nombre_programa, tc.tipo, tc.horas_contrato
-                ORDER BY u.apellidos, u.nombres
+                         pa.id_programa, pa.nombre_programa, f.id_facultad, f.nombre_facultad,
+                         tc.tipo, tc.horas_contrato
+                ORDER BY u.nombres, u.apellidos
             `;
 
             const docentesRes = await pool.query(docentesQuery, docParams);
@@ -924,6 +987,10 @@ const getDashboardDirector = async (req, res) => {
                 WHERE af.id_periodo = $1
             `;
             const distParams = [idPeriodo];
+            if (alcance.restringido) {
+                distQuery += ' AND u.id_programa = ANY($2::int[])';
+                distParams.push(alcance.ids);
+            }
             distQuery += `
                 GROUP BY af.funcion_sustantiva
                 ORDER BY horas DESC
@@ -956,6 +1023,10 @@ const getDistribucionDocente = async (req, res) => {
         const { id } = req.params;
         const idUsuario = parseInt(id, 10);
         if (isNaN(idUsuario)) return res.status(400).json({ error: 'ID de usuario inválido.' });
+
+        if (!(await docenteEnAlcance(req, idUsuario))) {
+            return res.status(403).json({ error: 'Este docente no pertenece a los programas que gestionas.' });
+        }
 
         // Periodo activo
         const periodoRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
@@ -1002,9 +1073,33 @@ const getDistribucionDocente = async (req, res) => {
 };
 
 const eliminarAgendas = async (req, res) => {
+    // id_programa obligatorio
+    const idPrograma = parseInt(req.body?.id_programa);
+    if (!idPrograma) {
+        return res.status(400).json({ error: 'Debe seleccionar un programa académico antes de eliminar agendas.' });
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
+        // Borrar TODAS las agendas de un programa exige escribir su nombre: evita el
+        // clic accidental sobre una acción que no se puede deshacer.
+        const progRes = await client.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [idPrograma]);
+        if (progRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'El programa académico seleccionado no existe.' });
+        }
+        const nombrePrograma = progRes.rows[0].nombre_programa;
+        const confirmacion = String(req.body?.confirmacion || '').trim().toLowerCase();
+        if (confirmacion !== String(nombrePrograma).trim().toLowerCase()) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                error: `Para eliminar escribe exactamente el nombre del programa: "${nombrePrograma}".`,
+                requiere_confirmacion: true,
+                nombre_programa: nombrePrograma
+            });
+        }
 
         // 1. Obtener el periodo activo
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
@@ -1014,11 +1109,21 @@ const eliminarAgendas = async (req, res) => {
         }
         const idPeriodoActivo = periodoRes.rows[0].id_periodo;
 
-        // 2. Obtener todas las funciones asociadas a este periodo
-        const funcRes = await client.query('SELECT id_funciones FROM asignacion_funciones WHERE id_periodo = $1', [idPeriodoActivo]);
+        // 2. Obtener funciones de los docentes del programa seleccionado en este periodo
+        const funcRes = await client.query(`
+            SELECT DISTINCT af.id_funciones
+            FROM asignacion_funciones af
+            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            JOIN usuarios u ON u.id_usuario = ua.id_usuario
+            WHERE af.id_periodo = $1 AND u.id_programa = $2
+        `, [idPeriodoActivo, idPrograma]);
         const funcIds = funcRes.rows.map(r => r.id_funciones);
 
+        // Copia de seguridad ANTES de borrar; si falla, la transacción se cancela
+        let respaldo = null;
         if (funcIds.length > 0) {
+            respaldo = await respaldarAgendas(client, funcIds, { motivo: `programa-${nombrePrograma}`, periodo: idPeriodoActivo });
+
             // Obtener todas las actividades asociadas a estas funciones
             const actIdsRes = await client.query('SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = ANY($1)', [funcIds]);
             const actIds = actIdsRes.rows.map(r => r.id_asignacionact);
@@ -1054,11 +1159,22 @@ const eliminarAgendas = async (req, res) => {
             await client.query('DELETE FROM usuario_asignacion WHERE id_funciones = ANY($1)', [funcIds]);
 
             // Eliminar asignacion_funciones
-            await client.query('DELETE FROM asignacion_funciones WHERE id_periodo = $1', [idPeriodoActivo]);
+            // Solo las del programa: filtrar por período borraba (o chocaba con) las de otros programas
+            await client.query('DELETE FROM asignacion_funciones WHERE id_funciones = ANY($1)', [funcIds]);
         }
 
         await client.query('COMMIT');
-        res.status(200).json({ mensaje: 'Todas las agendas del período activo fueron eliminadas correctamente.' });
+
+        await auditoria.registrar(req, {
+            accion: 'eliminar_agendas_programa',
+            entidad: 'programa',
+            detalle: { id_programa: idPrograma, programa: nombrePrograma, id_periodo: idPeriodoActivo, respaldo }
+        });
+
+        res.status(200).json({
+            mensaje: 'Todas las agendas del programa en el período activo fueron eliminadas correctamente.',
+            respaldo
+        });
 
     } catch (error) {
         await client.query('ROLLBACK');
@@ -1107,7 +1223,11 @@ const eliminarAgendasDocentes = async (req, res) => {
 
         const funcIds = funcRes.rows.map(r => r.id_funciones);
 
+        // Copia de seguridad ANTES de borrar; si falla, la transacción se cancela
+        let respaldo = null;
         if (funcIds.length > 0) {
+            respaldo = await respaldarAgendas(client, funcIds, { motivo: `docentes-${idsNum.length}`, periodo: idPeriodoActivo });
+
             // Actividades
             const actIdsRes = await client.query(
                 'SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = ANY($1)',
@@ -1145,9 +1265,17 @@ const eliminarAgendasDocentes = async (req, res) => {
         }
 
         await client.query('COMMIT');
+
+        await auditoria.registrar(req, {
+            accion: 'eliminar_agendas_docentes',
+            entidad: 'docente',
+            detalle: { ids_docentes: idsNum, id_periodo: idPeriodoActivo, respaldo }
+        });
+
         res.status(200).json({
             mensaje: `Agendas de ${idsNum.length} docente(s) eliminadas correctamente.`,
-            eliminados: idsNum.length
+            eliminados: idsNum.length,
+            respaldo
         });
 
     } catch (error) {
@@ -1159,5 +1287,5 @@ const eliminarAgendasDocentes = async (req, res) => {
     }
 };
 
-module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDistribucionDocente, eliminarAgendas, eliminarAgendasDocentes };
+module.exports = { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDistribucionDocente, eliminarAgendas, eliminarAgendasDocentes, parseSemestre };
 
