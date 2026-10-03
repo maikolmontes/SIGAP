@@ -35,3 +35,15 @@ test('en desarrollo sin secreto arranca, pero avisa', () => {
     assert.equal(r.status, 0);
     assert.match(r.stderr, /JWT_SECRET no está definido/);
 });
+
+test('en Vercel sin secreto NO tumba el despliegue: arranca con aviso', () => {
+    const r = cargar({ NODE_ENV: 'production', VERCEL: '1', JWT_SECRET: '' });
+    assert.equal(r.status, 0);
+    assert.match(r.stderr, /NO está definido en Vercel/);
+});
+
+test('en Vercel un secreto ya configurado se respeta, aunque sea corto', () => {
+    const r = cargar({ NODE_ENV: 'production', VERCEL: '1', JWT_SECRET: 'corto-12' });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /LONGITUD=8/);
+});
