@@ -1,39 +1,48 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ProtectedRoute } from './components/common/ProtectedRoute'
 import { useAuth } from './context/AuthContext'
 import SessionTimeoutModal from './components/common/SessionTimeoutModal'
 import Login from './pages/auth/Login'
-import RoleSelection from './pages/auth/RoleSelection'
-import DashboardPlaneacion from './pages/planeacion/DashboardPlaneacion'
-import Docentes from './pages/planeacion/Docentes'
-import Periodos from './pages/planeacion/Periodos' 
-import Semanas from './pages/planeacion/Semanas'
-import Facultades from './pages/planeacion/Facultades'
-import Programas from './pages/planeacion/Programas'
-import GestionPerfiles from './pages/planeacion/GestionPerfiles'
-import Notificaciones from './pages/planeacion/Notificaciones'
-import DashboardDirector from './pages/director/DashboardDirector'
-import AgendasPorRevisar from './pages/director/AgendasPorRevisar'
-import DetalleAgenda from './pages/director/DetalleAgenda'
-import RevisionSemana from './pages/director/RevisionSemana'
-import DashboardRevision from './pages/revision/DashboardRevision'
-import AvancesRevision from './pages/revision/AvancesRevision'
-import ReportesDirector from './pages/director/ReportesDirector'
-import ObservacionesDirector from './pages/director/ObservacionesDirector'
-import DashboardDocente from './pages/docente/Dashboard'
-import AgendaDocente from './pages/docente/Agenda'
-import AvanceSemana from './pages/docente/AvanceSemana'
-import Evidencias from './pages/docente/Evidencias'
-import Perfil from './pages/common/Perfil'
-import Configuracion from './pages/common/Configuracion'
-import Analitica from './pages/common/Analitica'
+const RoleSelection = lazy(() => import('./pages/auth/RoleSelection'))
+const DashboardPlaneacion = lazy(() => import('./pages/planeacion/DashboardPlaneacion'))
+const Docentes = lazy(() => import('./pages/planeacion/Docentes'))
+const Periodos = lazy(() => import('./pages/planeacion/Periodos'))
+const Semanas = lazy(() => import('./pages/planeacion/Semanas'))
+const Facultades = lazy(() => import('./pages/planeacion/Facultades'))
+const Programas = lazy(() => import('./pages/planeacion/Programas'))
+const GestionPerfiles = lazy(() => import('./pages/planeacion/GestionPerfiles'))
+const Notificaciones = lazy(() => import('./pages/planeacion/Notificaciones'))
+const DashboardDirector = lazy(() => import('./pages/director/DashboardDirector'))
+const AgendasPorRevisar = lazy(() => import('./pages/director/AgendasPorRevisar'))
+const DetalleAgenda = lazy(() => import('./pages/director/DetalleAgenda'))
+const RevisionSemana = lazy(() => import('./pages/director/RevisionSemana'))
+const DashboardRevision = lazy(() => import('./pages/revision/DashboardRevision'))
+const AvancesRevision = lazy(() => import('./pages/revision/AvancesRevision'))
+const ReportesDirector = lazy(() => import('./pages/director/ReportesDirector'))
+const ObservacionesDirector = lazy(() => import('./pages/director/ObservacionesDirector'))
+const DashboardDocente = lazy(() => import('./pages/docente/Dashboard'))
+const AgendaDocente = lazy(() => import('./pages/docente/Agenda'))
+const AvanceSemana = lazy(() => import('./pages/docente/AvanceSemana'))
+const Evidencias = lazy(() => import('./pages/docente/Evidencias'))
+const Perfil = lazy(() => import('./pages/common/Perfil'))
+const Configuracion = lazy(() => import('./pages/common/Configuracion'))
+const Analitica = lazy(() => import('./pages/common/Analitica'))
 
 // Consultor Pages
-import DashboardConsultor from './pages/consultor/DashboardConsultor'
-import DetalleAgendaConsultor from './pages/consultor/DetalleAgendaConsultor'
-import ObservacionesConsultor from './pages/consultor/ObservacionesConsultor'
+const DashboardConsultor = lazy(() => import('./pages/consultor/DashboardConsultor'))
+const DetalleAgendaConsultor = lazy(() => import('./pages/consultor/DetalleAgendaConsultor'))
+const ObservacionesConsultor = lazy(() => import('./pages/consultor/ObservacionesConsultor'))
 
 
+
+// Mientras se descarga el código de la página que se visita
+const CargandoPagina = () => (
+  <div role="status" aria-live="polite" className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="animate-spin w-9 h-9 border-4 border-blue-500 border-t-transparent rounded-full" />
+    <span className="sr-only">Cargando…</span>
+  </div>
+)
 
 function App() {
   const { showTimeoutModal, timeoutSeconds, extendSession, logout } = useAuth();
@@ -49,6 +58,7 @@ function App() {
         />
       )}
 
+      <Suspense fallback={<CargandoPagina />}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/role-selection" element={<RoleSelection />} />
@@ -114,6 +124,7 @@ function App() {
           <Route path="/configuracion" element={<Configuracion />} />
         </Route>
       </Routes>
+      </Suspense>
     </>
   )
 }
