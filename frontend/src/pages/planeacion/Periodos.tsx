@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import Layout from '../../components/common/Layout'
+import ModalDocentesPeriodo from '../../components/planeacion/ModalDocentesPeriodo'
 import { 
     Filter, 
     ChevronDown, 
@@ -33,6 +34,9 @@ interface Docente {
     correo: string
     activo: boolean
     fecha_asignacion?: string
+    programa?: string
+    tipo_documento?: string
+    numero_documento?: string
 }
 
 export default function Periodos() {
@@ -48,7 +52,6 @@ export default function Periodos() {
     const [registrosPorPaginaHistorial, setRegistrosPorPaginaHistorial] = useState(5)
 
     // Filtros de búsqueda en modales
-    const [busquedaDocenteAsignar, setBusquedaDocenteAsignar] = useState('')
     const [busquedaDocenteReporte, setBusquedaDocenteReporte] = useState('')
 
     // Modal crear período
@@ -125,16 +128,6 @@ export default function Periodos() {
         return periodosInactivosFiltrados.slice(indiceInicioHistorial, indiceFinHistorial)
     }, [periodosInactivosFiltrados, indiceInicioHistorial, indiceFinHistorial])
 
-    // Docentes disponibles filtrados en modal asignar
-    const docentesDisponiblesFiltrados = useMemo(() => {
-        if (!busquedaDocenteAsignar.trim()) return docentesDisponibles
-        const q = busquedaDocenteAsignar.toLowerCase()
-        return docentesDisponibles.filter(d => 
-            `${d.nombres} ${d.apellidos}`.toLowerCase().includes(q) ||
-            d.correo.toLowerCase().includes(q)
-        )
-    }, [docentesDisponibles, busquedaDocenteAsignar])
-
     // Docentes en modal reportes filtrados
     const docentesReporteFiltrados = useMemo(() => {
         if (!busquedaDocenteReporte.trim()) return docentesReporte
@@ -206,11 +199,15 @@ export default function Periodos() {
         }
     }
 
-    const abrirModalAsignar = async (periodo: Periodo) => {
+    // silencioso = true al refrescar después de asignar/remover: no vacía la lista ni la selección pendiente
+    const abrirModalAsignar = async (periodo: Periodo, silencioso = false) => {
         setPeriodoSeleccionado(periodo)
         setModalAsignar(true)
-        setCargandoDocentes(true)
-        setSeleccionados([])
+        if (!silencioso) {
+            setCargandoDocentes(true)
+            setSeleccionados([])
+            setError('')
+        }
         try {
             const [resUsuarios, resAsignados] = await Promise.all([
                 getUsuarios(),
@@ -221,7 +218,9 @@ export default function Periodos() {
             const sortDocentes = (lista: Docente[]) => [...lista].sort((a, b) =>
                 ((a.nombres || '') + ' ' + (a.apellidos || '')).trim().localeCompare(((b.nombres || '') + ' ' + (b.apellidos || '')).trim(), 'es', { sensitivity: 'base' })
             );
-            setDocentesAsignados(sortDocentes(asignados));
+            // Los asignados llegan con pocos datos: se completan (programa, documento) con la lista general de usuarios
+            const porId = new Map<number, Docente>(todosDocentes.map(d => [d.id_usuario, d]))
+            setDocentesAsignados(sortDocentes(asignados.map((a: Docente) => ({ ...(porId.get(a.id_usuario) || {}), ...a }))));
 
             // Filtrar: solo activos y que no estén ya asignados
             const idsAsignados = new Set(asignados.map((d: Docente) => d.id_usuario));
@@ -233,18 +232,14 @@ export default function Periodos() {
         }
     }
 
-    const handleSelectAll = () => {
-        if (seleccionados.length === docentesDisponibles.length) {
-            setSeleccionados([])
-        } else {
-            setSeleccionados(docentesDisponibles.map(d => d.id_usuario))
-        }
-    }
-
     const toggleSeleccion = (id: number) => {
         setSeleccionados(prev =>
             prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
         )
+    }
+
+    const seleccionarVarios = (ids: number[], marcar: boolean) => {
+        setSeleccionados(prev => marcar ? Array.from(new Set([...prev, ...ids])) : prev.filter(id => !ids.includes(id)))
     }
 
     const handleAsignar = async () => {
@@ -256,7 +251,8 @@ export default function Periodos() {
             setExito(res.data.mensaje)
             setTimeout(() => setExito(''), 4000)
             // Recargar la lista dentro del modal
-            await abrirModalAsignar(periodoSeleccionado)
+            await abrirModalAsignar(periodoSeleccionado, true)
+            setSeleccionados([])
             await cargarPeriodos()
         } catch (err: any) {
             setError(err.response?.data?.error || 'Error al asignar los docentes.')
@@ -268,8 +264,9 @@ export default function Periodos() {
     const handleDesasignar = async (idUsuario: number) => {
         if (!periodoSeleccionado) return
         try {
+            setError('')
             await desasignarDocentePeriodo(periodoSeleccionado.id_periodo, idUsuario)
-            await abrirModalAsignar(periodoSeleccionado)
+            await abrirModalAsignar(periodoSeleccionado, true)
             await cargarPeriodos()
         } catch {
             setError('Error al remover el docente.')
@@ -778,167 +775,22 @@ export default function Periodos() {
 
             {/* ══════════ MODAL VINCULAR DOCENTES ══════════ */}
             {modalAsignar && periodoSeleccionado && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 overflow-hidden max-h-[90vh] flex flex-col">
-                        <div className="bg-blue-700 px-6 py-4 flex items-center justify-between flex-shrink-0">
-                            <div>
-                                <h3 className="text-white font-medium text-sm">Docentes del período {etiquetaPeriodo(periodoSeleccionado)}</h3>
-                                <p className="text-white/70 text-xs mt-0.5">Vincule o remueva docentes activos</p>
-                            </div>
-                            <button onClick={() => { setModalAsignar(false); setError('') }} className="text-white/50 hover:text-white transition-colors">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-                            {cargandoDocentes ? (
-                                <div className="text-center text-gray-400 py-10 text-sm">Cargando docentes...</div>
-                            ) : (
-                                <>
-                                    {/* Docentes ya asignados */}
-                                    {docentesAsignados.length > 0 && (
-                                        <div>
-                                            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                                                Docentes asignados ({docentesAsignados.length})
-                                            </h4>
-                                            <div className="bg-green-50 border border-green-100 rounded-lg divide-y divide-green-100 max-h-48 overflow-y-auto">
-                                                {docentesAsignados.map(d => (
-                                                    <div key={d.id_usuario} className="flex items-center justify-between px-4 py-2.5">
-                                                        <div>
-                                                            <p className="text-sm font-medium text-gray-800">{d.nombres} {d.apellidos}</p>
-                                                            <p className="text-xs text-gray-500">{d.correo}</p>
-                                                        </div>
-                                                        {periodoSeleccionado.activo && (
-                                                            <button
-                                                                onClick={() => handleDesasignar(d.id_usuario)}
-                                                                className="text-xs text-red-500 hover:text-red-700 font-medium hover:underline flex-shrink-0"
-                                                                title="Remover del período"
-                                                            >
-                                                                Remover
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Docentes disponibles para asignar */}
-                                    {periodoSeleccionado.activo && (
-                                        <div>
-                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                                                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                                                    Docentes disponibles ({docentesDisponiblesFiltrados.length}{docentesDisponiblesFiltrados.length !== docentesDisponibles.length ? ` de ${docentesDisponibles.length}` : ''})
-                                                </h4>
-                                                {docentesDisponiblesFiltrados.length > 0 && (
-                                                    <button
-                                                        onClick={() => {
-                                                            const idsFiltrados = docentesDisponiblesFiltrados.map(d => d.id_usuario);
-                                                            const todosSeleccionados = idsFiltrados.every(id => seleccionados.includes(id));
-                                                            if (todosSeleccionados) {
-                                                                setSeleccionados(prev => prev.filter(id => !idsFiltrados.includes(id)));
-                                                            } else {
-                                                                setSeleccionados(prev => Array.from(new Set([...prev, ...idsFiltrados])));
-                                                            }
-                                                        }}
-                                                        className="text-xs text-blue-600 hover:underline font-medium self-end sm:self-auto"
-                                                    >
-                                                        {docentesDisponiblesFiltrados.every(d => seleccionados.includes(d.id_usuario)) ? 'Deseleccionar mostrados' : 'Seleccionar mostrados'}
-                                                    </button>
-                                                )}
-                                            </div>
-
-                                            {/* Buscador de docentes en modal */}
-                                            {docentesDisponibles.length > 0 && (
-                                                <div className="relative mb-2">
-                                                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                    <input
-                                                        type="text"
-                                                        placeholder="Filtrar por nombre o correo institucional..."
-                                                        value={busquedaDocenteAsignar}
-                                                        onChange={(e) => setBusquedaDocenteAsignar(e.target.value)}
-                                                        className="w-full pl-8 pr-7 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                                    />
-                                                    {busquedaDocenteAsignar && (
-                                                        <button 
-                                                            onClick={() => setBusquedaDocenteAsignar('')}
-                                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                                                        >
-                                                            <X className="w-3.5 h-3.5" />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            {docentesDisponibles.length === 0 ? (
-                                                <div className="text-center text-gray-400 text-sm py-6 bg-gray-50 rounded-lg border border-gray-100">
-                                                    Todos los docentes activos ya están asignados a este período.
-                                                </div>
-                                            ) : docentesDisponiblesFiltrados.length === 0 ? (
-                                                <div className="text-center text-gray-400 text-xs py-4 bg-gray-50 rounded-lg border border-gray-100">
-                                                    No se encontraron docentes con "{busquedaDocenteAsignar}"
-                                                </div>
-                                            ) : (
-                                                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-60 overflow-y-auto">
-                                                    {docentesDisponiblesFiltrados.map(d => (
-                                                        <label
-                                                            key={d.id_usuario}
-                                                            className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-blue-50/50 transition-colors ${seleccionados.includes(d.id_usuario) ? 'bg-blue-50' : ''
-                                                                }`}
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={seleccionados.includes(d.id_usuario)}
-                                                                onChange={() => toggleSeleccion(d.id_usuario)}
-                                                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                                                            />
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-sm font-medium text-gray-800 truncate">{d.nombres} {d.apellidos}</p>
-                                                                <p className="text-xs text-gray-500 truncate">{d.correo}</p>
-                                                            </div>
-                                                        </label>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                        </div>
-
-                        {/* Footer del modal */}
-                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center flex-shrink-0">
-                            <span className="text-xs text-gray-500">
-                                {seleccionados.length > 0 && `${seleccionados.length} seleccionado(s)`}
-                            </span>
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={() => { setModalAsignar(false); setError('') }}
-                                    className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
-                                >
-                                    Cerrar
-                                </button>
-                                {periodoSeleccionado.activo && seleccionados.length > 0 && (
-                                    <button
-                                        onClick={handleAsignar}
-                                        disabled={asignando}
-                                        className="px-5 py-2 text-sm bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors disabled:opacity-50 flex items-center gap-2"
-                                    >
-                                        {asignando ? (
-                                            <>
-                                                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                                                </svg>
-                                                Asignando...
-                                            </>
-                                        ) : `Asignar ${seleccionados.length} docente(s)`}
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <ModalDocentesPeriodo
+                    etiqueta={etiquetaPeriodo(periodoSeleccionado)}
+                    periodoActivo={periodoSeleccionado.activo}
+                    asignados={docentesAsignados}
+                    disponibles={docentesDisponibles}
+                    seleccionados={seleccionados}
+                    cargando={cargandoDocentes}
+                    asignando={asignando}
+                    error={error}
+                    onToggle={toggleSeleccion}
+                    onSeleccionar={seleccionarVarios}
+                    onLimpiarSeleccion={() => setSeleccionados([])}
+                    onAsignar={handleAsignar}
+                    onRemover={handleDesasignar}
+                    onCerrar={() => { setModalAsignar(false); setError('') }}
+                />
             )}
 
             {/* ══════════ MODAL REPORTES POR DOCENTE ══════════ */}
