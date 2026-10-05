@@ -1,4 +1,5 @@
 const pool = require('../db/connection');
+const auditoria = require('../services/auditoriaService');
 const notificaciones = require('../services/notificacionesService');
 const getAll = async (req, res) => {
     try {
@@ -1192,45 +1193,191 @@ const updatePerfil = async (req, res) => {
     }
 };
 
-const deleteUsuario = async (req, res) => {
-    const { id } = req.params;
+// ================================================================
+// Eliminación segura de usuarios
+// ----------------------------------------------------------------
+// Un usuario solo se puede eliminar si NO tiene datos relacionados. Antes el
+// borrado era en cascada: se llevaba por delante sus asignaciones de agenda y
+// las observaciones del director.
+//
+// Los vínculos se descubren en el catálogo de PostgreSQL (todas las claves
+// foráneas hacia usuarios), así que una tabla nueva que apunte a un usuario
+// bloquea el borrado sin tocar este código.
+//
+//  · Vínculos "de alta" (roles, período, niveles, programas del director) se
+//    crean con cualquier usuario: NO bloquean y se eliminan junto con él.
+//  · Todo lo demás (agendas, observaciones, revisiones, auditoría…) bloquea.
+//  · Nunca se puede eliminar el propio usuario ni al último Planeación activo.
+// ================================================================
+const TABLAS_DE_ALTA = ['usuario_rol', 'docente_periodo', 'usuario_nivel', 'director_programa'];
+
+const ETIQUETAS_VINCULO = {
+    'usuario_asignacion.id_usuario': 'Funciones sustantivas asignadas en agendas',
+    'observaciones_director.director_id': 'Observaciones registradas como director',
+    'asignacion_funciones.revisado_por': 'Agendas revisadas por este usuario',
+    'asignacion_funciones.visto_bueno_por': 'Vistos buenos dados a agendas',
+    'asignacion_funciones.asignacion_aprobada_por': 'Asignaciones aprobadas por este usuario',
+    'revision_corte.aprobado_por': 'Cortes de revisión aprobados',
+    'revision_corte.visto_bueno_por': 'Cortes con visto bueno',
+    'auditoria.id_usuario': 'Acciones registradas en la auditoría del sistema',
+};
+
+const entrecomillar = (identificador) => `"${String(identificador).split('"').join('""')}"`;
+
+/**
+ * Cuenta los datos que dependen del usuario.
+ * @returns {{bloqueantes: object[], deAlta: object[]}}
+ */
+const consultarVinculosUsuario = async (db, idUsuario) => {
+    const refs = (await db.query(`
+        SELECT n.nspname AS esquema, cl.relname AS tabla, a.attname AS columna
+        FROM pg_constraint c
+        JOIN pg_class cl ON cl.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = cl.relnamespace
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+        WHERE c.contype = 'f'
+          AND c.confrelid = 'public.usuarios'::regclass
+          AND array_length(c.conkey, 1) = 1
+    `)).rows;
+
+    // La auditoría guarda el id del usuario sin clave foránea
+    const auditoria = await db.query("SELECT to_regclass('public.auditoria') IS NOT NULL AS existe");
+    if (auditoria.rows[0].existe && !refs.some((r) => r.tabla === 'auditoria')) {
+        refs.push({ esquema: 'public', tabla: 'auditoria', columna: 'id_usuario' });
+    }
+
+    const bloqueantes = [];
+    const deAlta = [];
+    for (const ref of refs) {
+        const r = await db.query(
+            `SELECT COUNT(*)::int AS n FROM ${entrecomillar(ref.esquema)}.${entrecomillar(ref.tabla)} WHERE ${entrecomillar(ref.columna)} = $1`,
+            [idUsuario]
+        );
+        const cantidad = r.rows[0].n;
+        if (!cantidad) continue;
+        const item = {
+            tabla: ref.tabla,
+            columna: ref.columna,
+            cantidad,
+            descripcion: ETIQUETAS_VINCULO[`${ref.tabla}.${ref.columna}`] || `Registros en ${ref.tabla}`,
+        };
+        (TABLAS_DE_ALTA.includes(ref.tabla) ? deAlta : bloqueantes).push(item);
+    }
+    return { bloqueantes, deAlta };
+};
+
+/** Motivos por los que NUNCA se puede eliminar, aunque no tenga datos. */
+const motivosDeProteccion = async (db, idUsuario, idSolicitante) => {
+    const motivos = [];
+    if (Number(idUsuario) === Number(idSolicitante)) {
+        motivos.push('No puede eliminar su propio usuario.');
+    }
+    const esAdmin = await db.query(`
+        SELECT 1 FROM usuario_rol ur JOIN roles r ON r.id_rol = ur.id_rol
+        WHERE ur.id_usuario = $1 AND LOWER(r.nombre_rol) IN ('planeacion', 'admin') LIMIT 1
+    `, [idUsuario]);
+    if (esAdmin.rows.length > 0) {
+        const otros = await db.query(`
+            SELECT 1 FROM usuarios u
+            JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
+            JOIN roles r ON r.id_rol = ur.id_rol
+            WHERE u.activo = TRUE AND u.id_usuario <> $1 AND LOWER(r.nombre_rol) IN ('planeacion', 'admin') LIMIT 1
+        `, [idUsuario]);
+        if (otros.rows.length === 0) {
+            motivos.push('Es el único usuario activo de Planeación: sin él nadie podría administrar el sistema.');
+        }
+    }
+    return motivos;
+};
+
+// GET /api/usuarios/:id/vinculos — para que la pantalla explique si se puede eliminar y por qué no
+const getVinculos = async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Identificador de usuario inválido.' });
 
     try {
-        await pool.query('BEGIN');
+        const u = await pool.query('SELECT id_usuario, nombres, apellidos, correo FROM usuarios WHERE id_usuario = $1', [id]);
+        if (u.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
-        // 1. Eliminar relaciones de rol
-        await pool.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
+        const { bloqueantes, deAlta } = await consultarVinculosUsuario(pool, id);
+        const motivos = await motivosDeProteccion(pool, id, req.user?.id);
 
-        // 2. Eliminar relaciones de periodos
-        await pool.query('DELETE FROM docente_periodo WHERE id_usuario = $1', [id]);
+        res.json({
+            usuario: u.rows[0],
+            puedeEliminar: motivos.length === 0 && bloqueantes.length === 0,
+            motivos,
+            bloqueantes,
+            deAlta,
+        });
+    } catch (error) {
+        console.error('Error en getVinculos:', error.message);
+        res.status(500).json({ error: 'No se pudieron revisar los datos relacionados del usuario.' });
+    }
+};
 
-        // 3. Eliminar relaciones de nivel académico
-        await pool.query('DELETE FROM usuario_nivel WHERE id_usuario = $1', [id]);
+const deleteUsuario = async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Identificador de usuario inválido.' });
 
-        // 4. Eliminar asignaciones de agenda
-        await pool.query('DELETE FROM usuario_asignacion WHERE id_usuario = $1', [id]);
+    let client;
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
 
-        // 5. Eliminar observaciones de director creadas por el usuario si era Director
-        await pool.query('DELETE FROM observaciones_director WHERE director_id = $1', [id]);
-
-        // 6. Desvincular revisión en asignacion_funciones
-        await pool.query('UPDATE asignacion_funciones SET revisado_por = NULL WHERE revisado_por = $1', [id]);
-
-        // 7. Eliminar finalmente el usuario
-        const result = await pool.query('DELETE FROM usuarios WHERE id_usuario = $1 RETURNING id_usuario', [id]);
-
-        if (result.rows.length === 0) {
-            await pool.query('ROLLBACK');
-            return res.status(404).json({ error: 'Usuario no encontrado' });
+        // Bloqueo de la fila: nadie puede asignarle datos mientras se decide
+        const u = await client.query(
+            'SELECT id_usuario, nombres, apellidos, correo, tipo_documento, numero_documento FROM usuarios WHERE id_usuario = $1 FOR UPDATE',
+            [id]
+        );
+        if (u.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Usuario no encontrado.' });
         }
 
-        await pool.query('COMMIT');
-        res.json({ message: 'Usuario eliminado exitosamente' });
+        // El servidor decide: no se confía en lo que haya mostrado la pantalla
+        const motivos = await motivosDeProteccion(client, id, req.user?.id);
+        const { bloqueantes, deAlta } = await consultarVinculosUsuario(client, id);
+        if (motivos.length > 0 || bloqueantes.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                error: motivos[0] || 'El usuario tiene datos relacionados y no se puede eliminar. Puede desactivarlo para quitarle el acceso.',
+                motivos,
+                bloqueantes,
+            });
+        }
+
+        // Solo quedan los vínculos de alta: se eliminan junto con el usuario
+        for (const tabla of TABLAS_DE_ALTA) {
+            await client.query(`DELETE FROM ${entrecomillar(tabla)} WHERE id_usuario = $1`, [id]);
+        }
+        await client.query('DELETE FROM usuarios WHERE id_usuario = $1', [id]);
+        await client.query('COMMIT');
+
+        const eliminado = u.rows[0];
+        await auditoria.registrar(req, {
+            accion: 'eliminar_usuario',
+            entidad: 'usuario',
+            detalle: {
+                id_usuario: eliminado.id_usuario,
+                nombre: `${eliminado.nombres} ${eliminado.apellidos}`.trim(),
+                correo: eliminado.correo,
+                documento: `${eliminado.tipo_documento || ''} ${eliminado.numero_documento || ''}`.trim(),
+                vinculos_de_alta_eliminados: deAlta,
+            },
+        });
+
+        res.json({ message: 'Usuario eliminado exitosamente', eliminado: { id_usuario: eliminado.id_usuario } });
 
     } catch (error) {
-        await pool.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK').catch(() => {});
+        // Alguien le asignó datos justo entre la revisión y el borrado: la base lo impide
+        if (error.code === '23503') {
+            return res.status(409).json({ error: 'El usuario acaba de recibir datos relacionados y ya no se puede eliminar.' });
+        }
         console.error('Error en deleteUsuario:', error.message);
-        res.status(500).json({ error: 'Error al eliminar el usuario' });
+        res.status(500).json({ error: 'Error al eliminar el usuario.' });
+    } finally {
+        if (client) client.release();
     }
 };
 
@@ -1245,6 +1392,9 @@ module.exports = {
     toggleActivo,
     update,
     deleteUsuario,
+    getVinculos,
+    consultarVinculosUsuario,
+    motivosDeProteccion,
     getPerfilCompleto,
     updatePerfil,
     getRolesAsignables

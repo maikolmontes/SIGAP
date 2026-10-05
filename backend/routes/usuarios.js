@@ -31,6 +31,8 @@ router.post('/', soloAdmin, controller.create);
 router.get('/:id/perfil-completo', propioOAdmin, controller.getPerfilCompleto);
 router.put('/:id/perfil', propioOAdmin, controller.updatePerfil);
 router.patch('/:id/activo', soloAdmin, controller.toggleActivo);
+// Qué datos dependen del usuario (para decidir si se puede eliminar)
+router.get('/:id/vinculos', soloAdmin, controller.getVinculos);
 
 // Manejadores genéricos (al final para no capturar las rutas anteriores)
 router.get('/:id', propioOAdmin, controller.getById);

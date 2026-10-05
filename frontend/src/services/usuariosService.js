@@ -33,3 +33,8 @@ export const updateUsuario = (id, data) => {
 export const deleteUsuario = (id) => {
     return api.delete(`/usuarios/${id}`)
 }
+
+// Qué datos dependen del usuario (decide si se puede eliminar y explica por qué no)
+export const getVinculosUsuario = (id) => {
+    return api.get(`/usuarios/${id}/vinculos`)
+}

@@ -4,6 +4,7 @@ import Layout from '../../components/common/Layout';
 import * as XLSX from 'xlsx'
 import { leerFilasUsuarios } from '../../utils/excelUsuarios';
 import { usePermisosPagina } from '../../hooks/usePermisos';
+import ModalEliminarUsuario from '../../components/planeacion/ModalEliminarUsuario';
 
 import { 
   Users, 
@@ -26,6 +27,7 @@ import {
   Briefcase,
   Calendar,
   Pencil,
+  Trash2,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -334,7 +336,8 @@ function mensajeDeError(error: ErrorDeApi, porDefecto: string): string {
 
 export default function Docentes() {
   const location = useLocation();
-  const { puedeCrear, puedeEditar } = usePermisosPagina('Docentes y Usuarios');
+  const { puedeCrear, puedeEditar, puedeEliminar } = usePermisosPagina('Docentes y Usuarios');
+  const [usuarioAEliminar, setUsuarioAEliminar] = useState<Usuario | null>(null);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(true);
   const [mensaje, setMensaje] = useState<{ tipo: 'exito' | 'error', texto: string } | null>(null);
@@ -1217,15 +1220,28 @@ export default function Docentes() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
-                        {puedeEditar && (
-                        <button
-                          onClick={() => handleOpenEditModal(user)}
-                          title="Editar Usuario"
-                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        )}
+                        <div className="flex items-center justify-center gap-1">
+                          {puedeEditar && (
+                            <button
+                              onClick={() => handleOpenEditModal(user)}
+                              title="Editar Usuario"
+                              aria-label={`Editar a ${user.nombre_completo || `${user.nombres} ${user.apellidos}`}`}
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
+                          {puedeEliminar && (
+                            <button
+                              onClick={() => setUsuarioAEliminar(user)}
+                              title="Eliminar Usuario (solo si no tiene datos relacionados)"
+                              aria-label={`Eliminar a ${user.nombre_completo || `${user.nombres} ${user.apellidos}`}`}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1234,6 +1250,20 @@ export default function Docentes() {
             </table>
           )}
         </div>
+
+        {usuarioAEliminar && (
+          <ModalEliminarUsuario
+            usuario={usuarioAEliminar}
+            onCerrar={() => setUsuarioAEliminar(null)}
+            onEliminado={(nombre) => {
+              setUsuarioAEliminar(null);
+              setUsuarios(prev => prev.filter(u => u.id_usuario !== usuarioAEliminar.id_usuario));
+              setMensaje({ tipo: 'exito', texto: `El usuario ${nombre} fue eliminado correctamente.` });
+              setTimeout(() => setMensaje(null), 4000);
+            }}
+            onDesactivar={handleToggleActivo}
+          />
+        )}
 
         {/* Paginación */}
         {!loading && usuariosFiltrados.length > 0 && (
