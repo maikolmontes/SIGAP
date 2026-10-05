@@ -142,7 +142,7 @@ export default function Login() {
 
         {/* Panel derecho / inferior — formulario */}
         <div className="flex-1 flex flex-col bg-white min-h-0 overflow-hidden">
-          <div className="flex-1 flex flex-col justify-center px-6 sm:px-10 lg:px-16 xl:px-24 py-4 lg:py-0 min-h-0 overflow-auto">
+          <main className="flex-1 flex flex-col justify-center px-6 sm:px-10 lg:px-16 xl:px-24 py-4 lg:py-0 min-h-0 overflow-auto">
 
             {/* Logo SIGAP — solo desktop */}
             <div className="hidden lg:flex items-center gap-3 mb-10">
@@ -151,7 +151,7 @@ export default function Login() {
               </div>
               <div>
                 <span className="text-[#0f1f4b] font-black text-3xl tracking-tight">SIGAP</span>
-                <div className="text-gray-400 text-[10px] font-semibold uppercase tracking-widest">v2.0 · 2026</div>
+                <div className="text-gray-500 text-[10px] font-semibold uppercase tracking-widest">v2.0 · 2026</div>
               </div>
             </div>
 
@@ -186,7 +186,7 @@ export default function Login() {
 
             {/* Botón Google */}
             <div className="mb-4 lg:mb-6">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 lg:mb-3">Continuar con</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 lg:mb-3">Continuar con</p>
               <GoogleLogin
                 onSuccess={handleGoogleSuccess}
                 onError={() => setErrorMsg('Error al conectar con Google.')}
@@ -208,15 +208,15 @@ export default function Login() {
             {/* Chips roles — solo desktop */}
             <div className="hidden lg:flex flex-wrap gap-2 mt-6">
               {['Planeación', 'Docentes', 'Directores', 'Consultores'].map(rol => (
-                <span key={rol} className="text-xs font-semibold text-gray-500 bg-gray-100 border border-gray-200 px-3 py-1 rounded-full">
+                <span key={rol} className="text-xs font-semibold text-gray-600 bg-gray-100 border border-gray-200 px-3 py-1 rounded-full">
                   {rol}
                 </span>
               ))}
             </div>
-          </div>
+          </main>
 
           {/* Footer */}
-          <div className="px-6 sm:px-10 lg:px-16 py-3 lg:py-5 text-[11px] font-medium text-gray-400 flex flex-col sm:flex-row justify-between items-center gap-2 bg-gray-50 border-t border-gray-100 flex-shrink-0">
+          <div className="px-6 sm:px-10 lg:px-16 py-3 lg:py-5 text-[11px] font-medium text-gray-500 flex flex-col sm:flex-row justify-between items-center gap-2 bg-gray-50 border-t border-gray-100 flex-shrink-0">
             <div className="flex gap-4">
               <button
                 onClick={() => setShowPrivacidad(true)}
