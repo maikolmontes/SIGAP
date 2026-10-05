@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import Layout from '../../components/common/Layout';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx'
+import { leerFilasUsuarios } from '../../utils/excelUsuarios';
 import { usePermisosPagina } from '../../hooks/usePermisos';
 
 import { 
@@ -698,75 +699,23 @@ export default function Docentes() {
       const workbook = XLSX.read(data);
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       
-      // Obtener filas como matriz (array de arrays) para localizar dinámicamente el encabezado
-      const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+      // Matriz de filas: el lector localiza solo la fila de encabezados de la plantilla oficial
+      // (acepta asteriscos, tildes y mayúsculas distintas) y conserva el número de fila del Excel.
+      const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
 
       if (!rawRows || rawRows.length === 0) {
         setBulkError('El archivo Excel está vacío.');
         return;
       }
 
-      // Buscar la fila de encabezados que contenga 'nombre' o 'nombres'
-      let headerIndex = -1;
-      for (let i = 0; i < rawRows.length; i++) {
-        const row = rawRows[i];
-        if (Array.isArray(row) && row.some(cell => String(cell || '').toLowerCase().includes('nombre'))) {
-          headerIndex = i;
-          break;
-        }
+      const lectura = leerFilasUsuarios(rawRows);
+      if (!lectura.encabezadoEncontrado) {
+        setBulkError('No se encontraron los encabezados de la plantilla (Nombres, Apellidos y Correo Institucional). Descarga la plantilla oficial y vuelve a intentarlo.');
+        return;
       }
 
-      if (headerIndex === -1) {
-        headerIndex = 0; // Fallback a la primera fila si no encuentra coincidencia explícita
-      }
-
-      // Limpiar encabezados de asteriscos y espacios extra
-      const headers = (rawRows[headerIndex] || []).map(h => String(h || '').trim().replace(/\s*\*/g, ''));
-
-      const payload: any[] = [];
-      for (let i = headerIndex + 1; i < rawRows.length; i++) {
-        const row = rawRows[i];
-        if (!Array.isArray(row) || row.length === 0) continue;
-
-        const rowObj: Record<string, any> = {};
-        headers.forEach((h, colIdx) => {
-          if (h && row[colIdx] !== undefined) {
-            rowObj[h] = String(row[colIdx]).trim();
-          }
-        });
-
-        // Buscar valor ignorando mayúsculas, minúsculas o variaciones de acento/nombre
-        const getVal = (...keys: string[]) => {
-          for (const k of keys) {
-            for (const objKey of Object.keys(rowObj)) {
-              if (objKey.toLowerCase().trim() === k.toLowerCase().trim()) {
-                return rowObj[objKey];
-              }
-            }
-          }
-          return '';
-        };
-
-        const nombres = getVal('Nombres', 'Nombre', 'nombres');
-        const apellidos = getVal('Apellidos', 'Apellido', 'apellidos');
-        const correo = getVal('Correo Institucional', 'Correo', 'correo');
-        const tipoDoc = getVal('Tipo Documento', 'tipo_documento', 'tipoDocumento') || 'CC';
-        const numDoc = getVal('Número Documento', 'Numero Documento', 'numero_documento', 'numeroDocumento', 'Documento');
-        const roles = getVal('Roles', 'Rol', 'roles', 'rol', 'Roles de Acceso') || 'Docente';
-        const programa = getVal('Programa Académico', 'Programa Academico', 'programa', 'Programa');
-
-        if (nombres && apellidos && correo) {
-          payload.push({
-            nombres,
-            apellidos,
-            correo,
-            tipo_documento: tipoDoc,
-            numero_documento: numDoc,
-            roles,
-            programa
-          });
-        }
-      }
+      // Se envía tal cual viene en el Excel; el servidor valida y responde fila por fila
+      const payload: any[] = lectura.filas;
 
       if (payload.length === 0) {
         setBulkError('El Excel no tiene datos válidos. Revisa las columnas obligatorias: Nombres, Apellidos, Correo Institucional, Tipo Documento, Número Documento, Roles, Programa Académico.');
@@ -1788,7 +1737,7 @@ export default function Docentes() {
                       <span className="font-bold block mb-1 text-red-700">Omisiones o errores de registros ({importResult.errores.length}):</span>
                       <div className="max-h-24 overflow-y-auto space-y-1 bg-red-50/40 p-2 rounded border border-red-100 font-mono text-[10px]">
                         {importResult.errores.map((err, i) => (
-                          <div key={i}>- <strong>{err.correo}</strong>: {err.motivo}</div>
+                          <div key={i}>- {err.fila ? `Fila ${err.fila} · ` : ''}<strong>{err.correo || err.usuario}</strong>: {err.motivo}</div>
                         ))}
                       </div>
                     </div>

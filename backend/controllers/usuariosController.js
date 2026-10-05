@@ -626,256 +626,240 @@ const create = async (req, res) => {
     }
 };
 
+// ================================================================
+// Carga masiva de usuarios (Excel)
+// ----------------------------------------------------------------
+// Cada fila pasa por validarDatosUsuario — las mismas reglas que el alta
+// individual (formato de nombre/correo/documento, roles existentes, programa
+// real y activo, exclusividad de directores, duplicados). Lo que no se puede
+// importar se informa fila por fila; lo válido se guarda.
+//
+//  · Transacción real (una sola conexión) con un SAVEPOINT por fila: si una
+//    fila falla al guardar, solo esa se descarta.
+//  · El programa se resuelve de forma estricta: si no existe o es ambiguo,
+//    la fila se rechaza. Antes se asignaba el primer programa de la base.
+// ================================================================
+const MAX_FILAS_CARGA_MASIVA = 500;
+
+const sinTildes = (valor) =>
+    String(valor ?? '')
+        .normalize('NFD')
+        .split('')
+        .filter((c) => c.charCodeAt(0) < 0x300 || c.charCodeAt(0) > 0x36f)
+        .join('')
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .join(' ');
+
+/** "Pasaporte" -> PA, "cédula de ciudadanía" -> CC, etc. Lo desconocido se devuelve en mayúscula. */
+const normalizarTipoDocumento = (valor) => {
+    const t = sinTildes(valor);
+    if (!t) return 'CC';
+    if (t.includes('pasaporte')) return 'PA';
+    if (t.includes('extranjer')) return 'CE';
+    if (t.includes('tarjeta')) return 'TI';
+    if (t.includes('ciudadan')) return 'CC';
+    return String(valor).trim().toUpperCase();
+};
+
+/**
+ * Busca el programa por nombre o id. Devuelve { id } si hay exactamente uno,
+ * { error } si no existe o es ambiguo, y { id: null } para "No aplica".
+ */
+const resolverProgramaEstricto = (entrada, programas) => {
+    const t = sinTildes(entrada);
+    if (['no aplica', 'ninguno', 'n a', 'na', 'null'].includes(t)) return { id: null };
+
+    const num = Number(String(entrada).trim());
+    if (Number.isInteger(num) && num > 0) {
+        const p = programas.find((x) => x.id_programa === num);
+        return p ? { id: p.id_programa } : { error: `El programa con id ${num} no existe.` };
+    }
+
+    const exactos = programas.filter((p) => sinTildes(p.nombre_programa) === t);
+    if (exactos.length === 1) return { id: exactos[0].id_programa };
+
+    const parecidos = programas.filter((p) => {
+        const n = sinTildes(p.nombre_programa);
+        return n.includes(t) || t.includes(n);
+    });
+    if (parecidos.length === 1) return { id: parecidos[0].id_programa };
+    if (parecidos.length > 1) {
+        return { error: `El programa "${entrada}" es ambiguo (${parecidos.map((p) => p.nombre_programa).join(', ')}). Escriba el nombre completo.` };
+    }
+    return { error: `El programa "${entrada}" no existe.` };
+};
+
 const createBulk = async (req, res) => {
     const usuarios = req.body;
 
     if (!Array.isArray(usuarios) || usuarios.length === 0) {
         return res.status(400).json({ error: 'No se enviaron usuarios para importar.' });
     }
+    if (usuarios.length > MAX_FILAS_CARGA_MASIVA) {
+        return res.status(400).json({
+            error: `El archivo tiene ${usuarios.length} filas y el máximo por carga es ${MAX_FILAS_CARGA_MASIVA}. Divídalo en varios archivos.`
+        });
+    }
 
+    let client;
     try {
-        await pool.query('BEGIN');
-        let insertados = 0;
-        let errores = [];
-        const programasInsertados = new Set();
-        const docsProcesadosEnLote = new Set();
-        const correosProcesadosEnLote = new Set();
+        client = await pool.connect();
+        await client.query('BEGIN');
 
-        // Buscar periodo activo
-        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        let insertados = 0;
+        const errores = [];
+        const programasInsertados = new Set();
+        const docsEnLote = new Set();
+        const correosEnLote = new Set();
+        const directorPorPrograma = new Map(); // id_programa -> fila del director de este mismo archivo
+
+        const periodRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
         const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
 
-        // Cargar todos los roles para no consultar repetidamente
-        const rolesResult = await pool.query('SELECT id_rol, nombre_rol FROM roles');
-        const rolesMap = {};
-        rolesResult.rows.forEach(r => {
-            rolesMap[r.nombre_rol.toLowerCase()] = r.id_rol;
-        });
+        const programas = (await client.query('SELECT id_programa, nombre_programa FROM programa_academico WHERE activo IS NOT FALSE')).rows;
 
-        // Cargar programas académicos válidos existentes en la base de datos
-        const progResult = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico');
-        const programasValidos = progResult.rows;
-        const defaultProgId = programasValidos.length > 0 ? programasValidos[0].id_programa : 1;
-
-        const resolverIdPrograma = (progInput) => {
-            if (!progInput) return defaultProgId;
-            const str = String(progInput).trim().toLowerCase();
-            if (str === 'no aplica' || str === 'ninguno' || str === 'null' || str === '') return null;
-
-            // Coincidencia por nombre en la BD
-            const encontrado = programasValidos.find(p => {
-                const pNombre = p.nombre_programa.toLowerCase();
-                return pNombre.includes(str) || str.includes(pNombre);
-            });
-            if (encontrado) return encontrado.id_programa;
-
-            // Búsqueda por palabras clave
-            if (str.includes('electrónica') || str.includes('electronica')) {
-                const pElec = programasValidos.find(p => p.nombre_programa.toLowerCase().includes('electrónica') || p.nombre_programa.toLowerCase().includes('electronica'));
-                if (pElec) return pElec.id_programa;
-            }
-            if (str.includes('industrial')) {
-                const pInd = programasValidos.find(p => p.nombre_programa.toLowerCase().includes('industrial'));
-                if (pInd) return pInd.id_programa;
-            }
-            if (str.includes('sistemas')) {
-                const pSis = programasValidos.find(p => p.nombre_programa.toLowerCase().includes('sistemas'));
-                if (pSis) return pSis.id_programa;
-            }
-
-            // Si es un ID numérico directo y existe en la BD
-            const num = Number(progInput);
-            if (!isNaN(num) && programasValidos.some(p => p.id_programa === num)) {
-                return num;
-            }
-
-            return defaultProgId;
-        };
-
-        let filaIdx = 1;
+        let posicion = 1;
         for (const u of usuarios) {
-            filaIdx++;
-            const nombres = u.nombres ? String(u.nombres).trim() : '';
-            const apellidos = u.apellidos ? String(u.apellidos).trim() : '';
-            const tipoDoc = u.tipo_documento || u.tipoDocumento || u['tipo documento'] || u['Tipo Documento'] || 'CC';
-            const numDoc = u.numero_documento || u.numeroDocumento || u['numero documento'] || u['Número Documento'] || u['Numero Documento'] || '';
-            const correo = u.correo || u['correo'] || u['Correo'] || u['Correo Institucional'] || '';
-            const correoStr = String(correo).trim().toLowerCase();
-            const docStr = String(numDoc).trim();
+            posicion++;
+            const fila = Number(u.fila) > 0 ? Number(u.fila) : posicion; // fila del Excel si el cliente la envía
 
-            // Ignorar filas de ejemplo o marcas de agua de la plantilla
-            const nombresLow = nombres.toLowerCase();
-            const apellidosLow = apellidos.toLowerCase();
-            if (
-                nombresLow.startsWith('ej:') || 
-                nombresLow.startsWith('ej.') ||
-                apellidosLow.startsWith('ej:') || 
-                apellidosLow.startsWith('ej.') ||
-                nombresLow.includes('ejemplo') ||
-                correoStr.includes('ejemplo') ||
-                correoStr.startsWith('ej:') ||
-                docStr.startsWith('ej:') ||
-                docStr === '0000000000'
-            ) {
+            const nombres = String(u.nombres ?? '').trim();
+            const apellidos = String(u.apellidos ?? '').trim();
+            const correoStr = String(u.correo ?? u.Correo ?? u['Correo Institucional'] ?? '').trim().toLowerCase();
+            const docStr = String(u.numero_documento ?? u.numeroDocumento ?? u['Número Documento'] ?? '').trim();
+            const tipoDoc = normalizarTipoDocumento(u.tipo_documento ?? u.tipoDocumento ?? u['Tipo Documento']);
+            const etiqueta = `${nombres} ${apellidos}`.trim() || 'Sin nombre';
+            const rechazar = (motivo) => errores.push({ fila, usuario: etiqueta, correo: correoStr, motivo });
+
+            // Filas guía de la plantilla (no son usuarios)
+            const bajas = [nombres, apellidos, correoStr, docStr].map((v) => v.toLowerCase());
+            if (bajas.some((v) => v.startsWith('ej:') || v.startsWith('ej.') || v.includes('ejemplo'))) continue;
+            if (!nombres && !apellidos && !correoStr && !docStr) continue; // fila vacía
+
+            // Duplicados dentro del propio archivo (lo guardado en este lote aún no es visible en la base)
+            if (docStr && docsEnLote.has(docStr)) { rechazar(`La identificación ${docStr} está repetida dentro del mismo archivo.`); continue; }
+            if (correoStr && correosEnLote.has(correoStr)) { rechazar(`El correo ${correoStr} está repetido dentro del mismo archivo.`); continue; }
+
+            // Roles (varios separados por coma) y programa
+            const rawRoles = u.roles ?? u.rol ?? u.Rol ?? u.Roles ?? '';
+            const rolesPedidos = Array.isArray(rawRoles)
+                ? rawRoles
+                : String(rawRoles).split(',').map((r) => r.trim()).filter(Boolean);
+            const rolesList = rolesPedidos.length > 0 ? rolesPedidos : ['Docente'];
+
+            const soloSinPrograma = isOnlyConsultorOrPlaneacion(rolesList);
+            const esDirector = rolesList.some((r) => normalizeRolName(r) === 'director');
+
+            let idPrograma = null;
+            if (!soloSinPrograma) {
+                const rawProg = String(u.programa ?? u['Programa Académico'] ?? u.programaAcademico ?? '').trim();
+                if (!rawProg) { rechazar('Debe indicar el Programa Académico (obligatorio para Docente y Director).'); continue; }
+                const r = resolverProgramaEstricto(rawProg, programas);
+                if (r.error) { rechazar(r.error); continue; }
+                idPrograma = r.id;
+                if (!idPrograma) { rechazar('Debe indicar el Programa Académico (obligatorio para Docente y Director).'); continue; }
+            }
+
+            // Mismas reglas que el alta individual
+            const { errores: erroresValidacion, datos } = await validarDatosUsuario({
+                nombres, apellidos, correo: correoStr,
+                tipo_documento: tipoDoc, numero_documento: docStr,
+                roles: rolesList,
+                id_programa: idPrograma,
+                programas_gestion: esDirector && idPrograma ? [idPrograma] : undefined,
+                tipo_contrato: u.tipo_contrato ?? u.tipoContrato ?? u.vinculacion ?? u['Vinculación'] ?? ''
+            });
+            if (erroresValidacion.length > 0) {
+                rechazar(erroresValidacion.map((e) => e.mensaje).join(' '));
                 continue;
             }
 
-            if (!nombres || !apellidos || !correoStr || !docStr) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`.trim() || 'Desconocido',
-                    correo: correoStr,
-                    motivo: 'Faltan campos obligatorios (Nombres, Apellidos, Identificación o Correo).'
-                });
+            // Un programa solo puede tener un director: también dentro del archivo
+            const choque = datos.programasGestion.find((p) => directorPorPrograma.has(p));
+            if (esDirector && choque !== undefined) {
+                rechazar(`El programa ya está asignado a otro director en este mismo archivo (fila ${directorPorPrograma.get(choque)}).`);
                 continue;
             }
 
-            // 1. Validar si la identificación ya existe en la base de datos o en este lote
-            if (docsProcesadosEnLote.has(docStr)) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: `La identificación ${docStr} está duplicada dentro del mismo archivo Excel.`
-                });
-                continue;
-            }
-
-            const dupDoc = await pool.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [docStr]);
-            if (dupDoc.rows.length > 0) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: `La identificación ${docStr} ya está registrada en el sistema.`
-                });
-                continue;
-            }
-
-            // 2. Validar si el correo ya existe en la base de datos o en este lote
-            if (correosProcesadosEnLote.has(correoStr)) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: `El correo ${correoStr} está duplicado dentro del mismo archivo Excel.`
-                });
-                continue;
-            }
-
-            const dupEmail = await pool.query('SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1)', [correoStr]);
-            if (dupEmail.rows.length > 0) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: `El correo ${correoStr} ya está registrado en el sistema.`
-                });
-                continue;
-            }
-
-            // Parsear roles (soporta múltiples separados por coma)
-            const rawRoles = u.roles || u.Rol || u.rol || u['Roles'] || u['roles'] || u['Roles de Acceso'] || 'Docente';
-            const rolesList = typeof rawRoles === 'string'
-                ? rawRoles.split(',').map(r => r.trim()).filter(Boolean)
-                : (Array.isArray(rawRoles) ? rawRoles : ['Docente']);
-
-            const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
-
-            // Mapear programa de forma segura consultando la base de datos
-            let progId = null;
-            if (!soloConsultorOPlaneacion) {
-                const rawProg = u.programa || u['programa académico'] || u['Programa Académico'] || u.programaAcademico || u.Programa || '';
-                progId = resolverIdPrograma(rawProg);
-            }
-
-            // Mapear tipo de contrato / vinculación de forma segura (MT, TC, HC, Por Definir)
-            const rawContrato = u.tipo_contrato || u.tipoContrato || u['tipo contrato'] || u['Tipo Contrato'] || u.vinculacion || u['vinculación'] || u['Vinculación'] || u.dedicacion || '';
-            const contratoId = resolverIdContrato(rawContrato);
-
+            await client.query('SAVEPOINT fila_usuario');
             try {
-                // Insertar usuario
-                const userRes = await pool.query(`
+                const userRes = await client.query(`
                     INSERT INTO usuarios (nombres, apellidos, tipo_documento, numero_documento, correo, id_contrato, id_programa, activo)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
                     RETURNING id_usuario
-                `, [nombres, apellidos, tipoDoc, docStr, correoStr, contratoId, progId]);
-
+                `, [datos.nombres, datos.apellidos, datos.tipoDoc, datos.docNum, datos.correo, datos.idContrato, datos.progId]);
                 const idUsuario = userRes.rows[0].id_usuario;
-                if (progId) {
-                    programasInsertados.add(progId);
+
+                for (const idRol of datos.idsRol) {
+                    await client.query(
+                        'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
+                        [idUsuario, idRol]
+                    );
                 }
 
-                docsProcesadosEnLote.add(docStr);
-                correosProcesadosEnLote.add(correoStr);
+                const programasDirector = await sincronizarProgramasDirector(
+                    idUsuario, datos.rolesList, datos.programasGestion, datos.progId, client
+                );
 
-                // Insertar múltiples roles
-                for (const rName of rolesList) {
-                    const idRol = await resolverIdRol(rName);
-                    if (idRol) {
-                        await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT DO NOTHING', [idUsuario, idRol]);
-                    }
-                }
-
-                // Un director importado gestiona su programa; los demás se agregan desde la edición
-                await sincronizarProgramasDirector(idUsuario, rolesList, null, progId);
-
-                // Asignar al periodo activo si tiene rol académico (Docente/Director)
-                const tieneRolAcademico = rolesList.some(r => {
+                const tieneRolAcademico = datos.rolesList.some((r) => {
                     const norm = normalizeRolName(r);
                     return norm === 'docente' || norm === 'director';
                 });
-
                 if (idPeriodoActivo && tieneRolAcademico) {
-                    await pool.query(`
-                        INSERT INTO docente_periodo (id_usuario, id_periodo)
-                        VALUES ($1, $2)
-                        ON CONFLICT DO NOTHING
-                    `, [idUsuario, idPeriodoActivo]);
+                    await client.query(
+                        'INSERT INTO docente_periodo (id_usuario, id_periodo) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                        [idUsuario, idPeriodoActivo]
+                    );
+                    if (datos.progId) programasInsertados.add(datos.progId);
                 }
 
+                await client.query('RELEASE SAVEPOINT fila_usuario');
+
+                docsEnLote.add(datos.docNum);
+                correosEnLote.add(datos.correo);
+                programasDirector.forEach((p) => directorPorPrograma.set(p, fila));
                 insertados++;
             } catch (err) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: err.message
-                });
+                await client.query('ROLLBACK TO SAVEPOINT fila_usuario');
+                rechazar(err.code === '23505'
+                    ? 'Ya existe un usuario con esa identificación o ese correo.'
+                    : `No se pudo guardar la fila: ${err.message}`);
             }
         }
 
-        // Asegurar programa_periodo para cada programa insertado
-        if (idPeriodoActivo && insertados > 0) {
+        // Asegurar programa_periodo para cada programa con usuarios nuevos
+        if (idPeriodoActivo && programasInsertados.size > 0) {
+            const pensul = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1');
+            const idPensul = pensul.rows[0]?.id_pensulaca || 1;
             for (const pid of programasInsertados) {
-                const existeProgPer = await pool.query(
-                    'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
+                const existe = await client.query(
+                    'SELECT 1 FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
                     [pid, idPeriodoActivo]
                 );
-                if (existeProgPer.rows.length === 0) {
-                    const pensul = await pool.query(
-                        'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
+                if (existe.rows.length === 0) {
+                    await client.query(
+                        'INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca) VALUES ($1, $2, $3)',
+                        [idPeriodoActivo, pid, idPensul]
                     );
-                    const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-                    await pool.query(`
-                        INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
-                        VALUES ($1, $2, $3)
-                    `, [idPeriodoActivo, pid, id_pensulaca]);
                 }
             }
         }
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         res.status(201).json({
-            mensaje: `Proceso completado. Se importaron ${insertados} usuarios exitosamente.`,
+            mensaje: `Proceso completado. Se importaron ${insertados} usuarios y ${errores.length} fila(s) no se pudieron importar.`,
             insertados,
             errores
         });
 
     } catch (error) {
-        await pool.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK').catch(() => {});
         console.error('Error en createBulk:', error);
-        res.status(500).json({ error: 'Fallo crítico al realizar la carga masiva.' });
+        res.status(500).json({ error: 'Fallo crítico al realizar la carga masiva. No se guardó ningún usuario.' });
+    } finally {
+        if (client) client.release();
     }
 };
 
@@ -1256,6 +1240,8 @@ module.exports = {
     validar,
     create,
     createBulk,
+    normalizarTipoDocumento,
+    resolverProgramaEstricto,
     toggleActivo,
     update,
     deleteUsuario,
