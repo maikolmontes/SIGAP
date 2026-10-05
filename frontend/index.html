@@ -6,14 +6,73 @@
   <link rel="icon" type="image/png" href="/logo_cesmag.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="SIGAP: Sistema de Información de Gestión de Actividad Profesoral de la Universidad CESMAG. Planeación, seguimiento y evidencias de la agenda docente." />
-  <meta name="theme-color" content="#1a2744" />
+  <meta name="theme-color" content="#0f1f4b" />
   <!-- La imagen del login es el elemento más grande de la primera pantalla: se pide ya, en paralelo con el JS -->
   <link rel="preload" as="image" href="/edificio.jpg" fetchpriority="high" />
   <title>SIGAP — Gestión de Actividad Profesoral | CESMAG</title>
+
+  <!--
+    Cascarón del login: se pinta con el HTML, sin esperar a que React se descargue y se ejecute
+    (en un celular lento eso son varios segundos con la pantalla en blanco). Cuando React monta,
+    reemplaza todo el contenido de #root. Solo se muestra en /login y / a quien NO tiene sesión.
+  -->
+  <style>
+    #shell{display:none}
+    .is-login #shell{display:flex;flex-direction:column;min-height:100vh;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#fff}
+    #shell .h{position:relative;height:28vh;overflow:hidden;background:#0f1f4b;color:#fff;flex-shrink:0}
+    #shell .h>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.4}
+    #shell .o{position:absolute;inset:0;background:linear-gradient(to top,rgba(15,31,75,.9),rgba(15,31,75,.4),transparent)}
+    #shell .t{position:absolute;left:16px;right:16px;bottom:14px}
+    #shell .b{position:absolute;left:16px;top:16px;display:flex;align-items:center;gap:8px}
+    #shell .b img{width:32px;height:32px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,.1);padding:2px;box-sizing:border-box}
+    #shell .b i{display:block;font-style:normal;font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:rgba(191,219,254,.6)}
+    #shell .b b{display:block;font-size:14px;font-weight:900;line-height:1;letter-spacing:-.01em}
+    #shell .t h2{margin:10px 0 0;font-size:22px;line-height:1.2;font-weight:800}
+    #shell .t h2 span{color:#67e8f9}
+    #shell .t p{margin:2px 0 0;font-size:12px;color:rgba(191,219,254,.7)}
+    #shell .f{flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 24px 56px}
+    #shell .f h1{margin:0 0 8px;font-size:28px;font-weight:800;color:#111827;letter-spacing:-.02em}
+    #shell .f p{margin:0;font-size:14px;line-height:1.4;font-weight:500;color:#6b7280}
+    @media(min-width:1024px){
+      .is-login #shell{flex-direction:row}
+      #shell .h{height:100vh;width:50%}
+      #shell .t{left:56px;right:56px;bottom:56px}
+      #shell .t h2{font-size:48px}
+      #shell .f{flex:none;width:50%;padding:0 64px}
+      #shell .f h1{font-size:36px}
+      #shell .f p{font-size:18px}
+    }
+  </style>
+  <script>
+    (function () {
+      try {
+        var p = location.pathname;
+        if ((p === '/' || p === '/login' || p === '/login/') && !localStorage.getItem('sigap_token')) {
+          document.documentElement.className += ' is-login';
+        }
+      } catch (e) { /* sin acceso a localStorage: no se muestra el cascarón */ }
+    })();
+  </script>
 </head>
 
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div id="shell" aria-hidden="true">
+      <div class="h">
+        <img src="/edificio.jpg" alt="" width="1200" height="800" fetchpriority="high" decoding="async" />
+        <div class="o"></div>
+        <div class="b"><img src="/logo_cesmag.png" alt="" width="32" height="32" /><div><b>CESMAG</b><i>Pasto · Colombia</i></div></div>
+        <div class="t">
+          <h2>Sistema de <span>Gestión</span> Profesoral</h2>
+          <p>Facultad de Ingeniería · CESMAG</p>
+        </div>
+      </div>
+      <div class="f">
+        <h1>Bienvenido(a)</h1>
+        <p>Al Sistema de Gestión Profesoral. Ingrese con sus credenciales institucionales.</p>
+      </div>
+    </div>
+  </div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 
