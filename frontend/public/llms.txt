@@ -1,0 +1,9 @@
+# SIGAP — Sistema de Información de Gestión de Actividad Profesoral
+
+> Aplicación web de la Universidad CESMAG (Pasto, Colombia) para planear, diligenciar y hacer seguimiento a la agenda de actividades de los docentes: funciones sustantivas, asignación de horas, reportes de avance en las semanas 8 y 16, evidencias e informes de gestión.
+
+El acceso es solo para usuarios institucionales con sesión iniciada; la información de la plataforma no es pública.
+
+## Enlaces
+
+- [Inicio de sesión](https://sigap-fronted.vercel.app/login): ingreso con la cuenta institucional de Google.

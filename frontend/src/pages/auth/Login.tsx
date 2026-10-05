@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useLocation } from 'react-router-dom';
-import { GoogleLogin } from '@react-oauth/google';
 import type { CredentialResponse } from '@react-oauth/google';
 // @ts-ignore
 import api from '../../services/api';
@@ -10,14 +9,29 @@ import {
   GraduationCap, Users, X, Lock, FileText
 } from 'lucide-react';
 
+// El botón de Google (y su script de ~100 KiB) se descarga después del primer pintado
+const BotonGoogle = lazy(() => import('../../components/auth/BotonGoogle'));
+
 export default function Login() {
   const { login } = useAuth();
   const location = useLocation();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [mostrarGoogle, setMostrarGoogle] = useState(false);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [showPrivacidad, setShowPrivacidad] = useState(false);
   const [showTerminos, setShowTerminos] = useState(false);
   const [stats, setStats] = useState({ docentes: 23, programas: 6 });
+
+  // Cargar el botón de Google cuando el navegador esté libre (tras el primer pintado)
+  useEffect(() => {
+    const mostrar = () => setMostrarGoogle(true);
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(mostrar, { timeout: 1200 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(mostrar, 300);
+    return () => window.clearTimeout(id);
+  }, []);
 
   useEffect(() => {
     api.get('/auth/stats')
@@ -187,14 +201,17 @@ export default function Login() {
             {/* Botón Google */}
             <div className="mb-4 lg:mb-6">
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 lg:mb-3">Continuar con</p>
-              <GoogleLogin
-                onSuccess={handleGoogleSuccess}
-                onError={() => setErrorMsg('Error al conectar con Google.')}
-                theme="outline"
-                size="large"
-                shape="rectangular"
-                text="continue_with"
-              />
+              {/* Espacio reservado: el botón aparece al terminar de pintar y nada se desplaza */}
+              <div className="min-h-[44px]">
+                {mostrarGoogle && (
+                  <Suspense fallback={null}>
+                    <BotonGoogle
+                      onSuccess={handleGoogleSuccess}
+                      onError={() => setErrorMsg('Error al conectar con Google.')}
+                    />
+                  </Suspense>
+                )}
+              </div>
             </div>
 
             {/* Seguridad */}
