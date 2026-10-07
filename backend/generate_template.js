@@ -224,8 +224,8 @@ async function generateTemplate() {
         ['Tipo Documento', 'SÍ', 'CC, CE, TI, Pasaporte', 'Tipo de documento de identificación oficial.'],
         ['Número Documento', 'SÍ', 'Numérico (ej. 1085123456)', 'Debe ser único en el sistema.'],
         ['Correo Institucional', 'SÍ', 'usuario@cesmag.edu.co', 'Correo válido institucional con dominio CESMAG.'],
-        ['Roles', 'SÍ', 'Docente, Director, Consultor, Planeación', 'Puede ingresar uno o varios separados por coma.'],
-        ['Programa Académico', 'Condicional', 'Ingeniería de Sistemas, Electrónica, Industrial, Financiera...', 'Requerido para Docente y Director. Si es solo Consultor o Planeación use "No aplica".']
+        ['Roles', 'SÍ', 'Docente, Director, Consultor, Planeación, Investigación', 'Puede ingresar uno o varios separados por coma. Un rol que no exista rechaza la fila.'],
+        ['Programa Académico', 'Condicional', 'Escriba el nombre del programa (ej. Ingeniería de Sistemas, Ingeniería Electrónica, Ingeniería Industrial…)', 'Obligatorio para Docente, Director e Investigación. Debe existir y no ser ambiguo: "Ingeniería" solo se rechaza. Si es solo Consultor o Planeación use "No aplica". Un Director gestiona el programa indicado y un programa tiene un solo director.']
     ];
 
     guideRows.forEach((r, idx) => {

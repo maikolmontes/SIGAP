@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import Layout from '../../components/common/Layout';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx'
+import { leerFilasUsuarios } from '../../utils/excelUsuarios';
 import { usePermisosPagina } from '../../hooks/usePermisos';
+import ModalEliminarUsuario from '../../components/planeacion/ModalEliminarUsuario';
 
 import { 
   Users, 
@@ -25,6 +27,7 @@ import {
   Briefcase,
   Calendar,
   Pencil,
+  Trash2,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -54,6 +57,13 @@ interface ProgramaItem {
   facultad?: string;
   activo?: boolean;
 }
+
+const NOMBRE_TIPO_DOC: Record<string, string> = {
+  CC: 'Cédula de ciudadanía',
+  CE: 'Cédula de extranjería',
+  TI: 'Tarjeta de identidad',
+  PA: 'Pasaporte',
+};
 
 interface Usuario {
   id_usuario: number;
@@ -326,7 +336,8 @@ function mensajeDeError(error: ErrorDeApi, porDefecto: string): string {
 
 export default function Docentes() {
   const location = useLocation();
-  const { puedeCrear, puedeEditar } = usePermisosPagina('Docentes y Usuarios');
+  const { puedeCrear, puedeEditar, puedeEliminar } = usePermisosPagina('Docentes y Usuarios');
+  const [usuarioAEliminar, setUsuarioAEliminar] = useState<Usuario | null>(null);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(true);
   const [mensaje, setMensaje] = useState<{ tipo: 'exito' | 'error', texto: string } | null>(null);
@@ -339,6 +350,7 @@ export default function Docentes() {
   const [selectedRol, setSelectedRol] = useState('todos');
   const [selectedEstado, setSelectedEstado] = useState('todos');
   const [selectedPrograma, setSelectedPrograma] = useState('todos');
+  const [selectedTipoDoc, setSelectedTipoDoc] = useState('todos');
   const [mostrarFiltros, setMostrarFiltros] = useState(true);
   const [paginaActual, setPaginaActual] = useState(1);
   const [registrosPorPagina, setRegistrosPorPagina] = useState(10);
@@ -698,75 +710,23 @@ export default function Docentes() {
       const workbook = XLSX.read(data);
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       
-      // Obtener filas como matriz (array de arrays) para localizar dinámicamente el encabezado
-      const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+      // Matriz de filas: el lector localiza solo la fila de encabezados de la plantilla oficial
+      // (acepta asteriscos, tildes y mayúsculas distintas) y conserva el número de fila del Excel.
+      const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
 
       if (!rawRows || rawRows.length === 0) {
         setBulkError('El archivo Excel está vacío.');
         return;
       }
 
-      // Buscar la fila de encabezados que contenga 'nombre' o 'nombres'
-      let headerIndex = -1;
-      for (let i = 0; i < rawRows.length; i++) {
-        const row = rawRows[i];
-        if (Array.isArray(row) && row.some(cell => String(cell || '').toLowerCase().includes('nombre'))) {
-          headerIndex = i;
-          break;
-        }
+      const lectura = leerFilasUsuarios(rawRows);
+      if (!lectura.encabezadoEncontrado) {
+        setBulkError('No se encontraron los encabezados de la plantilla (Nombres, Apellidos y Correo Institucional). Descarga la plantilla oficial y vuelve a intentarlo.');
+        return;
       }
 
-      if (headerIndex === -1) {
-        headerIndex = 0; // Fallback a la primera fila si no encuentra coincidencia explícita
-      }
-
-      // Limpiar encabezados de asteriscos y espacios extra
-      const headers = (rawRows[headerIndex] || []).map(h => String(h || '').trim().replace(/\s*\*/g, ''));
-
-      const payload: any[] = [];
-      for (let i = headerIndex + 1; i < rawRows.length; i++) {
-        const row = rawRows[i];
-        if (!Array.isArray(row) || row.length === 0) continue;
-
-        const rowObj: Record<string, any> = {};
-        headers.forEach((h, colIdx) => {
-          if (h && row[colIdx] !== undefined) {
-            rowObj[h] = String(row[colIdx]).trim();
-          }
-        });
-
-        // Buscar valor ignorando mayúsculas, minúsculas o variaciones de acento/nombre
-        const getVal = (...keys: string[]) => {
-          for (const k of keys) {
-            for (const objKey of Object.keys(rowObj)) {
-              if (objKey.toLowerCase().trim() === k.toLowerCase().trim()) {
-                return rowObj[objKey];
-              }
-            }
-          }
-          return '';
-        };
-
-        const nombres = getVal('Nombres', 'Nombre', 'nombres');
-        const apellidos = getVal('Apellidos', 'Apellido', 'apellidos');
-        const correo = getVal('Correo Institucional', 'Correo', 'correo');
-        const tipoDoc = getVal('Tipo Documento', 'tipo_documento', 'tipoDocumento') || 'CC';
-        const numDoc = getVal('Número Documento', 'Numero Documento', 'numero_documento', 'numeroDocumento', 'Documento');
-        const roles = getVal('Roles', 'Rol', 'roles', 'rol', 'Roles de Acceso') || 'Docente';
-        const programa = getVal('Programa Académico', 'Programa Academico', 'programa', 'Programa');
-
-        if (nombres && apellidos && correo) {
-          payload.push({
-            nombres,
-            apellidos,
-            correo,
-            tipo_documento: tipoDoc,
-            numero_documento: numDoc,
-            roles,
-            programa
-          });
-        }
-      }
+      // Se envía tal cual viene en el Excel; el servidor valida y responde fila por fila
+      const payload: any[] = lectura.filas;
 
       if (payload.length === 0) {
         setBulkError('El Excel no tiene datos válidos. Revisa las columnas obligatorias: Nombres, Apellidos, Correo Institucional, Tipo Documento, Número Documento, Roles, Programa Académico.');
@@ -797,8 +757,18 @@ export default function Docentes() {
   // Filtrar los usuarios en el cliente
   const usuariosFiltrados = usuarios.filter(user => {
     const nombreCompleto = `${user.nombres} ${user.apellidos}`.toLowerCase();
-    const coincideBusqueda = nombreCompleto.includes(searchTerm.toLowerCase()) || 
-                              user.correo.toLowerCase().includes(searchTerm.toLowerCase());
+    const busqueda = searchTerm.toLowerCase().trim();
+    // La identificación se busca tal cual ("CC 1085") y también sin puntos, comas ni espacios ("1.085.291")
+    const soloLetrasYNumeros = (v: string) => v.toLowerCase().split('').filter(c => (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')).join('');
+    const documento = `${user.tipo_documento || ''} ${user.numero_documento || ''}`.toLowerCase();
+    const busquedaTieneNumero = busqueda.split('').some(c => c >= '0' && c <= '9');
+    const coincideBusqueda = !busqueda ||
+                              nombreCompleto.includes(busqueda) ||
+                              (user.correo || '').toLowerCase().includes(busqueda) ||
+                              documento.includes(busqueda) ||
+                              (busquedaTieneNumero && soloLetrasYNumeros(documento).includes(soloLetrasYNumeros(busqueda)));
+
+    const coincideTipoDoc = selectedTipoDoc === 'todos' || (user.tipo_documento || '').toUpperCase() === selectedTipoDoc;
     
     const coincideRol = selectedRol === 'todos' || 
                         (user.roles && user.roles.toLowerCase().includes(selectedRol.toLowerCase()));
@@ -811,7 +781,7 @@ export default function Docentes() {
                               (selectedPrograma === 'Ninguno' && (!user.programa || user.programa === '')) ||
                               (user.programa && user.programa.toLowerCase() === selectedPrograma.toLowerCase());
 
-    return coincideBusqueda && coincideRol && coincideEstado && coincidePrograma;
+    return coincideBusqueda && coincideRol && coincideEstado && coincidePrograma && coincideTipoDoc;
   }).sort((a, b) => {
     const nombreA = (a.nombre_completo || `${a.nombres || ''} ${a.apellidos || ''}`).trim();
     const nombreB = (b.nombre_completo || `${b.nombres || ''} ${b.apellidos || ''}`).trim();
@@ -829,7 +799,7 @@ export default function Docentes() {
 
   useEffect(() => {
     setPaginaActual(1);
-  }, [searchTerm, selectedRol, selectedEstado, selectedPrograma, registrosPorPagina]);
+  }, [searchTerm, selectedRol, selectedEstado, selectedPrograma, selectedTipoDoc, registrosPorPagina]);
 
   useEffect(() => {
     if (paginaActual > totalPaginas) {
@@ -841,7 +811,8 @@ export default function Docentes() {
     Boolean(searchTerm.trim()),
     selectedRol !== 'todos',
     selectedEstado !== 'todos',
-    selectedPrograma !== 'todos'
+    selectedPrograma !== 'todos',
+    selectedTipoDoc !== 'todos'
   ].filter(Boolean).length;
 
   const limpiarFiltros = () => {
@@ -849,6 +820,7 @@ export default function Docentes() {
     setSelectedRol('todos');
     setSelectedEstado('todos');
     setSelectedPrograma('todos');
+    setSelectedTipoDoc('todos');
   };
 
   // Métricas para tarjetas KPI
@@ -1037,11 +1009,11 @@ export default function Docentes() {
         {mostrarFiltros && (
           <div className="p-4 border-b border-gray-100 bg-white">
             <div className="flex flex-col md:flex-row gap-3 justify-between items-center">
-              <div className="relative w-full md:w-80">
+              <div className="relative w-full md:w-96">
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
                 <input
                   type="text"
-                  placeholder="Buscar por nombre o correo..."
+                  placeholder="Buscar por nombre, correo o identificación..."
                   className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
@@ -1088,6 +1060,19 @@ export default function Docentes() {
                   <option value="Ninguno">No Aplica / Sin Asignar</option>
                 </select>
 
+                {/* Filtro por Tipo de documento */}
+                <select
+                  value={selectedTipoDoc}
+                  onChange={(e) => setSelectedTipoDoc(e.target.value)}
+                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                  aria-label="Filtrar por tipo de documento"
+                >
+                  <option value="todos">Todos los Documentos</option>
+                  {Object.entries(NOMBRE_TIPO_DOC).map(([sigla, nombre]) => (
+                    <option key={sigla} value={sigla}>{sigla} · {nombre}</option>
+                  ))}
+                </select>
+
                 {totalFiltrosActivos > 0 && (
                   <button
                     onClick={limpiarFiltros}
@@ -1120,6 +1105,7 @@ export default function Docentes() {
               <thead className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur-xs border-b border-gray-200 shadow-2xs">
                 <tr className="bg-gray-50 border-b border-gray-200 text-left">
                   <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Usuario / Correo</th>
+                  <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Identificación</th>
                   <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Roles Asignados</th>
                   <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Programa Académico</th>
                   <th className="px-6 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50">Tipo Contrato</th>
@@ -1141,6 +1127,21 @@ export default function Docentes() {
                           <Mail className="w-3 h-3 shrink-0" />
                           {user.correo}
                         </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {user.numero_documento ? (
+                          <div className="flex items-center gap-2">
+                            <span
+                              title={NOMBRE_TIPO_DOC[(user.tipo_documento || 'CC').toUpperCase()] || user.tipo_documento}
+                              className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 uppercase tracking-wider"
+                            >
+                              {user.tipo_documento || 'CC'}
+                            </span>
+                            <span className="text-sm font-semibold text-gray-800 tabular-nums">{user.numero_documento}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs italic text-gray-400">Sin registrar</span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-1">
@@ -1219,15 +1220,28 @@ export default function Docentes() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
-                        {puedeEditar && (
-                        <button
-                          onClick={() => handleOpenEditModal(user)}
-                          title="Editar Usuario"
-                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        )}
+                        <div className="flex items-center justify-center gap-1">
+                          {puedeEditar && (
+                            <button
+                              onClick={() => handleOpenEditModal(user)}
+                              title="Editar Usuario"
+                              aria-label={`Editar a ${user.nombre_completo || `${user.nombres} ${user.apellidos}`}`}
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
+                          {puedeEliminar && (
+                            <button
+                              onClick={() => setUsuarioAEliminar(user)}
+                              title="Eliminar Usuario (solo si no tiene datos relacionados)"
+                              aria-label={`Eliminar a ${user.nombre_completo || `${user.nombres} ${user.apellidos}`}`}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1236,6 +1250,20 @@ export default function Docentes() {
             </table>
           )}
         </div>
+
+        {usuarioAEliminar && (
+          <ModalEliminarUsuario
+            usuario={usuarioAEliminar}
+            onCerrar={() => setUsuarioAEliminar(null)}
+            onEliminado={(nombre) => {
+              setUsuarioAEliminar(null);
+              setUsuarios(prev => prev.filter(u => u.id_usuario !== usuarioAEliminar.id_usuario));
+              setMensaje({ tipo: 'exito', texto: `El usuario ${nombre} fue eliminado correctamente.` });
+              setTimeout(() => setMensaje(null), 4000);
+            }}
+            onDesactivar={handleToggleActivo}
+          />
+        )}
 
         {/* Paginación */}
         {!loading && usuariosFiltrados.length > 0 && (
@@ -1788,7 +1816,7 @@ export default function Docentes() {
                       <span className="font-bold block mb-1 text-red-700">Omisiones o errores de registros ({importResult.errores.length}):</span>
                       <div className="max-h-24 overflow-y-auto space-y-1 bg-red-50/40 p-2 rounded border border-red-100 font-mono text-[10px]">
                         {importResult.errores.map((err, i) => (
-                          <div key={i}>- <strong>{err.correo}</strong>: {err.motivo}</div>
+                          <div key={i}>- {err.fila ? `Fila ${err.fila} · ` : ''}<strong>{err.correo || err.usuario}</strong>: {err.motivo}</div>
                         ))}
                       </div>
                     </div>

@@ -48,6 +48,11 @@ export default function AgendaDocente() {
     const [periodoAbierto, setPeriodoAbierto] = useState(true);
     const [tiempoRestanteTexto, setTiempoRestanteTexto] = useState('');
 
+    // "Otro/Cuál" (Académico-Administrativo) y "Otro, ¿Cuál?" (Vicerrectoría): la
+    // actividad no está en el catálogo, así que el docente escribe la descripción y
+    // los indicadores en lugar de elegirlos de una lista.
+    const esActividadOtro = (rol: string) => /^otro/i.test((rol || '').trim());
+
     // Mapeo dinámico del catálogo
     const getActividadesDelCatalogo = (funcionNombre: string, sourceCatalogo = catalogoGlobal) => {
         const funcItem = sourceCatalogo.find((c: any) => c.funcion_sustantiva === funcionNombre);
@@ -151,14 +156,14 @@ export default function AgendaDocente() {
                             }
 
                             // Auto-selección en la carga inicial
-                            if (a.actividadLibre && !a.resultadoEsperado && f.funcion_sustantiva) {
+                            if (a.actividadLibre && !esActividadOtro(a.actividadLibre) && !a.resultadoEsperado && f.funcion_sustantiva) {
                                 const descs = getDescripcionesDeActividad(f.funcion_sustantiva, a.actividadLibre, catalogoData);
                                 if (descs.length === 1) {
                                     a.resultadoEsperado = descs[0].resultado_esperado;
                                 }
                             }
                             // Re-validar indicadores si ya hay un resultado esperado
-                            if (a.actividadLibre && a.resultadoEsperado && f.funcion_sustantiva) {
+                            if (a.actividadLibre && !esActividadOtro(a.actividadLibre) && a.resultadoEsperado && f.funcion_sustantiva) {
                                 const inds = getIndicadoresDeDescripcion(f.funcion_sustantiva, a.actividadLibre, a.resultadoEsperado, catalogoData);
                                 if (inds.length === 1 && (!a.indicadores[0] || !a.indicadores[0].nombre_indicador)) {
                                     a.indicadores[0].nombre_indicador = inds[0].nombre_indicador;
@@ -212,8 +217,8 @@ export default function AgendaDocente() {
             nuevas[funcIndex].actividades[actIndex].resultadoEsperado = '';
             nuevas[funcIndex].actividades[actIndex].indicadores = [{ id: generarId(), nombre_indicador: '' }];
             
-            // Auto seleccionar Descripción e Indicador
-            if (valor && valor !== 'otro') {
+            // Auto seleccionar Descripción e Indicador (en "Otro" los escribe el docente)
+            if (valor && !esActividadOtro(valor)) {
                 const descs = getDescripcionesDeActividad(funcionSust, valor);
                 if (descs.length === 1) {
                     nuevas[funcIndex].actividades[actIndex].resultadoEsperado = descs[0].resultado_esperado;
@@ -228,7 +233,7 @@ export default function AgendaDocente() {
             nuevas[funcIndex].actividades[actIndex].indicadores = [{ id: generarId(), nombre_indicador: '' }];
             
             // Auto seleccionar Indicador
-            if (valor && valor !== 'otro') {
+            if (valor && !esActividadOtro(nuevas[funcIndex].actividades[actIndex].actividadLibre)) {
                 const actLibre = nuevas[funcIndex].actividades[actIndex].actividadLibre;
                 const inds = getIndicadoresDeDescripcion(funcionSust, actLibre, valor);
                 if (inds.length === 1) {
@@ -560,17 +565,7 @@ export default function AgendaDocente() {
                                                                     {catsActs.map((act:any) => (
                                                                         <option key={act.id_asignacionact} value={act.rol_seleccionado}>{act.rol_seleccionado}</option>
                                                                     ))}
-                                                                    <option value="otro">Registrar otra actividad...</option>
                                                                 </select>
-                                                            )}
-                                                            
-                                                            {actividad.actividadLibre === 'otro' && !esDeshabilitado && !esIndirecta && (
-                                                                <input
-                                                                    type="text"
-                                                                    placeholder="Escribe la actividad"
-                                                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-2 text-sm focus:border-purple-500 focus:ring-1 outline-none disabled:opacity-60 disabled:bg-gray-100"
-                                                                    disabled={!semanaActiva || !periodoAbierto}
-                                                                />
                                                             )}
                                                         </div>
 
@@ -679,12 +674,21 @@ export default function AgendaDocente() {
                                                                         readOnly
                                                                         value="Pendiente de implementación jerárquica"    
                                                                     />
+                                                                ) : esActividadOtro(actividad.actividadLibre) ? (
+                                                                    <textarea
+                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100"
+                                                                        rows={2}
+                                                                        placeholder="Escribe cuál es la actividad y el resultado esperado..."
+                                                                        value={actividad.resultadoEsperado}
+                                                                        onChange={(e) => cambiarActividad(fIndex, aIndex, 'resultadoEsperado', e.target.value)}
+                                                                        disabled={!semanaActiva || !periodoAbierto}
+                                                                    />
                                                                 ) : (
                                                                     <select
                                                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white transition-colors disabled:opacity-60 disabled:bg-gray-100"
                                                                         value={actividad.resultadoEsperado}
                                                                         onChange={(e) => cambiarActividad(fIndex, aIndex, 'resultadoEsperado', e.target.value)}
-                                                                        disabled={!semanaActiva || !actividad.actividadLibre || actividad.actividadLibre==='otro'}
+                                                                        disabled={!semanaActiva || !actividad.actividadLibre}
                                                                     >
                                                                         <option value="">
                                                                             {!actividad.actividadLibre 
@@ -740,11 +744,21 @@ export default function AgendaDocente() {
                                                                         <div key={ind.id} className="flex gap-2 items-center">
                                                                             <div className="relative flex-1">
                                                                                 <div className="absolute left-3 top-2.5 w-1.5 h-1.5 bg-orange-400 rounded-full"></div>
+                                                                                {esActividadOtro(actividad.actividadLibre) ? (
+                                                                                <input
+                                                                                    type="text"
+                                                                                    className="w-full border border-orange-200 rounded-md pl-7 pr-3 py-1.5 text-xs outline-none bg-white font-medium text-orange-900 focus:border-orange-400 disabled:opacity-60 disabled:bg-gray-100"
+                                                                                    placeholder="Escribe el indicador o entregable..."
+                                                                                    value={ind.nombre_indicador}
+                                                                                    onChange={(e) => cambiarIndicador(fIndex, aIndex, iIndex, e.target.value)}
+                                                                                    disabled={!semanaActiva || !periodoAbierto}
+                                                                                />
+                                                                                ) : (
                                                                                 <select
                                                                                     className="w-full border border-orange-200 rounded-md pl-7 pr-3 py-1.5 text-xs outline-none bg-white font-medium text-orange-900 disabled:opacity-60 disabled:bg-gray-100"
                                                                                     value={ind.nombre_indicador}
                                                                                     onChange={(e) => cambiarIndicador(fIndex, aIndex, iIndex, e.target.value)}
-                                                                                    disabled={!semanaActiva || !actividad.resultadoEsperado || actividad.resultadoEsperado==='otro'}
+                                                                                    disabled={!semanaActiva || !actividad.resultadoEsperado}
                                                                                 >
                                                                                     <option value="">
                                                                                         {!actividad.resultadoEsperado 
@@ -755,6 +769,7 @@ export default function AgendaDocente() {
                                                                                         <option key={indic.id_indicador} value={indic.nombre_indicador}>{indic.nombre_indicador}</option>
                                                                                     ))}
                                                                                 </select>
+                                                                                )}
                                                                             </div>
                                                                             {actividad.indicadores.length > 1 && (
                                                                                 <button

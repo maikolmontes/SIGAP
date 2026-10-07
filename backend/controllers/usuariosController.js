@@ -1,4 +1,5 @@
 const pool = require('../db/connection');
+const auditoria = require('../services/auditoriaService');
 const notificaciones = require('../services/notificacionesService');
 const getAll = async (req, res) => {
     try {
@@ -626,256 +627,240 @@ const create = async (req, res) => {
     }
 };
 
+// ================================================================
+// Carga masiva de usuarios (Excel)
+// ----------------------------------------------------------------
+// Cada fila pasa por validarDatosUsuario — las mismas reglas que el alta
+// individual (formato de nombre/correo/documento, roles existentes, programa
+// real y activo, exclusividad de directores, duplicados). Lo que no se puede
+// importar se informa fila por fila; lo válido se guarda.
+//
+//  · Transacción real (una sola conexión) con un SAVEPOINT por fila: si una
+//    fila falla al guardar, solo esa se descarta.
+//  · El programa se resuelve de forma estricta: si no existe o es ambiguo,
+//    la fila se rechaza. Antes se asignaba el primer programa de la base.
+// ================================================================
+const MAX_FILAS_CARGA_MASIVA = 500;
+
+const sinTildes = (valor) =>
+    String(valor ?? '')
+        .normalize('NFD')
+        .split('')
+        .filter((c) => c.charCodeAt(0) < 0x300 || c.charCodeAt(0) > 0x36f)
+        .join('')
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .join(' ');
+
+/** "Pasaporte" -> PA, "cédula de ciudadanía" -> CC, etc. Lo desconocido se devuelve en mayúscula. */
+const normalizarTipoDocumento = (valor) => {
+    const t = sinTildes(valor);
+    if (!t) return 'CC';
+    if (t.includes('pasaporte')) return 'PA';
+    if (t.includes('extranjer')) return 'CE';
+    if (t.includes('tarjeta')) return 'TI';
+    if (t.includes('ciudadan')) return 'CC';
+    return String(valor).trim().toUpperCase();
+};
+
+/**
+ * Busca el programa por nombre o id. Devuelve { id } si hay exactamente uno,
+ * { error } si no existe o es ambiguo, y { id: null } para "No aplica".
+ */
+const resolverProgramaEstricto = (entrada, programas) => {
+    const t = sinTildes(entrada);
+    if (['no aplica', 'ninguno', 'n a', 'na', 'null'].includes(t)) return { id: null };
+
+    const num = Number(String(entrada).trim());
+    if (Number.isInteger(num) && num > 0) {
+        const p = programas.find((x) => x.id_programa === num);
+        return p ? { id: p.id_programa } : { error: `El programa con id ${num} no existe.` };
+    }
+
+    const exactos = programas.filter((p) => sinTildes(p.nombre_programa) === t);
+    if (exactos.length === 1) return { id: exactos[0].id_programa };
+
+    const parecidos = programas.filter((p) => {
+        const n = sinTildes(p.nombre_programa);
+        return n.includes(t) || t.includes(n);
+    });
+    if (parecidos.length === 1) return { id: parecidos[0].id_programa };
+    if (parecidos.length > 1) {
+        return { error: `El programa "${entrada}" es ambiguo (${parecidos.map((p) => p.nombre_programa).join(', ')}). Escriba el nombre completo.` };
+    }
+    return { error: `El programa "${entrada}" no existe.` };
+};
+
 const createBulk = async (req, res) => {
     const usuarios = req.body;
 
     if (!Array.isArray(usuarios) || usuarios.length === 0) {
         return res.status(400).json({ error: 'No se enviaron usuarios para importar.' });
     }
+    if (usuarios.length > MAX_FILAS_CARGA_MASIVA) {
+        return res.status(400).json({
+            error: `El archivo tiene ${usuarios.length} filas y el máximo por carga es ${MAX_FILAS_CARGA_MASIVA}. Divídalo en varios archivos.`
+        });
+    }
 
+    let client;
     try {
-        await pool.query('BEGIN');
-        let insertados = 0;
-        let errores = [];
-        const programasInsertados = new Set();
-        const docsProcesadosEnLote = new Set();
-        const correosProcesadosEnLote = new Set();
+        client = await pool.connect();
+        await client.query('BEGIN');
 
-        // Buscar periodo activo
-        const periodRes = await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
+        let insertados = 0;
+        const errores = [];
+        const programasInsertados = new Set();
+        const docsEnLote = new Set();
+        const correosEnLote = new Set();
+        const directorPorPrograma = new Map(); // id_programa -> fila del director de este mismo archivo
+
+        const periodRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1');
         const idPeriodoActivo = periodRes.rows.length > 0 ? periodRes.rows[0].id_periodo : null;
 
-        // Cargar todos los roles para no consultar repetidamente
-        const rolesResult = await pool.query('SELECT id_rol, nombre_rol FROM roles');
-        const rolesMap = {};
-        rolesResult.rows.forEach(r => {
-            rolesMap[r.nombre_rol.toLowerCase()] = r.id_rol;
-        });
+        const programas = (await client.query('SELECT id_programa, nombre_programa FROM programa_academico WHERE activo IS NOT FALSE')).rows;
 
-        // Cargar programas académicos válidos existentes en la base de datos
-        const progResult = await pool.query('SELECT id_programa, nombre_programa FROM programa_academico');
-        const programasValidos = progResult.rows;
-        const defaultProgId = programasValidos.length > 0 ? programasValidos[0].id_programa : 1;
-
-        const resolverIdPrograma = (progInput) => {
-            if (!progInput) return defaultProgId;
-            const str = String(progInput).trim().toLowerCase();
-            if (str === 'no aplica' || str === 'ninguno' || str === 'null' || str === '') return null;
-
-            // Coincidencia por nombre en la BD
-            const encontrado = programasValidos.find(p => {
-                const pNombre = p.nombre_programa.toLowerCase();
-                return pNombre.includes(str) || str.includes(pNombre);
-            });
-            if (encontrado) return encontrado.id_programa;
-
-            // Búsqueda por palabras clave
-            if (str.includes('electrónica') || str.includes('electronica')) {
-                const pElec = programasValidos.find(p => p.nombre_programa.toLowerCase().includes('electrónica') || p.nombre_programa.toLowerCase().includes('electronica'));
-                if (pElec) return pElec.id_programa;
-            }
-            if (str.includes('industrial')) {
-                const pInd = programasValidos.find(p => p.nombre_programa.toLowerCase().includes('industrial'));
-                if (pInd) return pInd.id_programa;
-            }
-            if (str.includes('sistemas')) {
-                const pSis = programasValidos.find(p => p.nombre_programa.toLowerCase().includes('sistemas'));
-                if (pSis) return pSis.id_programa;
-            }
-
-            // Si es un ID numérico directo y existe en la BD
-            const num = Number(progInput);
-            if (!isNaN(num) && programasValidos.some(p => p.id_programa === num)) {
-                return num;
-            }
-
-            return defaultProgId;
-        };
-
-        let filaIdx = 1;
+        let posicion = 1;
         for (const u of usuarios) {
-            filaIdx++;
-            const nombres = u.nombres ? String(u.nombres).trim() : '';
-            const apellidos = u.apellidos ? String(u.apellidos).trim() : '';
-            const tipoDoc = u.tipo_documento || u.tipoDocumento || u['tipo documento'] || u['Tipo Documento'] || 'CC';
-            const numDoc = u.numero_documento || u.numeroDocumento || u['numero documento'] || u['Número Documento'] || u['Numero Documento'] || '';
-            const correo = u.correo || u['correo'] || u['Correo'] || u['Correo Institucional'] || '';
-            const correoStr = String(correo).trim().toLowerCase();
-            const docStr = String(numDoc).trim();
+            posicion++;
+            const fila = Number(u.fila) > 0 ? Number(u.fila) : posicion; // fila del Excel si el cliente la envía
 
-            // Ignorar filas de ejemplo o marcas de agua de la plantilla
-            const nombresLow = nombres.toLowerCase();
-            const apellidosLow = apellidos.toLowerCase();
-            if (
-                nombresLow.startsWith('ej:') || 
-                nombresLow.startsWith('ej.') ||
-                apellidosLow.startsWith('ej:') || 
-                apellidosLow.startsWith('ej.') ||
-                nombresLow.includes('ejemplo') ||
-                correoStr.includes('ejemplo') ||
-                correoStr.startsWith('ej:') ||
-                docStr.startsWith('ej:') ||
-                docStr === '0000000000'
-            ) {
+            const nombres = String(u.nombres ?? '').trim();
+            const apellidos = String(u.apellidos ?? '').trim();
+            const correoStr = String(u.correo ?? u.Correo ?? u['Correo Institucional'] ?? '').trim().toLowerCase();
+            const docStr = String(u.numero_documento ?? u.numeroDocumento ?? u['Número Documento'] ?? '').trim();
+            const tipoDoc = normalizarTipoDocumento(u.tipo_documento ?? u.tipoDocumento ?? u['Tipo Documento']);
+            const etiqueta = `${nombres} ${apellidos}`.trim() || 'Sin nombre';
+            const rechazar = (motivo) => errores.push({ fila, usuario: etiqueta, correo: correoStr, motivo });
+
+            // Filas guía de la plantilla (no son usuarios)
+            const bajas = [nombres, apellidos, correoStr, docStr].map((v) => v.toLowerCase());
+            if (bajas.some((v) => v.startsWith('ej:') || v.startsWith('ej.') || v.includes('ejemplo'))) continue;
+            if (!nombres && !apellidos && !correoStr && !docStr) continue; // fila vacía
+
+            // Duplicados dentro del propio archivo (lo guardado en este lote aún no es visible en la base)
+            if (docStr && docsEnLote.has(docStr)) { rechazar(`La identificación ${docStr} está repetida dentro del mismo archivo.`); continue; }
+            if (correoStr && correosEnLote.has(correoStr)) { rechazar(`El correo ${correoStr} está repetido dentro del mismo archivo.`); continue; }
+
+            // Roles (varios separados por coma) y programa
+            const rawRoles = u.roles ?? u.rol ?? u.Rol ?? u.Roles ?? '';
+            const rolesPedidos = Array.isArray(rawRoles)
+                ? rawRoles
+                : String(rawRoles).split(',').map((r) => r.trim()).filter(Boolean);
+            const rolesList = rolesPedidos.length > 0 ? rolesPedidos : ['Docente'];
+
+            const soloSinPrograma = isOnlyConsultorOrPlaneacion(rolesList);
+            const esDirector = rolesList.some((r) => normalizeRolName(r) === 'director');
+
+            let idPrograma = null;
+            if (!soloSinPrograma) {
+                const rawProg = String(u.programa ?? u['Programa Académico'] ?? u.programaAcademico ?? '').trim();
+                if (!rawProg) { rechazar('Debe indicar el Programa Académico (obligatorio para Docente y Director).'); continue; }
+                const r = resolverProgramaEstricto(rawProg, programas);
+                if (r.error) { rechazar(r.error); continue; }
+                idPrograma = r.id;
+                if (!idPrograma) { rechazar('Debe indicar el Programa Académico (obligatorio para Docente y Director).'); continue; }
+            }
+
+            // Mismas reglas que el alta individual
+            const { errores: erroresValidacion, datos } = await validarDatosUsuario({
+                nombres, apellidos, correo: correoStr,
+                tipo_documento: tipoDoc, numero_documento: docStr,
+                roles: rolesList,
+                id_programa: idPrograma,
+                programas_gestion: esDirector && idPrograma ? [idPrograma] : undefined,
+                tipo_contrato: u.tipo_contrato ?? u.tipoContrato ?? u.vinculacion ?? u['Vinculación'] ?? ''
+            });
+            if (erroresValidacion.length > 0) {
+                rechazar(erroresValidacion.map((e) => e.mensaje).join(' '));
                 continue;
             }
 
-            if (!nombres || !apellidos || !correoStr || !docStr) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`.trim() || 'Desconocido',
-                    correo: correoStr,
-                    motivo: 'Faltan campos obligatorios (Nombres, Apellidos, Identificación o Correo).'
-                });
+            // Un programa solo puede tener un director: también dentro del archivo
+            const choque = datos.programasGestion.find((p) => directorPorPrograma.has(p));
+            if (esDirector && choque !== undefined) {
+                rechazar(`El programa ya está asignado a otro director en este mismo archivo (fila ${directorPorPrograma.get(choque)}).`);
                 continue;
             }
 
-            // 1. Validar si la identificación ya existe en la base de datos o en este lote
-            if (docsProcesadosEnLote.has(docStr)) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: `La identificación ${docStr} está duplicada dentro del mismo archivo Excel.`
-                });
-                continue;
-            }
-
-            const dupDoc = await pool.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [docStr]);
-            if (dupDoc.rows.length > 0) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: `La identificación ${docStr} ya está registrada en el sistema.`
-                });
-                continue;
-            }
-
-            // 2. Validar si el correo ya existe en la base de datos o en este lote
-            if (correosProcesadosEnLote.has(correoStr)) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: `El correo ${correoStr} está duplicado dentro del mismo archivo Excel.`
-                });
-                continue;
-            }
-
-            const dupEmail = await pool.query('SELECT id_usuario FROM usuarios WHERE LOWER(correo) = LOWER($1)', [correoStr]);
-            if (dupEmail.rows.length > 0) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: `El correo ${correoStr} ya está registrado en el sistema.`
-                });
-                continue;
-            }
-
-            // Parsear roles (soporta múltiples separados por coma)
-            const rawRoles = u.roles || u.Rol || u.rol || u['Roles'] || u['roles'] || u['Roles de Acceso'] || 'Docente';
-            const rolesList = typeof rawRoles === 'string'
-                ? rawRoles.split(',').map(r => r.trim()).filter(Boolean)
-                : (Array.isArray(rawRoles) ? rawRoles : ['Docente']);
-
-            const soloConsultorOPlaneacion = isOnlyConsultorOrPlaneacion(rolesList);
-
-            // Mapear programa de forma segura consultando la base de datos
-            let progId = null;
-            if (!soloConsultorOPlaneacion) {
-                const rawProg = u.programa || u['programa académico'] || u['Programa Académico'] || u.programaAcademico || u.Programa || '';
-                progId = resolverIdPrograma(rawProg);
-            }
-
-            // Mapear tipo de contrato / vinculación de forma segura (MT, TC, HC, Por Definir)
-            const rawContrato = u.tipo_contrato || u.tipoContrato || u['tipo contrato'] || u['Tipo Contrato'] || u.vinculacion || u['vinculación'] || u['Vinculación'] || u.dedicacion || '';
-            const contratoId = resolverIdContrato(rawContrato);
-
+            await client.query('SAVEPOINT fila_usuario');
             try {
-                // Insertar usuario
-                const userRes = await pool.query(`
+                const userRes = await client.query(`
                     INSERT INTO usuarios (nombres, apellidos, tipo_documento, numero_documento, correo, id_contrato, id_programa, activo)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
                     RETURNING id_usuario
-                `, [nombres, apellidos, tipoDoc, docStr, correoStr, contratoId, progId]);
-
+                `, [datos.nombres, datos.apellidos, datos.tipoDoc, datos.docNum, datos.correo, datos.idContrato, datos.progId]);
                 const idUsuario = userRes.rows[0].id_usuario;
-                if (progId) {
-                    programasInsertados.add(progId);
+
+                for (const idRol of datos.idsRol) {
+                    await client.query(
+                        'INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT (id_usuario, id_rol) DO NOTHING',
+                        [idUsuario, idRol]
+                    );
                 }
 
-                docsProcesadosEnLote.add(docStr);
-                correosProcesadosEnLote.add(correoStr);
+                const programasDirector = await sincronizarProgramasDirector(
+                    idUsuario, datos.rolesList, datos.programasGestion, datos.progId, client
+                );
 
-                // Insertar múltiples roles
-                for (const rName of rolesList) {
-                    const idRol = await resolverIdRol(rName);
-                    if (idRol) {
-                        await pool.query('INSERT INTO usuario_rol (id_usuario, id_rol) VALUES ($1, $2) ON CONFLICT DO NOTHING', [idUsuario, idRol]);
-                    }
-                }
-
-                // Un director importado gestiona su programa; los demás se agregan desde la edición
-                await sincronizarProgramasDirector(idUsuario, rolesList, null, progId);
-
-                // Asignar al periodo activo si tiene rol académico (Docente/Director)
-                const tieneRolAcademico = rolesList.some(r => {
+                const tieneRolAcademico = datos.rolesList.some((r) => {
                     const norm = normalizeRolName(r);
                     return norm === 'docente' || norm === 'director';
                 });
-
                 if (idPeriodoActivo && tieneRolAcademico) {
-                    await pool.query(`
-                        INSERT INTO docente_periodo (id_usuario, id_periodo)
-                        VALUES ($1, $2)
-                        ON CONFLICT DO NOTHING
-                    `, [idUsuario, idPeriodoActivo]);
+                    await client.query(
+                        'INSERT INTO docente_periodo (id_usuario, id_periodo) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                        [idUsuario, idPeriodoActivo]
+                    );
+                    if (datos.progId) programasInsertados.add(datos.progId);
                 }
 
+                await client.query('RELEASE SAVEPOINT fila_usuario');
+
+                docsEnLote.add(datos.docNum);
+                correosEnLote.add(datos.correo);
+                programasDirector.forEach((p) => directorPorPrograma.set(p, fila));
                 insertados++;
             } catch (err) {
-                errores.push({
-                    fila: filaIdx,
-                    usuario: `${nombres} ${apellidos}`,
-                    correo: correoStr,
-                    motivo: err.message
-                });
+                await client.query('ROLLBACK TO SAVEPOINT fila_usuario');
+                rechazar(err.code === '23505'
+                    ? 'Ya existe un usuario con esa identificación o ese correo.'
+                    : `No se pudo guardar la fila: ${err.message}`);
             }
         }
 
-        // Asegurar programa_periodo para cada programa insertado
-        if (idPeriodoActivo && insertados > 0) {
+        // Asegurar programa_periodo para cada programa con usuarios nuevos
+        if (idPeriodoActivo && programasInsertados.size > 0) {
+            const pensul = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1');
+            const idPensul = pensul.rows[0]?.id_pensulaca || 1;
             for (const pid of programasInsertados) {
-                const existeProgPer = await pool.query(
-                    'SELECT id_progperiodo FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
+                const existe = await client.query(
+                    'SELECT 1 FROM programa_periodo WHERE id_programa = $1 AND id_periodo = $2',
                     [pid, idPeriodoActivo]
                 );
-                if (existeProgPer.rows.length === 0) {
-                    const pensul = await pool.query(
-                        'SELECT id_pensulaca FROM pensul_academico WHERE activo = TRUE LIMIT 1'
+                if (existe.rows.length === 0) {
+                    await client.query(
+                        'INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca) VALUES ($1, $2, $3)',
+                        [idPeriodoActivo, pid, idPensul]
                     );
-                    const id_pensulaca = pensul.rows[0]?.id_pensulaca || 1;
-                    await pool.query(`
-                        INSERT INTO programa_periodo (id_periodo, id_programa, id_pensulaca)
-                        VALUES ($1, $2, $3)
-                    `, [idPeriodoActivo, pid, id_pensulaca]);
                 }
             }
         }
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         res.status(201).json({
-            mensaje: `Proceso completado. Se importaron ${insertados} usuarios exitosamente.`,
+            mensaje: `Proceso completado. Se importaron ${insertados} usuarios y ${errores.length} fila(s) no se pudieron importar.`,
             insertados,
             errores
         });
 
     } catch (error) {
-        await pool.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK').catch(() => {});
         console.error('Error en createBulk:', error);
-        res.status(500).json({ error: 'Fallo crítico al realizar la carga masiva.' });
+        res.status(500).json({ error: 'Fallo crítico al realizar la carga masiva. No se guardó ningún usuario.' });
+    } finally {
+        if (client) client.release();
     }
 };
 
@@ -1208,45 +1193,191 @@ const updatePerfil = async (req, res) => {
     }
 };
 
-const deleteUsuario = async (req, res) => {
-    const { id } = req.params;
+// ================================================================
+// Eliminación segura de usuarios
+// ----------------------------------------------------------------
+// Un usuario solo se puede eliminar si NO tiene datos relacionados. Antes el
+// borrado era en cascada: se llevaba por delante sus asignaciones de agenda y
+// las observaciones del director.
+//
+// Los vínculos se descubren en el catálogo de PostgreSQL (todas las claves
+// foráneas hacia usuarios), así que una tabla nueva que apunte a un usuario
+// bloquea el borrado sin tocar este código.
+//
+//  · Vínculos "de alta" (roles, período, niveles, programas del director) se
+//    crean con cualquier usuario: NO bloquean y se eliminan junto con él.
+//  · Todo lo demás (agendas, observaciones, revisiones, auditoría…) bloquea.
+//  · Nunca se puede eliminar el propio usuario ni al último Planeación activo.
+// ================================================================
+const TABLAS_DE_ALTA = ['usuario_rol', 'docente_periodo', 'usuario_nivel', 'director_programa'];
+
+const ETIQUETAS_VINCULO = {
+    'usuario_asignacion.id_usuario': 'Funciones sustantivas asignadas en agendas',
+    'observaciones_director.director_id': 'Observaciones registradas como director',
+    'asignacion_funciones.revisado_por': 'Agendas revisadas por este usuario',
+    'asignacion_funciones.visto_bueno_por': 'Vistos buenos dados a agendas',
+    'asignacion_funciones.asignacion_aprobada_por': 'Asignaciones aprobadas por este usuario',
+    'revision_corte.aprobado_por': 'Cortes de revisión aprobados',
+    'revision_corte.visto_bueno_por': 'Cortes con visto bueno',
+    'auditoria.id_usuario': 'Acciones registradas en la auditoría del sistema',
+};
+
+const entrecomillar = (identificador) => `"${String(identificador).split('"').join('""')}"`;
+
+/**
+ * Cuenta los datos que dependen del usuario.
+ * @returns {{bloqueantes: object[], deAlta: object[]}}
+ */
+const consultarVinculosUsuario = async (db, idUsuario) => {
+    const refs = (await db.query(`
+        SELECT n.nspname AS esquema, cl.relname AS tabla, a.attname AS columna
+        FROM pg_constraint c
+        JOIN pg_class cl ON cl.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = cl.relnamespace
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+        WHERE c.contype = 'f'
+          AND c.confrelid = 'public.usuarios'::regclass
+          AND array_length(c.conkey, 1) = 1
+    `)).rows;
+
+    // La auditoría guarda el id del usuario sin clave foránea
+    const auditoria = await db.query("SELECT to_regclass('public.auditoria') IS NOT NULL AS existe");
+    if (auditoria.rows[0].existe && !refs.some((r) => r.tabla === 'auditoria')) {
+        refs.push({ esquema: 'public', tabla: 'auditoria', columna: 'id_usuario' });
+    }
+
+    const bloqueantes = [];
+    const deAlta = [];
+    for (const ref of refs) {
+        const r = await db.query(
+            `SELECT COUNT(*)::int AS n FROM ${entrecomillar(ref.esquema)}.${entrecomillar(ref.tabla)} WHERE ${entrecomillar(ref.columna)} = $1`,
+            [idUsuario]
+        );
+        const cantidad = r.rows[0].n;
+        if (!cantidad) continue;
+        const item = {
+            tabla: ref.tabla,
+            columna: ref.columna,
+            cantidad,
+            descripcion: ETIQUETAS_VINCULO[`${ref.tabla}.${ref.columna}`] || `Registros en ${ref.tabla}`,
+        };
+        (TABLAS_DE_ALTA.includes(ref.tabla) ? deAlta : bloqueantes).push(item);
+    }
+    return { bloqueantes, deAlta };
+};
+
+/** Motivos por los que NUNCA se puede eliminar, aunque no tenga datos. */
+const motivosDeProteccion = async (db, idUsuario, idSolicitante) => {
+    const motivos = [];
+    if (Number(idUsuario) === Number(idSolicitante)) {
+        motivos.push('No puede eliminar su propio usuario.');
+    }
+    const esAdmin = await db.query(`
+        SELECT 1 FROM usuario_rol ur JOIN roles r ON r.id_rol = ur.id_rol
+        WHERE ur.id_usuario = $1 AND LOWER(r.nombre_rol) IN ('planeacion', 'admin') LIMIT 1
+    `, [idUsuario]);
+    if (esAdmin.rows.length > 0) {
+        const otros = await db.query(`
+            SELECT 1 FROM usuarios u
+            JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
+            JOIN roles r ON r.id_rol = ur.id_rol
+            WHERE u.activo = TRUE AND u.id_usuario <> $1 AND LOWER(r.nombre_rol) IN ('planeacion', 'admin') LIMIT 1
+        `, [idUsuario]);
+        if (otros.rows.length === 0) {
+            motivos.push('Es el único usuario activo de Planeación: sin él nadie podría administrar el sistema.');
+        }
+    }
+    return motivos;
+};
+
+// GET /api/usuarios/:id/vinculos — para que la pantalla explique si se puede eliminar y por qué no
+const getVinculos = async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Identificador de usuario inválido.' });
 
     try {
-        await pool.query('BEGIN');
+        const u = await pool.query('SELECT id_usuario, nombres, apellidos, correo FROM usuarios WHERE id_usuario = $1', [id]);
+        if (u.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
-        // 1. Eliminar relaciones de rol
-        await pool.query('DELETE FROM usuario_rol WHERE id_usuario = $1', [id]);
+        const { bloqueantes, deAlta } = await consultarVinculosUsuario(pool, id);
+        const motivos = await motivosDeProteccion(pool, id, req.user?.id);
 
-        // 2. Eliminar relaciones de periodos
-        await pool.query('DELETE FROM docente_periodo WHERE id_usuario = $1', [id]);
+        res.json({
+            usuario: u.rows[0],
+            puedeEliminar: motivos.length === 0 && bloqueantes.length === 0,
+            motivos,
+            bloqueantes,
+            deAlta,
+        });
+    } catch (error) {
+        console.error('Error en getVinculos:', error.message);
+        res.status(500).json({ error: 'No se pudieron revisar los datos relacionados del usuario.' });
+    }
+};
 
-        // 3. Eliminar relaciones de nivel académico
-        await pool.query('DELETE FROM usuario_nivel WHERE id_usuario = $1', [id]);
+const deleteUsuario = async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Identificador de usuario inválido.' });
 
-        // 4. Eliminar asignaciones de agenda
-        await pool.query('DELETE FROM usuario_asignacion WHERE id_usuario = $1', [id]);
+    let client;
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
 
-        // 5. Eliminar observaciones de director creadas por el usuario si era Director
-        await pool.query('DELETE FROM observaciones_director WHERE director_id = $1', [id]);
-
-        // 6. Desvincular revisión en asignacion_funciones
-        await pool.query('UPDATE asignacion_funciones SET revisado_por = NULL WHERE revisado_por = $1', [id]);
-
-        // 7. Eliminar finalmente el usuario
-        const result = await pool.query('DELETE FROM usuarios WHERE id_usuario = $1 RETURNING id_usuario', [id]);
-
-        if (result.rows.length === 0) {
-            await pool.query('ROLLBACK');
-            return res.status(404).json({ error: 'Usuario no encontrado' });
+        // Bloqueo de la fila: nadie puede asignarle datos mientras se decide
+        const u = await client.query(
+            'SELECT id_usuario, nombres, apellidos, correo, tipo_documento, numero_documento FROM usuarios WHERE id_usuario = $1 FOR UPDATE',
+            [id]
+        );
+        if (u.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Usuario no encontrado.' });
         }
 
-        await pool.query('COMMIT');
-        res.json({ message: 'Usuario eliminado exitosamente' });
+        // El servidor decide: no se confía en lo que haya mostrado la pantalla
+        const motivos = await motivosDeProteccion(client, id, req.user?.id);
+        const { bloqueantes, deAlta } = await consultarVinculosUsuario(client, id);
+        if (motivos.length > 0 || bloqueantes.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                error: motivos[0] || 'El usuario tiene datos relacionados y no se puede eliminar. Puede desactivarlo para quitarle el acceso.',
+                motivos,
+                bloqueantes,
+            });
+        }
+
+        // Solo quedan los vínculos de alta: se eliminan junto con el usuario
+        for (const tabla of TABLAS_DE_ALTA) {
+            await client.query(`DELETE FROM ${entrecomillar(tabla)} WHERE id_usuario = $1`, [id]);
+        }
+        await client.query('DELETE FROM usuarios WHERE id_usuario = $1', [id]);
+        await client.query('COMMIT');
+
+        const eliminado = u.rows[0];
+        await auditoria.registrar(req, {
+            accion: 'eliminar_usuario',
+            entidad: 'usuario',
+            detalle: {
+                id_usuario: eliminado.id_usuario,
+                nombre: `${eliminado.nombres} ${eliminado.apellidos}`.trim(),
+                correo: eliminado.correo,
+                documento: `${eliminado.tipo_documento || ''} ${eliminado.numero_documento || ''}`.trim(),
+                vinculos_de_alta_eliminados: deAlta,
+            },
+        });
+
+        res.json({ message: 'Usuario eliminado exitosamente', eliminado: { id_usuario: eliminado.id_usuario } });
 
     } catch (error) {
-        await pool.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK').catch(() => {});
+        // Alguien le asignó datos justo entre la revisión y el borrado: la base lo impide
+        if (error.code === '23503') {
+            return res.status(409).json({ error: 'El usuario acaba de recibir datos relacionados y ya no se puede eliminar.' });
+        }
         console.error('Error en deleteUsuario:', error.message);
-        res.status(500).json({ error: 'Error al eliminar el usuario' });
+        res.status(500).json({ error: 'Error al eliminar el usuario.' });
+    } finally {
+        if (client) client.release();
     }
 };
 
@@ -1256,9 +1387,14 @@ module.exports = {
     validar,
     create,
     createBulk,
+    normalizarTipoDocumento,
+    resolverProgramaEstricto,
     toggleActivo,
     update,
     deleteUsuario,
+    getVinculos,
+    consultarVinculosUsuario,
+    motivosDeProteccion,
     getPerfilCompleto,
     updatePerfil,
     getRolesAsignables

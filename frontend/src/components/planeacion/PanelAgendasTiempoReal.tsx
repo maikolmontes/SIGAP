@@ -29,11 +29,27 @@ const getEstadoDocente = (d: any) => {
 };
 
 // ─────────────────────────────────────────────────────────────
-// Panel de resultado de importación con advertencias detalladas
+// Panel de resultado de importación con advertencias detalladas.
+// En vista previa (simulacion = true) no se guardó nada: muestra el
+// mismo informe y los botones para confirmar o cancelar.
 // ─────────────────────────────────────────────────────────────
-function ImportResultPanel({ result, onClose }: { result: any; onClose: () => void }) {
+interface AlertaImportacion {
+  documento: string;
+  docente: string;
+  nivel: 'advertencia' | 'info';
+  mensaje: string;
+}
+
+function ImportResultPanel({ result, onClose, onConfirmar, confirmando }: {
+  result: any;
+  onClose: () => void;
+  onConfirmar?: () => void;
+  confirmando?: boolean;
+}) {
   const [showNoEncontrados, setShowNoEncontrados] = useState(true);
   const [showErrores, setShowErrores] = useState(false);
+  const [showAlertas, setShowAlertas] = useState(true);
+  const [verInformativas, setVerInformativas] = useState(false);
 
   if (!result.success) {
     return (
@@ -47,57 +63,153 @@ function ImportResultPanel({ result, onClose }: { result: any; onClose: () => vo
     );
   }
 
+  const esVistaPrevia = !!result.data?.simulacion;
   const r = result.data?.resultados || {};
   const noEncontrados: any[] = r.docentesNoEncontrados || [];
   const erroresTecnicos: string[] = r.detallesErrores || [];
-  const procesados: number = r.procesados || 0;
+  const alertas: AlertaImportacion[] = r.alertas || [];
+  const clasesOtrosProgramas: { programa: string; filas: number }[] = r.clasesOtrosProgramas || [];
+  const procesados: number = (r.procesados || 0) + (r.actualizados || 0);
   const totalNoEncontrados: number = r.totalNoEncontrados || 0;
   const tieneAdvertencias = totalNoEncontrados > 0;
   const tieneErrores = erroresTecnicos.length > 0;
 
+  // Alertas agrupadas por docente; las informativas se muestran a pedido
+  const visibles = verInformativas ? alertas : alertas.filter(a => a.nivel === 'advertencia');
+  const porDocente = new Map<string, { docente: string; items: AlertaImportacion[] }>();
+  for (const a of visibles) {
+    if (!porDocente.has(a.documento)) porDocente.set(a.documento, { docente: a.docente, items: [] });
+    porDocente.get(a.documento)!.items.push(a);
+  }
+  const totalAdvertencias = alertas.filter(a => a.nivel === 'advertencia').length;
+  const totalInformativas = alertas.length - totalAdvertencias;
+
+  const cabecera = esVistaPrevia
+    ? { fondo: 'bg-indigo-50 border-indigo-200', icono: <Info className="w-6 h-6 text-indigo-600 shrink-0 mt-0.5" />, titulo: 'text-indigo-900', texto: 'text-indigo-700' }
+    : { fondo: 'bg-green-50 border-green-200', icono: <CheckCircle className="w-6 h-6 text-green-600 shrink-0 mt-0.5" />, titulo: 'text-green-900', texto: 'text-green-700' };
+
   return (
     <div className="mb-6 rounded-2xl border overflow-hidden shadow-sm">
-      {/* Cabecera verde */}
-      <div className="bg-green-50 border-b border-green-200 px-5 py-4 flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <CheckCircle className="w-6 h-6 text-green-600 shrink-0 mt-0.5" />
+      {/* Cabecera */}
+      <div className={`${cabecera.fondo} border-b px-5 py-4 flex items-start justify-between gap-3`}>
+        <div className="flex items-start gap-3">
+          {cabecera.icono}
           <div>
-            <p className="font-bold text-green-900">{result.tipo} procesada correctamente</p>
-            <p className="text-sm text-green-700 mt-0.5">
-              <span className="font-semibold">{procesados}</span> registro{procesados !== 1 ? 's' : ''} procesado{procesados !== 1 ? 's' : ''}
+            <p className={`font-bold ${cabecera.titulo}`}>
+              {esVistaPrevia ? `Vista previa de la ${result.tipo.toLowerCase()} — todavía no se guardó nada` : `${result.tipo} procesada correctamente`}
+            </p>
+            <p className={`text-sm mt-0.5 ${cabecera.texto}`}>
+              <span className="font-semibold">{procesados}</span> de {r.filasLeidas ?? procesados} fila{(r.filasLeidas ?? procesados) !== 1 ? 's' : ''} {esVistaPrevia ? 'se cargarían' : 'cargadas'}
+              {' '}para <span className="font-semibold">{r.docentesProcesados ?? 0}</span> docente{r.docentesProcesados !== 1 ? 's' : ''}
+              {r.contratosActualizados > 0 && <> · {r.contratosActualizados} contrato{r.contratosActualizados !== 1 ? 's' : ''} {esVistaPrevia ? 'se actualizarían' : 'actualizados'} desde la columna VIN</>}
             </p>
           </div>
         </div>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 mt-0.5"><X className="w-5 h-5" /></button>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 mt-0.5" aria-label="Cerrar"><X className="w-5 h-5" /></button>
       </div>
 
       {/* Resumen de contadores */}
-      <div className="bg-white px-5 py-3 flex flex-wrap gap-4 border-b border-gray-100">
-        <div className="flex items-center gap-2 text-sm">
+      <div className="bg-white px-5 py-3 flex flex-wrap gap-x-5 gap-y-2 border-b border-gray-100 text-sm">
+        <span className="flex items-center gap-2 text-gray-700">
           <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
-          <span className="text-gray-700"><span className="font-semibold text-gray-900">{procesados}</span> procesados</span>
-        </div>
+          <span className="font-semibold text-gray-900">{r.procesados || 0}</span> nuevas
+        </span>
+        {(r.actualizados || 0) > 0 && (
+          <span className="flex items-center gap-2 text-gray-700">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
+            <span className="font-semibold text-gray-900">{r.actualizados}</span> actualizadas
+          </span>
+        )}
+        {(r.conservados || 0) > 0 && (
+          <span className="flex items-center gap-2 text-gray-700">
+            <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" />
+            <span className="font-semibold text-gray-900">{r.conservados}</span> conservadas (ya diligenciadas)
+          </span>
+        )}
         {tieneAdvertencias && (
-          <div className="flex items-center gap-2 text-sm">
+          <span className="flex items-center gap-2 text-gray-700">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
-            <span className="text-gray-700"><span className="font-semibold text-amber-700">{totalNoEncontrados}</span> docente{totalNoEncontrados !== 1 ? 's' : ''} no encontrado{totalNoEncontrados !== 1 ? 's' : ''}</span>
-          </div>
+            <span className="font-semibold text-amber-700">{totalNoEncontrados}</span> docente{totalNoEncontrados !== 1 ? 's' : ''} omitido{totalNoEncontrados !== 1 ? 's' : ''}
+          </span>
+        )}
+        {totalAdvertencias > 0 && (
+          <span className="flex items-center gap-2 text-gray-700">
+            <span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />
+            <span className="font-semibold text-orange-700">{r.docentesConAlertas}</span> docente{r.docentesConAlertas !== 1 ? 's' : ''} con alertas
+          </span>
         )}
         {tieneErrores && (
-          <div className="flex items-center gap-2 text-sm">
+          <span className="flex items-center gap-2 text-gray-700">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
-            <span className="text-gray-700"><span className="font-semibold text-red-700">{erroresTecnicos.length}</span> error{erroresTecnicos.length !== 1 ? 'es' : ''} técnico{erroresTecnicos.length !== 1 ? 's' : ''}</span>
-          </div>
-        )}
-        {!tieneAdvertencias && !tieneErrores && (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />
-            <span className="text-gray-500">Sin advertencias — todos los docentes fueron encontrados</span>
-          </div>
+            <span className="font-semibold text-red-700">{erroresTecnicos.length}</span> error{erroresTecnicos.length !== 1 ? 'es' : ''}
+          </span>
         )}
       </div>
 
-      {/* Panel: Docentes no encontrados */}
+      {/* Clases de programas que no están registrados en SIGAP */}
+      {clasesOtrosProgramas.length > 0 && (
+        <div className="px-5 py-2.5 bg-slate-50 border-b border-gray-100 text-xs text-slate-600 flex items-start gap-1.5">
+          <BookOpen className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>
+            Clases en programas no registrados en SIGAP, cargadas como Docencia Directa:{' '}
+            {clasesOtrosProgramas.map(c => `${c.programa} (${c.filas})`).join(', ')}.
+          </span>
+        </div>
+      )}
+
+      {/* Panel: Alertas de la carga (horas vs contrato, 30 %, actividades) */}
+      {alertas.length > 0 && (
+        <div className="border-b border-orange-100">
+          <button
+            onClick={() => setShowAlertas(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 bg-orange-50 hover:bg-orange-100 transition-colors text-left"
+          >
+            <span className="flex items-center gap-2 font-semibold text-orange-800 text-sm">
+              <AlertCircle className="w-4 h-4 text-orange-600" />
+              Revisión de la carga: {totalAdvertencias} alerta{totalAdvertencias !== 1 ? 's' : ''}
+              {totalInformativas > 0 && <span className="font-normal text-orange-700">· {totalInformativas} nota{totalInformativas !== 1 ? 's' : ''}</span>}
+            </span>
+            {showAlertas ? <ChevronUp className="w-4 h-4 text-orange-600" /> : <ChevronDown className="w-4 h-4 text-orange-600" />}
+          </button>
+          {showAlertas && (
+            <div className="bg-white">
+              <div className="px-5 py-2 bg-orange-50/50 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-orange-700 flex items-start gap-1.5">
+                  <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  Las alertas no impiden la carga: el listado es la asignación oficial y el Director la revisa.
+                </p>
+                {totalInformativas > 0 && (
+                  <label className="text-xs text-gray-600 flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={verInformativas} onChange={e => setVerInformativas(e.target.checked)} />
+                    Ver también las notas informativas
+                  </label>
+                )}
+              </div>
+              <ul className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+                {[...porDocente].map(([documento, g]) => (
+                  <li key={documento} className="px-5 py-2.5">
+                    <p className="text-sm font-semibold text-gray-800">
+                      {g.docente} <span className="font-mono text-xs text-gray-400">{documento}</span>
+                    </p>
+                    <ul className="mt-1 space-y-0.5">
+                      {g.items.map((a, i) => (
+                        <li key={i} className={`text-xs ${a.nivel === 'advertencia' ? 'text-orange-700' : 'text-gray-500'}`}>
+                          {a.nivel === 'advertencia' ? '⚠ ' : '· '}{a.mensaje}
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+                {porDocente.size === 0 && (
+                  <li className="px-5 py-3 text-xs text-gray-500">Sin alertas; marque la casilla para ver las notas informativas.</li>
+                )}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Panel: Docentes omitidos */}
       {tieneAdvertencias && (
         <div className="border-b border-amber-100">
           <button
@@ -107,7 +219,7 @@ function ImportResultPanel({ result, onClose }: { result: any; onClose: () => vo
             <div className="flex items-center gap-2">
               <UserX className="w-4 h-4 text-amber-600" />
               <span className="font-semibold text-amber-800 text-sm">
-                ⚠️ {totalNoEncontrados} docente{totalNoEncontrados !== 1 ? 's' : ''} del Excel no existe{totalNoEncontrados !== 1 ? 'n' : ''} en el sistema
+                {totalNoEncontrados} docente{totalNoEncontrados !== 1 ? 's' : ''} del Excel no se {totalNoEncontrados !== 1 ? 'cargaron' : 'cargó'} con este programa
               </span>
             </div>
             {showNoEncontrados
@@ -120,7 +232,7 @@ function ImportResultPanel({ result, onClose }: { result: any; onClose: () => vo
               <div className="px-5 py-2 bg-amber-50/50">
                 <p className="text-xs text-amber-700 flex items-start gap-1.5">
                   <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  Las filas de estos docentes fueron <strong>omitidas</strong>. Regístralos en <strong>Gestión de Usuarios</strong> y vuelve a importar.
+                  Si no existe, regístrelo en <strong>Docentes</strong> y vuelva a importar. Si pertenece a otro programa, su carga se importa con el listado de ese programa.
                 </p>
               </div>
               <div className="overflow-x-auto">
@@ -129,6 +241,7 @@ function ImportResultPanel({ result, onClose }: { result: any; onClose: () => vo
                     <tr>
                       <th className="px-4 py-2.5 text-left font-bold">Documento</th>
                       <th className="px-4 py-2.5 text-left font-bold">Nombre</th>
+                      <th className="px-4 py-2.5 text-left font-bold">Motivo</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -136,6 +249,7 @@ function ImportResultPanel({ result, onClose }: { result: any; onClose: () => vo
                       <tr key={idx} className="hover:bg-amber-50/30 transition-colors">
                         <td className="px-4 py-2.5 font-semibold text-gray-800 font-mono">{d.documento}</td>
                         <td className="px-4 py-2.5 text-gray-700">{d.nombre || <span className="text-gray-400 italic">—</span>}</td>
+                        <td className="px-4 py-2.5 text-gray-500 text-xs">{d.motivo}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -146,7 +260,7 @@ function ImportResultPanel({ result, onClose }: { result: any; onClose: () => vo
         </div>
       )}
 
-      {/* Panel: Errores técnicos */}
+      {/* Panel: Errores */}
       {tieneErrores && (
         <div>
           <button
@@ -156,7 +270,7 @@ function ImportResultPanel({ result, onClose }: { result: any; onClose: () => vo
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-red-600" />
               <span className="font-semibold text-red-800 text-sm">
-                {erroresTecnicos.length} error{erroresTecnicos.length !== 1 ? 'es' : ''} técnico{erroresTecnicos.length !== 1 ? 's' : ''} (filas sin inscripción u otros)
+                {erroresTecnicos.length} fila{erroresTecnicos.length !== 1 ? 's' : ''} con error (no se cargaron)
               </span>
             </div>
             {showErrores
@@ -171,6 +285,23 @@ function ImportResultPanel({ result, onClose }: { result: any; onClose: () => vo
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {/* Confirmación de la vista previa */}
+      {esVistaPrevia && onConfirmar && (
+        <div className="bg-gray-50 px-5 py-3 flex flex-wrap items-center justify-end gap-3 border-t border-gray-100">
+          <button onClick={onClose} disabled={confirmando} className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-200 rounded-lg">
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirmar}
+            disabled={confirmando || procesados === 0}
+            className="px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-300 disabled:cursor-not-allowed rounded-lg inline-flex items-center gap-2"
+          >
+            {confirmando ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+            {confirmando ? 'Guardando…' : `Confirmar ${result.tipo.toLowerCase()}`}
+          </button>
         </div>
       )}
     </div>
@@ -200,6 +331,8 @@ export default function PanelAgendasTiempoReal({
   const [modalEliminarAbierto, setModalEliminarAbierto] = useState(false);
   const [confirmacionEliminar, setConfirmacionEliminar] = useState('');
   const [uploadResult, setUploadResult] = useState<any>(null);
+  // Listado en vista previa, esperando que Planeación confirme
+  const [listadoPendiente, setListadoPendiente] = useState<{ file: File; endpoint: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('');
   const [filtroContrato, setFiltroContrato] = useState('');
@@ -324,8 +457,22 @@ export default function PanelAgendasTiempoReal({
     }
   };
 
+  // Subir el listado. Primero va en vista previa (simular=true): el servidor
+  // procesa todo y revierte, y Planeación revisa el informe antes de confirmar.
+  const enviarListado = async (file: File, endpoint: string, simular: boolean) => {
+    const formData = new FormData();
+    formData.append('archivo', file);
+    formData.append('id_programa', String(programaSel));
+    const res = await api.post(`/director/${endpoint}${simular ? '?simular=true' : ''}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return { success: true, data: res.data, tipo: endpoint === 'importar' ? 'Importación' : 'Actualización' };
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, endpoint: string) => {
     const file = e.target.files?.[0];
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (fileUpdateRef.current) fileUpdateRef.current.value = '';
     if (!file) return;
     if (!programaSel) {
       alert('Debes seleccionar una facultad y un programa antes de importar.');
@@ -333,21 +480,30 @@ export default function PanelAgendasTiempoReal({
     }
     setUploading(true);
     setUploadResult(null);
-    const formData = new FormData();
-    formData.append('archivo', file);
-    formData.append('id_programa', String(programaSel));
+    setListadoPendiente(null);
     try {
-      const res = await api.post(`/director/${endpoint}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setUploadResult({ success: true, data: res.data, tipo: endpoint === 'importar' ? 'Importación' : 'Actualización' });
-      cargarDashboard();
+      setUploadResult(await enviarListado(file, endpoint, true));
+      setListadoPendiente({ file, endpoint });
     } catch (err: any) {
       setUploadResult({ success: false, error: err.response?.data?.error || 'Error de conexión.' });
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      if (fileUpdateRef.current) fileUpdateRef.current.value = '';
+    }
+  };
+
+  const confirmarListado = async () => {
+    if (!listadoPendiente) return;
+    setUploading(true);
+    try {
+      setUploadResult(await enviarListado(listadoPendiente.file, listadoPendiente.endpoint, false));
+      setListadoPendiente(null);
+      cargarDashboard();
+    } catch (err: unknown) {
+      const mensaje = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
+      setUploadResult({ success: false, error: mensaje || 'Error de conexión.' });
+      setListadoPendiente(null);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -389,6 +545,8 @@ export default function PanelAgendasTiempoReal({
   const metricas = data?.metricas || { total: 0, aceptadas: 0, pendientes: 0, total_horas: 0 };
   const distribucion: any[] = data?.distribucion || [];
   const importacionRealizada = data?.importacionRealizada || false;
+  // "Importar (Nuevo)" se bloquea solo para el programa que ya tiene carga en el período
+  const importadoEnPrograma = !!programaSel && (data?.programasImportados || []).includes(programaSel);
   const puedeImportar = !!periodoActivo;
 
   const docentesFiltrados = docentes.filter((d: any) => {
@@ -552,17 +710,17 @@ export default function PanelAgendasTiempoReal({
               <>
                 {puedeCrear && (
                   <button
-                    disabled={uploading || importacionRealizada}
+                    disabled={uploading || importadoEnPrograma}
                     onClick={() => fileInputRef.current?.click()}
-                    title={importacionRealizada ? 'Ya se importó para este periodo. Use Actualizar.' : 'Importar desde cero para el periodo activo'}
+                    title={importadoEnPrograma ? 'Este programa ya tiene carga en el período. Use Actualizar.' : 'Importar desde cero para el periodo activo'}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md ${
-                      importacionRealizada
+                      importadoEnPrograma
                         ? 'bg-gray-500/40 text-gray-400 cursor-not-allowed border border-gray-600/30'
                         : uploading ? 'bg-indigo-400 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
                     }`}
                   >
                     {uploading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <UploadCloud className="w-4 h-4" />}
-                    {importacionRealizada ? 'Ya Importado ✓' : uploading ? 'Procesando...' : 'Importar (Nuevo)'}
+                    {importadoEnPrograma ? 'Ya Importado ✓' : uploading ? 'Procesando...' : 'Importar (Nuevo)'}
                   </button>
                 )}
                 {puedeEditar && (
@@ -578,7 +736,7 @@ export default function PanelAgendasTiempoReal({
                 <button onClick={cargarDashboard} className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-white text-sm font-bold transition-all">
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Actualizar
                 </button>
-                {importacionRealizada && puedeEliminar && (
+                {importadoEnPrograma && puedeEliminar && (
                   <button
                     disabled={uploading}
                     onClick={handleEliminarAgendas}
@@ -597,7 +755,12 @@ export default function PanelAgendasTiempoReal({
 
       {/* RESULTADO IMPORTACIÓN */}
       {uploadResult && (
-        <ImportResultPanel result={uploadResult} onClose={() => setUploadResult(null)} />
+        <ImportResultPanel
+          result={uploadResult}
+          onClose={() => { setUploadResult(null); setListadoPendiente(null); }}
+          onConfirmar={listadoPendiente ? confirmarListado : undefined}
+          confirmando={uploading}
+        />
       )}
 
       {/* CONFIRMACIÓN DE ELIMINACIÓN: hay que escribir el nombre del programa */}

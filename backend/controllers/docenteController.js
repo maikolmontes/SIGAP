@@ -1,4 +1,5 @@
 const pool = require('../db/connection');
+const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 
 const getDashboard = async (req, res) => {
     const idUsuario = req.user.id;
@@ -11,7 +12,7 @@ const getDashboard = async (req, res) => {
                 u.apellidos,
                 pa.nombre_programa AS programa,
                 tc.tipo AS tipo_contrato,
-                COALESCE(tc.horas_contrato, 40) AS total_horas_contrato
+                COALESCE(tc.horas_contrato, 0) AS total_horas_contrato
             FROM USUARIOS u
             JOIN TIPO_CONTRATO tc ON tc.id_contrato = u.id_contrato
             JOIN PROGRAMA_ACADEMICO pa ON pa.id_programa = u.id_programa
@@ -157,33 +158,26 @@ const getDashboard = async (req, res) => {
 
         // Procesar datos - distribución de horas
         let horasDirectas = 0;
-        let horasInvestigacion = 0;
+        let horasIndirectas = 0;
 
         const distribucionHoras = distribucionQuery.rows.map(row => {
             const horas = parseFloat(row.horas_asignadas) || 0;
-            if (row.funcion === 'Docencia Directa') horasDirectas = horas;
-            if (row.funcion === 'Investigación') horasInvestigacion = horas;
+            if (row.funcion === 'Docencia Directa') horasDirectas += horas;
+            if (row.funcion === 'Docencia Indirecta') horasIndirectas += horas;
             return {
                 funcion: row.funcion,
                 horas: horas
             };
         });
 
-        // 1. Docencia Indirecta (automática)
-        const docenciaIndirecta = Math.round(horasDirectas * 0.3);
-        const indexIndirecta = distribucionHoras.findIndex(d => d.funcion === 'Docencia Indirecta');
-        if (indexIndirecta !== -1) {
-            distribucionHoras[indexIndirecta].horas = docenciaIndirecta;
-        } else if (horasDirectas > 0) {
-            distribucionHoras.push({ funcion: 'Docencia Indirecta', horas: docenciaIndirecta });
-        }
+        // 1. Docencia Indirecta: se muestra la asignada y se compara con el 30 %
+        //    (antes se reemplazaba por el 30 % y el tablero no cuadraba con la agenda)
+        const indirecta = revisarIndirecta(horasDirectas, horasIndirectas);
 
         const totalHoras = distribucionHoras.reduce((sum, item) => sum + item.horas, 0);
 
-        // 2. Validación de consistencia
-        const tipoContrato = (docenteRow.tipo_contrato || '').toUpperCase();
-        const horasContrato = parseFloat(docenteRow.total_horas_contrato) || 40;
-        let perfilDocente = (totalHoras === horasContrato) ? "AGENDA CORRECTA" : "INCONSISTENCIAS EN AGENDA AC 30";
+        // 2. Validación de consistencia: total de horas frente al contrato
+        const perfilDocente = perfilAgenda(totalHoras, docenteRow.total_horas_contrato);
 
         // Avance por función sustantiva basado en indicadores reales
         const avanceSemana8 = avanceQuery.rows.map(row => {
@@ -205,14 +199,13 @@ const getDashboard = async (req, res) => {
 
         const totalHorasEjecucion = parseFloat(horasEjecucionQuery.rows[0]?.total_ejecucion) || 0;
 
-        // Avance general: promedio de (ejec_8 + ejec_16) / meta por cada función
-        const avanceGeneral = avanceSemana8.length > 0
-            ? Math.round(avanceSemana8.reduce((sum, item) => {
-                const meta = item.meta || 0;
-                const total = (item.ejec8 || 0) + (item.ejec16 || 0);
-                return sum + (meta > 0 ? Math.min((total / meta) * 100, 100) : 0);
-              }, 0) / avanceSemana8.length)
-            : 0;
+        // Avance general = Σ ejecución / Σ meta, como el "% de logro" del formato
+        // institucional. Promediar el % de cada función daba el mismo peso a una
+        // función de 1 h que a una de 20 h (49,4 % en el formato vs 43,3 %).
+        const sumaMetas = avanceSemana8.reduce((s, item) => s + (item.meta || 0), 0);
+        const sumaEjecucion = avanceSemana8.reduce(
+            (s, item) => s + Math.min((item.ejec8 || 0) + (item.ejec16 || 0), item.meta || 0), 0);
+        const avanceGeneral = sumaMetas > 0 ? Math.round((sumaEjecucion / sumaMetas) * 100) : 0;
 
         // Estado de la agenda basado en funciones aceptadas
         const funcionesAceptadas = estadoFuncionesQuery.rows.find(r => r.estado_agenda === 'Aceptado');
@@ -253,8 +246,11 @@ const getDashboard = async (req, res) => {
                 periodo: periodoLabel,
                 cierre: periodoRow?.fecha_fin || null,
                 periodoActivo: !!periodoRow?.activo,
-                totalHorasContrato: parseFloat(docenteRow.total_horas_contrato) || 40,
-                perfilDocente: perfilDocente
+                totalHorasContrato: parseFloat(docenteRow.total_horas_contrato) || 0,
+                perfilDocente: perfilDocente,
+                docenciaIndirecta: indirecta.asignada,
+                docenciaIndirectaEsperada: indirecta.esperada,
+                indirectaCumpleAc030: indirecta.cumple
             },
             metricas: {
                 totalHoras,

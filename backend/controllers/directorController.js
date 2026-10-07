@@ -1,9 +1,13 @@
 const pool = require('../db/connection');
-const xlsx = require('xlsx');
 const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
 const notificaciones = require('../services/notificacionesService');
 const { respaldarAgendas } = require('../services/respaldoAgendasService');
 const auditoria = require('../services/auditoriaService');
+const { condicionCatalogo } = require('../utils/catalogo');
+const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
+const {
+    leerListado, clasificarFila, clasificarVinculacion, revisarCarga, normalizar, TIPO_CONTRATO_POR_SIGLA,
+} = require('../utils/listadoAgenda');
 
 const parseSemestre = (semestreStr) => {
     if (!semestreStr) return { numero: '1', grupo: 'A' };
@@ -19,852 +23,466 @@ const parseSemestre = (semestreStr) => {
     return { numero: str, grupo: 'A' };
 };
 
-const mapFuncionSustantiva = async (client, programaStr) => {
-    if (!programaStr) return "Otra Función";
-    const str = String(programaStr).trim();
-    const strLower = str.toLowerCase();
-    
-    // Buscar en el catálogo maestro (funciones sin usuario asignado) usando fuzzy
-    const catalogRes = await client.query(`
-        SELECT DISTINCT funcion_sustantiva FROM asignacion_funciones
-        WHERE NOT EXISTS (SELECT 1 FROM usuario_asignacion ua WHERE ua.id_funciones = asignacion_funciones.id_funciones)
+// ================================================================
+// Importación del listado de asignación académica
+// ----------------------------------------------------------------
+// Un solo motor para los dos botones de Planeación:
+//   - importar:   reemplaza lo precargado de los docentes del listado,
+//                 pero conserva las funciones que el docente o el
+//                 Director ya trabajaron;
+//   - actualizar: solo agrega o actualiza actividades, no borra nada.
+// Con ?simular=true hace todo dentro de la transacción y la revierte:
+// devuelve el mismo informe sin guardar nada (vista previa).
+// Leer y clasificar las filas es trabajo de utils/listadoAgenda.js.
+// ================================================================
+
+// Una función en estos estados ya fue trabajada: importar no la toca
+const ESTADOS_TRABAJADOS = ['Aceptado', 'Aprobada', 'Devuelta'];
+
+const SIGLA_POR_CONTRATO = { 'tiempo completo': 'TC', 'medio tiempo': 'MT', 'hora catedra': 'HC' };
+
+const cargarContextoListado = async (client) => {
+    const programas = (await client.query('SELECT id_programa, nombre_programa FROM programa_academico')).rows;
+
+    const catalogo = new Map();
+    const cat = await client.query(`
+        SELECT af.funcion_sustantiva, aa.rol_seleccionado
+        FROM asignacion_funciones af
+        JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones
+        WHERE ${condicionCatalogo('af')}
+        ORDER BY af.id_funciones, aa.id_asignacionact
     `);
-    
-    // Mapeo de keywords a funciones del catálogo
-    const keywordMap = [
-        { keywords: ['investigacion', 'investigación'], funcion: null },
-        { keywords: ['admin'], funcion: null },
-        { keywords: ['calidad', 'aseguramiento'], funcion: null },
-        { keywords: ['indirecta'], funcion: null },
-        { keywords: ['vicerrectoria', 'vicerrectoría', 'proyeccion', 'proyección'], funcion: null },
-    ];
-    
-    // Llenar con los nombres reales del catálogo
-    for (const catRow of catalogRes.rows) {
-        const catLower = catRow.funcion_sustantiva.toLowerCase();
-        for (const km of keywordMap) {
-            if (km.keywords.some(kw => catLower.includes(kw))) {
-                km.funcion = catRow.funcion_sustantiva; // Nombre exacto de la BD
-                break;
-            }
-        }
+    for (const r of cat.rows) {
+        if (!r.rol_seleccionado) continue;
+        if (!catalogo.has(r.funcion_sustantiva)) catalogo.set(r.funcion_sustantiva, []);
+        const roles = catalogo.get(r.funcion_sustantiva);
+        if (!roles.includes(r.rol_seleccionado)) roles.push(r.rol_seleccionado);
     }
-    
-    // Buscar match con el texto del Excel
-    for (const km of keywordMap) {
-        if (km.funcion && km.keywords.some(kw => strLower.includes(kw))) {
-            return km.funcion;
-        }
+
+    const contratos = (await client.query('SELECT id_contrato, tipo, horas_contrato FROM tipo_contrato')).rows;
+    const contratoPorSigla = {};
+    for (const [sigla, nombre] of Object.entries(TIPO_CONTRATO_POR_SIGLA)) {
+        const c = contratos.find((x) => normalizar(x.tipo) === nombre);
+        if (c) contratoPorSigla[sigla] = c;
     }
-    
-    // "Horas indirectas" como texto genérico
-    if (strLower.includes('indirecta')) return 'Docencia Indirecta';
-    
-    // Verificar si es un Programa Académico → Docencia Directa
-    const { rows } = await client.query('SELECT nombre_programa FROM programa_academico WHERE LOWER(nombre_programa) = $1', [strLower]);
-    if (rows.length > 0) {
-        return 'Docencia Directa';
-    }
-    
-    return str;
+
+    const pensul = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = true LIMIT 1');
+    return {
+        programas,
+        catalogo,
+        contratoPorSigla,
+        idPensulAca: pensul.rows[0]?.id_pensulaca || 1,
+        // Cachés de la transacción; se vacían si se revierte un docente
+        semestres: new Map(),
+        grupos: new Map(),
+        semestresGrupos: new Set(),
+    };
 };
 
-// ================================================================
-// Fuzzy Matching mejorado:
-// Compara por palabras clave. Si al menos 2 palabras significativas
-// del Excel coinciden con las del catálogo, es un match.
-// ================================================================
-const fuzzyMatch = (excelStr, dbStr) => {
-    if (!excelStr || !dbStr) return false;
-    
-    const normalize = (s) => String(s).toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/[-_]/g, ' ')
-        .replace(/[^a-z0-9\s]/g, '')
-        .trim();
-    
-    const excelNorm = normalize(excelStr);
-    const dbNorm = normalize(dbStr);
-    
-    // Match exacto
-    if (excelNorm === dbNorm) return true;
-    
-    // Uno contiene al otro
-    if (excelNorm.includes(dbNorm) || dbNorm.includes(excelNorm)) return true;
-    
-    // Match por palabras clave (ignorar palabras cortas como "de", "la", "el", etc.)
-    const stopWords = new Set(['de', 'la', 'el', 'los', 'las', 'del', 'en', 'y', 'a', 'e', 'o', 'u', 'por', 'para', 'con', 'cual']);
-    const getKeywords = (s) => s.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
-    
-    const excelWords = getKeywords(excelNorm);
-    const dbWords = getKeywords(dbNorm);
-    
-    if (excelWords.length === 0 || dbWords.length === 0) return false;
-    
-    // Contar cuántas palabras del Excel aparecen en el texto de la BD
-    let matchCount = 0;
-    for (const ew of excelWords) {
-        for (const dw of dbWords) {
-            if (ew.includes(dw) || dw.includes(ew)) {
-                matchCount++;
-                break;
-            }
-        }
+const obtenerSemestreGrupo = async (client, ctx, semestreRaw) => {
+    const { numero, grupo } = parseSemestre(semestreRaw);
+
+    let idSemestre = ctx.semestres.get(numero);
+    if (!idSemestre) {
+        const r = await client.query('SELECT id_semestre FROM semestres WHERE nombre_sem = $1 ORDER BY id_semestre LIMIT 1', [numero]);
+        idSemestre = r.rows[0]?.id_semestre || (await client.query(
+            'INSERT INTO semestres (id_pensulaca, nombre_sem) VALUES ($1, $2) RETURNING id_semestre',
+            [ctx.idPensulAca, numero]
+        )).rows[0].id_semestre;
+        ctx.semestres.set(numero, idSemestre);
     }
-    
-    // Si coinciden al menos 2 palabras, o si coincide más del 50% de las palabras del Excel
-    const threshold = Math.min(2, Math.ceil(excelWords.length * 0.5));
-    return matchCount >= threshold;
+
+    let idGrupo = ctx.grupos.get(grupo);
+    if (!idGrupo) {
+        const r = await client.query('SELECT id_grupos FROM grupos WHERE nombre_grupo = $1 ORDER BY id_grupos LIMIT 1', [grupo]);
+        idGrupo = r.rows[0]?.id_grupos || (await client.query(
+            'INSERT INTO grupos (nombre_grupo, jornada) VALUES ($1, $2) RETURNING id_grupos',
+            [grupo, 'Diurna']
+        )).rows[0].id_grupos;
+        ctx.grupos.set(grupo, idGrupo);
+    }
+
+    const claveSG = `${idSemestre}-${idGrupo}`;
+    if (!ctx.semestresGrupos.has(claveSG)) {
+        const sg = await client.query('SELECT 1 FROM semestres_grupos WHERE id_semestre = $1 AND id_grupos = $2', [idSemestre, idGrupo]);
+        if (sg.rows.length === 0) {
+            await client.query('INSERT INTO semestres_grupos (id_semestre, id_grupos, activo) VALUES ($1, $2, true)', [idSemestre, idGrupo]);
+        }
+        ctx.semestresGrupos.add(claveSG);
+    }
+    return { idSemestre, idGrupo };
 };
 
-// ================================================================
-// Calcular score de match para ranking
-// ================================================================
-const calcFuzzyScore = (excelStr, dbStr) => {
-    const exAlpha = String(excelStr).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
-    const dbAlpha = String(dbStr).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (exAlpha === dbAlpha) return 1000;
-    
-    const excelWords = String(excelStr).toLowerCase().split(/\s+/);
-    const dbWords = String(dbStr).toLowerCase().split(/\s+/);
-    let score = 0;
-    for (const ew of excelWords) {
-        for (const dw of dbWords) {
-            if (ew.length > 2 && dw.length > 2 && (ew.includes(dw) || dw.includes(ew))) {
-                score++;
-                break;
-            }
-        }
+/**
+ * Importar desde cero: borra las funciones precargadas del docente en el período
+ * que nadie ha trabajado todavía. Devuelve los nombres de las funciones conservadas.
+ */
+const limpiarCargaPrecargada = async (client, idUsuario, idPeriodo) => {
+    const funcs = await client.query(`
+        SELECT af.id_funciones, af.funcion_sustantiva, af.estado_agenda,
+               EXISTS (
+                   SELECT 1 FROM asignacion_actividades aa
+                   JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact
+                   WHERE aa.id_funciones = af.id_funciones
+               ) AS diligenciada
+        FROM usuario_asignacion ua
+        JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones
+        WHERE ua.id_usuario = $1 AND af.id_periodo = $2
+    `, [idUsuario, idPeriodo]);
+
+    const conservadas = new Set();
+    const aBorrar = [];
+    for (const f of funcs.rows) {
+        if (ESTADOS_TRABAJADOS.includes(f.estado_agenda) || f.diligenciada) conservadas.add(f.funcion_sustantiva);
+        else aBorrar.push(f.id_funciones);
     }
-    return score;
+    if (aBorrar.length > 0) {
+        await client.query('DELETE FROM actividad_semana WHERE id_asignacionact IN (SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = ANY($1))', [aBorrar]);
+        await client.query('DELETE FROM asignacion_actividades WHERE id_funciones = ANY($1)', [aBorrar]);
+        await client.query('DELETE FROM usuario_asignacion WHERE id_usuario = $1 AND id_funciones = ANY($2)', [idUsuario, aBorrar]);
+        await client.query(`
+            DELETE FROM asignacion_funciones af
+            WHERE af.id_funciones = ANY($1)
+              AND NOT EXISTS (SELECT 1 FROM usuario_asignacion ua WHERE ua.id_funciones = af.id_funciones)
+        `, [aBorrar]);
+    }
+    return conservadas;
 };
 
-// ================================================================
-// buscarEnCatalogo:
-// Busca el texto del Excel (columna ASIGNATURAS) en el catálogo maestro.
-// Flujo:
-//   1. Buscar coincidencia con rol_seleccionado (actividad)
-//   2. Si no encuentra, buscar en resultado_esperado (descripción)
-//      y devolver la actividad padre correspondiente
-// Retorna: { rolSeleccionado: string } o null
-// ================================================================
-const buscarEnCatalogo = async (client, asignaturas, funcionSustantivaStr) => {
-    // Obtener la función del catálogo maestro
-    const catalogFuncRes = await client.query(`
-        SELECT id_funciones FROM asignacion_funciones 
-        WHERE funcion_sustantiva = $1 
-        AND NOT EXISTS (SELECT 1 FROM usuario_asignacion ua WHERE ua.id_funciones = asignacion_funciones.id_funciones)
-        LIMIT 1
-    `, [funcionSustantivaStr]);
-    
-    if (catalogFuncRes.rows.length === 0) return null;
-    
-    const catalogIdFunc = catalogFuncRes.rows[0].id_funciones;
-    
-    // Obtener actividades únicas del catálogo
-    const catActsRes = await client.query(
-        'SELECT DISTINCT rol_seleccionado FROM asignacion_actividades WHERE id_funciones = $1',
-        [catalogIdFunc]
-    );
-    
-    // Si solo hay 1 actividad en el catálogo, seleccionarla automáticamente
-    if (catActsRes.rows.length === 1) {
-        return { rolSeleccionado: catActsRes.rows[0].rol_seleccionado };
+/**
+ * Guarda una fila clasificada en la agenda del docente.
+ * En modo actualizar reutiliza la actividad equivalente si ya existe
+ * (misma materia y grupo, o el mismo rol) y solo actualiza sus horas.
+ * @returns {'nueva'|'actualizada'}
+ */
+const registrarFila = async (client, ctx, d) => {
+    const { idUsuario, idPeriodo, fila, clas, modo, funcionesDocente, actividadesUsadas, observacion } = d;
+
+    let idFunciones = funcionesDocente.get(clas.funcion);
+    if (!idFunciones) {
+        const ex = await client.query(`
+            SELECT af.id_funciones
+            FROM asignacion_funciones af
+            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2 AND af.id_periodo = $3
+            ORDER BY af.id_funciones LIMIT 1
+        `, [idUsuario, clas.funcion, idPeriodo]);
+        idFunciones = ex.rows[0]?.id_funciones;
+        if (!idFunciones) {
+            idFunciones = (await client.query(`
+                INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo)
+                VALUES ($1, 0, 'Por Aprobar', $2, $3) RETURNING id_funciones
+            `, [clas.funcion, observacion, idPeriodo])).rows[0].id_funciones;
+            await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
+        }
+        funcionesDocente.set(clas.funcion, idFunciones);
     }
-    
-    if (!asignaturas) return null;
-    
-    // PASO 1: Buscar coincidencia en actividades (rol_seleccionado)
-    let bestMatch = '';
-    let bestScore = 0;
-    
-    for (const ca of catActsRes.rows) {
-        const dbRol = ca.rol_seleccionado;
-        if (fuzzyMatch(asignaturas, dbRol)) {
-            const score = calcFuzzyScore(asignaturas, dbRol);
-            if (score > bestScore) {
-                bestScore = score;
-                bestMatch = dbRol;
-            }
+
+    // Las clases llevan espacio académico, semestre y grupo; las demás funciones no
+    let idEspacioAca = null;
+    let idGrupo = null;
+    if (clas.esClase) {
+        const sg = await obtenerSemestreGrupo(client, ctx, fila.semestre);
+        idGrupo = sg.idGrupo;
+        if (clas.rol) {
+            const esp = await client.query(
+                'SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = LOWER($1) AND id_semestre = $2 ORDER BY id_espacio_aca LIMIT 1',
+                [clas.rol, sg.idSemestre]
+            );
+            idEspacioAca = esp.rows[0]?.id_espacio_aca || (await client.query(
+                'INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca',
+                [clas.rol, sg.idSemestre]
+            )).rows[0].id_espacio_aca;
         }
     }
-    
-    if (bestMatch) {
-        return { rolSeleccionado: bestMatch };
-    }
-    
-    // PASO 2: Buscar en descripciones (resultado_esperado)
-    const catDescRes = await client.query(`
-        SELECT aa.rol_seleccionado, d.resultado_esperado
-        FROM asignacion_actividades aa
-        JOIN descripcion d ON aa.id_asignacionact = d.id_asignacionact
-        WHERE aa.id_funciones = $1
-    `, [catalogIdFunc]);
-    
-    bestMatch = '';
-    bestScore = 0;
-    
-    for (const cd of catDescRes.rows) {
-        if (fuzzyMatch(asignaturas, cd.resultado_esperado)) {
-            const score = calcFuzzyScore(asignaturas, cd.resultado_esperado);
-            if (score > bestScore) {
-                bestScore = score;
-                bestMatch = cd.rol_seleccionado;
-            }
+
+    if (modo === 'actualizar') {
+        // La enésima fila igual del listado corresponde a la enésima actividad igual
+        // (dos filas de Calidad con el mismo rol no se pisan entre sí)
+        const existentes = idEspacioAca
+            ? await client.query(
+                'SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = $1 AND id_espacio_aca = $2 AND id_grupos = $3 ORDER BY id_asignacionact',
+                [idFunciones, idEspacioAca, idGrupo])
+            : await client.query(
+                "SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado, '')) = LOWER($2) ORDER BY id_asignacionact",
+                [idFunciones, clas.rol]);
+        const libre = existentes.rows.find((r) => !actividadesUsadas.has(r.id_asignacionact));
+        if (libre) {
+            actividadesUsadas.add(libre.id_asignacionact);
+            await client.query('UPDATE asignacion_actividades SET horas_rol = $1 WHERE id_asignacionact = $2', [fila.horas, libre.id_asignacionact]);
+            return 'actualizada';
         }
     }
-    
-    if (bestMatch) {
-        return { rolSeleccionado: bestMatch };
-    }
-    
-    return null;
+
+    const orden = (await client.query('SELECT COALESCE(MAX(orden), 0) + 1 AS n FROM asignacion_actividades WHERE id_funciones = $1', [idFunciones])).rows[0].n;
+    const nueva = await client.query(`
+        INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_asignacionact
+    `, [idFunciones, idEspacioAca, idGrupo, clas.rol, fila.horas, orden]);
+    actividadesUsadas.add(nueva.rows[0].id_asignacionact);
+    return 'nueva';
 };
 
-const importarAsignaciones = async (req, res) => {
+const procesarListado = async (req, res, modo) => {
+    const accion = modo === 'importar' ? 'importar' : 'actualizar';
+    const simular = String(req.query?.simular ?? req.body?.simular ?? '').toLowerCase() === 'true';
+
     if (!req.file) {
         return res.status(400).json({ error: 'No se subió ningún archivo Excel' });
     }
-
-    // id_programa obligatorio — viene en el FormData junto con el archivo
     const idPrograma = parseInt(req.body?.id_programa);
     if (!idPrograma) {
-        return res.status(400).json({ error: 'Debe seleccionar un programa académico antes de importar.' });
+        return res.status(400).json({ error: `Debe seleccionar un programa académico antes de ${accion}.` });
     }
 
-    const normalizeObjectKeys = (obj) => {
-        const newObj = {};
-        for (let key in obj) {
-            const newKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            newObj[newKey] = obj[key];
-        }
-        return newObj;
-    };
+    let listado;
+    try {
+        listado = leerListado(req.file.buffer);
+    } catch {
+        return res.status(400).json({ error: 'No se pudo leer el archivo. Verifique que sea un Excel (.xlsx o .xls).' });
+    }
+    if (!listado.encabezadoEncontrado) {
+        return res.status(400).json({
+            error: 'No se encontró la fila de encabezados del listado. Debe tener las columnas INSCRIPCIÓN, DOCENTES, PROGRAMAS, ASIGNATURAS, SEMESTRE, VIN y HORAS.'
+        });
+    }
 
     const client = await pool.connect();
-    
     try {
         await client.query('BEGIN');
 
-        // Verificar que el programa existe
         const progRes = await client.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [idPrograma]);
         if (progRes.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'El programa académico seleccionado no existe.' });
         }
-
-        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const records = xlsx.utils.sheet_to_json(sheet);
-        
-        let procesados = 0;
-        let conservados = 0;
-        let errores = [];
-        // Docentes tocados por la importación — se usa para avisarles por correo
-        const docentesAfectados = new Set();
-
-        const pensulRes = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = true LIMIT 1');
-        const idPensulAca = pensulRes.rows.length > 0 ? pensulRes.rows[0].id_pensulaca : 1;
+        const nombrePrograma = progRes.rows[0].nombre_programa;
 
         const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
         if (periodoRes.rows.length === 0) {
+            await client.query('ROLLBACK');
             return res.status(400).json({ error: 'No hay un período académico activo para asignar las funciones.' });
         }
-        const idPeriodoActivo = periodoRes.rows[0].id_periodo;
+        const idPeriodo = periodoRes.rows[0].id_periodo;
 
-        // ============================================================
-        // PASO 1: Identificar docentes del Excel y SOLO limpiar
-        //         funciones que NO estén "Aceptado" EN EL PERIODO ACTIVO
-        // ============================================================
-        const documentosEnExcel = new Set();
-        for (let i = 0; i < records.length; i++) {
-            const row = normalizeObjectKeys(records[i]);
-            const inscripcion = row['inscripcion'];
-            if (inscripcion) {
-                documentosEnExcel.add(String(inscripcion).trim());
+        const ctx = await cargarContextoListado(client);
+        const observacion = modo === 'importar' ? 'Asignado automáticamente vía Excel' : 'Agregado vía actualización Excel';
+
+        // Agrupar las filas por docente, en el orden del listado
+        const errores = [];
+        const porDocente = new Map();
+        for (const fila of listado.filas) {
+            if (!fila.documento) {
+                errores.push(`Fila ${fila.fila}: no tiene número de documento (INSCRIPCIÓN).`);
+                continue;
             }
+            if (!porDocente.has(fila.documento)) porDocente.set(fila.documento, []);
+            porDocente.get(fila.documento).push(fila);
         }
 
-        // Mapa para saber qué funciones ya están aceptadas por cada usuario
-        // Clave: `${userId}_${funcionSustantiva}` → id_funciones
-        const funcionesAceptadas = new Map();
+        const totales = { procesados: 0, actualizados: 0, conservados: 0, omitidos: 0, docentesProcesados: 0, contratosActualizados: 0 };
+        const alertas = [];
+        const docentesNoEncontrados = [];
+        const docentesAfectados = new Set();
+        const clasesOtrosProgramas = new Map();
 
-        for (const docNum of documentosEnExcel) {
-            const userRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [docNum]);
-            if (userRes.rows.length === 0) continue;
-            const userId = userRes.rows[0].id_usuario;
+        for (const [documento, filas] of porDocente) {
+            const nombreExcel = filas.find((f) => f.nombre)?.nombre || null;
+            const u = (await client.query(`
+                SELECT u.id_usuario, u.nombres, u.apellidos, u.id_programa, u.id_contrato,
+                       pa.nombre_programa, tc.tipo AS tipo_contrato, tc.horas_contrato
+                FROM usuarios u
+                LEFT JOIN programa_academico pa ON pa.id_programa = u.id_programa
+                LEFT JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+                WHERE u.numero_documento = $1
+                ORDER BY u.id_usuario LIMIT 1
+            `, [documento])).rows[0];
 
-            const funcRes = await client.query(`
-                SELECT af.id_funciones, af.funcion_sustantiva, af.estado_agenda 
-                FROM usuario_asignacion ua
-                JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
-                WHERE ua.id_usuario = $1 AND af.id_periodo = $2
-            `, [userId, idPeriodoActivo]);
+            if (!u || u.id_programa !== idPrograma) {
+                docentesNoEncontrados.push({
+                    fila: filas[0].fila,
+                    documento,
+                    nombre: nombreExcel,
+                    programa: filas[0].programa || null,
+                    motivo: !u
+                        ? 'No encontrado en el sistema'
+                        : `Pertenece a ${u.nombre_programa || 'otro programa'}: su carga se importa con el listado de ese programa`
+                });
+                totales.omitidos += filas.length;
+                continue;
+            }
 
-            for (const fRow of funcRes.rows) {
-                const fid = fRow.id_funciones;
+            const docente = `${u.nombres} ${u.apellidos}`.trim();
+            const alertar = (mensaje, nivel = 'advertencia') => alertas.push({ documento, docente, nivel, mensaje });
+            const savepoint = `docente_${u.id_usuario}`;
+            await client.query(`SAVEPOINT ${savepoint}`);
 
-                if (fRow.estado_agenda === 'Aceptado') {
-                    // PRESERVAR: esta función ya fue aceptada por el docente
-                    const key = `${userId}_${fRow.funcion_sustantiva}`;
-                    funcionesAceptadas.set(key, fid);
-                    conservados++;
-                    continue; // No tocar nada de esta función
-                }
-
-                // LIMPIAR: función pendiente, se va a re-importar
-                const actIdsRes = await client.query('SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = $1', [fid]);
-                const actIds = actIdsRes.rows.map(r => r.id_asignacionact);
-
-                if (actIds.length > 0) {
-                    await client.query(`
-                        DELETE FROM evidencias WHERE id_indicadores IN (
-                            SELECT i.id_indicadores FROM indicadores i
-                            JOIN descripcion d ON i.id_descripcion = d.id_descripcion
-                            WHERE d.id_asignacionact = ANY($1)
-                        )
-                    `, [actIds]);
-                    await client.query(`
-                        DELETE FROM indicadores WHERE id_descripcion IN (
-                            SELECT id_descripcion FROM descripcion WHERE id_asignacionact = ANY($1)
-                        )
-                    `, [actIds]);
-                    await client.query('DELETE FROM descripcion WHERE id_asignacionact = ANY($1)', [actIds]);
-                    await client.query('DELETE FROM actividad_semana WHERE id_asignacionact = ANY($1)', [actIds]);
-                    await client.query('DELETE FROM asignacion_actividades WHERE id_funciones = $1', [fid]);
-                }
-
-                await client.query('DELETE FROM usuario_asignacion WHERE id_usuario = $1 AND id_funciones = $2', [userId, fid]);
-                const otrosRes = await client.query('SELECT COUNT(*) as cnt FROM usuario_asignacion WHERE id_funciones = $1', [fid]);
-                if (parseInt(otrosRes.rows[0].cnt) === 0) {
-                    const catCheck = await client.query(`
-                        SELECT COUNT(*) as cnt FROM asignacion_actividades aa
-                        JOIN descripcion d ON aa.id_asignacionact = d.id_asignacionact
-                        WHERE aa.id_funciones = $1
-                    `, [fid]);
-                    if (parseInt(catCheck.rows[0].cnt) === 0) {
-                        await client.query('DELETE FROM asignacion_funciones WHERE id_funciones = $1', [fid]);
+            try {
+                // 1. Vinculación (columna VIN) → tipo de contrato del docente
+                let sigla = SIGLA_POR_CONTRATO[normalizar(u.tipo_contrato)] || null;
+                let horasContrato = Number(u.horas_contrato) || 0;
+                const vinculaciones = [...new Set(filas.map((f) => f.vinculacion).filter(Boolean))];
+                const siglas = [...new Set(vinculaciones.map(clasificarVinculacion))];
+                if (siglas.length > 1) {
+                    alertar(`El listado trae vinculaciones distintas (${vinculaciones.join(', ')}); se conserva el contrato registrado (${u.tipo_contrato || 'sin contrato'}).`);
+                } else if (siglas.length === 1) {
+                    const contrato = ctx.contratoPorSigla[siglas[0]];
+                    if (contrato) {
+                        sigla = siglas[0];
+                        horasContrato = Number(contrato.horas_contrato) || 0;
+                        if (contrato.id_contrato !== u.id_contrato) {
+                            await client.query('UPDATE usuarios SET id_contrato = $1 WHERE id_usuario = $2', [contrato.id_contrato, u.id_usuario]);
+                            totales.contratosActualizados++;
+                        }
+                    } else if (siglas[0] === 'ADM') {
+                        sigla = 'ADM';
+                        alertar(`Vinculación ADM (personal administrativo): se conserva el contrato registrado (${u.tipo_contrato || 'sin contrato'}).`, 'info');
+                    } else {
+                        alertar(`Vinculación "${vinculaciones[0]}" no reconocida; se conserva el contrato registrado (${u.tipo_contrato || 'sin contrato'}).`);
                     }
+                } else {
+                    alertar(`El listado no trae la vinculación (VIN); se conserva el contrato registrado (${u.tipo_contrato || 'sin contrato'}).`, 'info');
                 }
+
+                // El tablero solo muestra a los docentes vinculados al período
+                await client.query(
+                    'INSERT INTO docente_periodo (id_usuario, id_periodo) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    [u.id_usuario, idPeriodo]
+                );
+
+                // 2. Importar desde cero: quitar solo lo precargado que nadie ha trabajado
+                const conservadas = modo === 'importar'
+                    ? await limpiarCargaPrecargada(client, u.id_usuario, idPeriodo)
+                    : new Set();
+
+                // 3. Filas del docente
+                const funcionesDocente = new Map();
+                const actividadesUsadas = new Set();
+                const clasificadas = [];
+                let nuevas = 0, actualizadas = 0, filasConservadas = 0;
+
+                for (const fila of filas) {
+                    const clas = clasificarFila(fila, ctx);
+                    if (!clas.funcion) {
+                        errores.push(`Fila ${fila.fila} (${docente}): no se reconoce la función "${fila.programa}"; la fila no se cargó.`);
+                        continue;
+                    }
+                    clasificadas.push({ funcion: clas.funcion, horas: fila.horas });
+
+                    if (clas.esClase && !clas.idProgramaClase && clas.programaClase) {
+                        clasesOtrosProgramas.set(clas.programaClase, (clasesOtrosProgramas.get(clas.programaClase) || 0) + 1);
+                    }
+                    if (clas.como === 'otro') {
+                        alertar(`Fila ${fila.fila}: "${fila.asignatura}" no tiene una actividad equivalente en ${clas.funcion}; se cargó como "${clas.rol}".`, 'info');
+                    } else if (clas.como === 'ambiguo') {
+                        alertar(`Fila ${fila.fila}: "${fila.asignatura}" puede ser ${clas.opciones.join(' o ')}; el docente debe elegir la actividad.`);
+                    } else if (clas.como === 'sin_equivalencia') {
+                        alertar(`Fila ${fila.fila}: "${fila.asignatura}" no coincide con ninguna actividad de ${clas.funcion}; el docente debe elegirla.`);
+                    }
+
+                    if (conservadas.has(clas.funcion)) {
+                        filasConservadas++;
+                        continue;
+                    }
+                    const r = await registrarFila(client, ctx, {
+                        idUsuario: u.id_usuario, idPeriodo, fila, clas, modo,
+                        funcionesDocente, actividadesUsadas, observacion
+                    });
+                    if (r === 'nueva') nuevas++; else actualizadas++;
+                }
+
+                if (conservadas.size > 0) {
+                    alertar(`Se conservaron sin cambios las funciones que ya estaban diligenciadas o revisadas: ${[...conservadas].join(', ')}.`, 'info');
+                }
+
+                // 4. Revisión de la carga: horas vs. contrato y regla del 30 % (no bloquea)
+                revisarCarga({ filas: clasificadas, sigla, horasContrato }).alertas.forEach((m) => alertar(m));
+
+                await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+                totales.procesados += nuevas;
+                totales.actualizados += actualizadas;
+                totales.conservados += filasConservadas;
+                totales.docentesProcesados++;
+                docentesAfectados.add(u.id_usuario);
+            } catch (err) {
+                await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+                // Lo que se insertó para este docente ya no existe: las cachés tampoco valen
+                ctx.semestres.clear();
+                ctx.grupos.clear();
+                ctx.semestresGrupos.clear();
+                console.error(`Error procesando docente ${documento}:`, err);
+                errores.push(`No se pudo cargar la agenda de ${docente} (${documento}): ${err.message}`);
+                totales.omitidos += filas.length;
             }
         }
 
-        // ============================================================
-        // PASO 2: Procesar cada fila del Excel
-        //         - Skipear filas cuya función ya está Aceptada
-        //         - Insertar normalmente las pendientes/nuevas
-        // ============================================================
-        for (let i = 0; i < records.length; i++) {
-            const row = normalizeObjectKeys(records[i]);
-            
-            const inscripcion = row['inscripcion'] || row['documento'];
-            const asignaturas = row['asignaturas'] || row['espaciosacademicos'] || row['espacioacademico'];
-            const semestreRaw = row['semestre'];
-            const programasRaw = row['programas'];
-            const horasRaw = row['horas'] || row['horassemana'] || row['horassemanales'];
-            
-            if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
-
-            if (!inscripcion) {
-                if (!programasRaw && !asignaturas) continue;
-                errores.push(`Fila ${i+2}: No tiene campo Inscripción.`);
-                continue;
-            }
-
-            const userRes = await client.query(
-                'SELECT id_usuario FROM usuarios WHERE numero_documento = $1 AND id_programa = $2',
-                [String(inscripcion), idPrograma]
-            );
-            if (userRes.rows.length === 0) {
-                // Verificar si existe en el sistema pero en otro programa
-                const userGenRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [String(inscripcion)]);
-                if (userGenRes.rows.length > 0) {
-                    errores.push(`Fila ${i+2}: Docente ${inscripcion} no pertenece al programa seleccionado.`);
-                } else {
-                    errores.push(`Fila ${i+2}: Docente con documento ${inscripcion} no encontrado en el sistema.`);
-                }
-                continue;
-            }
-            const idUsuario = userRes.rows[0].id_usuario;
-            docentesAfectados.add(idUsuario);
-
-            // Actualizar tipo de vinculación / contrato automáticamente si se incluye en el Excel (MT: Medio Tiempo, TC: Tiempo Completo, HC: Hora Cátedra)
-            const vinculacionRaw = row['vinculacion'] || row['tipovinculacion'] || row['vinculación'] || row['tipodevinculacion'] || row['contrato'] || row['tipocontrato'] || row['dedicacion'] || row['dedicaciondocente'];
-            if (vinculacionRaw) {
-                const vincStr = String(vinculacionRaw).trim().toLowerCase();
-                let nuevoContratoId = null;
-                if (vincStr.includes('mt') || vincStr.includes('medio')) {
-                    nuevoContratoId = 2; // Medio Tiempo (20h)
-                } else if (vincStr.includes('tc') || vincStr.includes('completo')) {
-                    nuevoContratoId = 1; // Tiempo Completo (40h)
-                } else if (vincStr.includes('hc') || vincStr.includes('catedra') || vincStr.includes('cátedra')) {
-                    nuevoContratoId = 3; // Hora Cátedra
-                }
-
-                if (nuevoContratoId) {
-                    await client.query('UPDATE usuarios SET id_contrato = $1 WHERE id_usuario = $2', [nuevoContratoId, idUsuario]);
-                }
-            }
-
-            const { numero, grupo } = parseSemestre(semestreRaw);
-            
-            let idSemestre;
-            const semRes = await client.query('SELECT id_semestre FROM semestres WHERE nombre_sem = $1', [numero]);
-            if (semRes.rows.length > 0) {
-                idSemestre = semRes.rows[0].id_semestre;
-            } else {
-                const newSem = await client.query('INSERT INTO semestres (id_pensulaca, nombre_sem) VALUES ($1, $2) RETURNING id_semestre', [idPensulAca, numero]);
-                idSemestre = newSem.rows[0].id_semestre;
-            }
-
-            let idGrupo;
-            const gruRes = await client.query('SELECT id_grupos FROM grupos WHERE nombre_grupo = $1', [grupo]);
-            if (gruRes.rows.length > 0) {
-                idGrupo = gruRes.rows[0].id_grupos;
-            } else {
-                const newGru = await client.query('INSERT INTO grupos (nombre_grupo, jornada) VALUES ($1, $2) RETURNING id_grupos', [grupo, 'Diurna']);
-                idGrupo = newGru.rows[0].id_grupos;
-            }
-
-            const sgRes = await client.query('SELECT id_semestregrupo FROM semestres_grupos WHERE id_semestre = $1 AND id_grupos = $2', [idSemestre, idGrupo]);
-            if (sgRes.rows.length === 0) {
-                await client.query('INSERT INTO semestres_grupos (id_semestre, id_grupos, activo) VALUES ($1, $2, true)', [idSemestre, idGrupo]);
-            }
-
-            const funcionSustantivaStr = await mapFuncionSustantiva(client, programasRaw);
-            
-            // Verificar si esta función ya fue Aceptada por el docente
-            const aceptadaKey = `${idUsuario}_${funcionSustantivaStr}`;
-            if (funcionesAceptadas.has(aceptadaKey)) {
-                // Ya fue aceptada, no tocar. Solo actualizar horas del bloque padre.
-                const fidAceptado = funcionesAceptadas.get(aceptadaKey);
-                // Las horas se recalculan al final
-                continue;
-            }
-
-            // Buscar si el usuario ya tiene esta funcion asignada (creada en esta importación)
-            let idFunciones;
-            const funcAsigRes = await client.query(`
-                SELECT af.id_funciones 
-                FROM asignacion_funciones af
-                JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
-                WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2 AND af.id_periodo = $3
-            `, [idUsuario, funcionSustantivaStr, idPeriodoActivo]);
-
-            let horasActividad = parseFloat(horasRaw || 0);
-
-            if (funcAsigRes.rows.length > 0) {
-                idFunciones = funcAsigRes.rows[0].id_funciones;
-                // No sumar horas aquí, se recalculan al final
-            } else {
-                const newFunc = await client.query(`
-                    INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
-                    VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
-                `, [funcionSustantivaStr, 0, 'Por Aprobar', 'Asignado automáticamente vía Excel', idPeriodoActivo]);
-                idFunciones = newFunc.rows[0].id_funciones;
-                await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
-            }
-
-            // Buscar o crear espacio académico
-            let idEspacioAca = null;
-            if (funcionSustantivaStr === 'Docencia Directa' && asignaturas) {
-                const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 AND id_semestre = $2 LIMIT 1', [String(asignaturas).toLowerCase().trim(), idSemestre]);
-                if (espRes.rows.length > 0) {
-                    idEspacioAca = espRes.rows[0].id_espacio_aca;
-                } else {
-                    const newEsp = await client.query('INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca', [String(asignaturas).trim(), idSemestre]);
-                    idEspacioAca = newEsp.rows[0].id_espacio_aca;
-                }
-            } else if (asignaturas) {
-                const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 LIMIT 1', [String(asignaturas).toLowerCase().trim()]);
-                if (espRes.rows.length > 0) {
-                    idEspacioAca = espRes.rows[0].id_espacio_aca;
-                }
-            }
-
-            // Determinar el rol seleccionado (Fuzzy Matching mejorado)
-            let rolToInsert = asignaturas || '';
-            
-            // Fuzzy Matching: buscar en catálogo maestro (actividades Y descripciones)
-            const matchResult = await buscarEnCatalogo(client, asignaturas, funcionSustantivaStr);
-            console.log(`[IMPORT] Fila ${i+2}: Función="${funcionSustantivaStr}" | Asignatura="${asignaturas}" → Match=${matchResult ? matchResult.rolSeleccionado : 'NINGUNO'}`);
-            if (matchResult) {
-                rolToInsert = matchResult.rolSeleccionado;
-            } else {
-                // Si tiene catálogo pero no se encontró match, dejar vacío para que el docente elija
-                const esFuncionCatalogo = await client.query(`
-                    SELECT COUNT(*) as cnt FROM asignacion_funciones 
-                    WHERE funcion_sustantiva = $1 
-                    AND NOT EXISTS (SELECT 1 FROM usuario_asignacion ua WHERE ua.id_funciones = asignacion_funciones.id_funciones)
-                `, [funcionSustantivaStr]);
-                if (parseInt(esFuncionCatalogo.rows[0].cnt) > 0) {
-                    rolToInsert = ''; // Tiene catálogo pero no hubo match
-                }
-            }
-
-            await client.query(`
-                INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
-                VALUES ($1, $2, $3, $4, $5, $6)
-            `, [idFunciones, idEspacioAca, idGrupo, rolToInsert, horasActividad, procesados + 1]);
-
-            procesados++;
-        }
-
-        // Recalcular horas de cada función basado en la suma real de actividades
+        // Horas de cada función = suma de sus actividades (funciones de docentes del período)
         await client.query(`
             UPDATE asignacion_funciones af
-            SET horas_funcion = COALESCE(sub.total, 0)
+            SET horas_funcion = sub.total
             FROM (
-                SELECT id_funciones, SUM(horas_rol) as total
+                SELECT id_funciones, COALESCE(SUM(horas_rol), 0) AS total
                 FROM asignacion_actividades
                 GROUP BY id_funciones
             ) sub
             WHERE af.id_funciones = sub.id_funciones
-            AND af.id_funciones IN (SELECT id_funciones FROM usuario_asignacion)
-        `);
+              AND af.id_periodo = $1
+              AND af.id_funciones IN (SELECT id_funciones FROM usuario_asignacion)
+        `, [idPeriodo]);
 
-        await client.query('COMMIT');
+        await client.query(simular ? 'ROLLBACK' : 'COMMIT');
 
-        // Aviso a los docentes de que ya tienen carga académica cargada.
-        // Es un correo masivo, así que solo sale si está habilitado por
-        // configuración (EMAIL_AVISO_ASIGNACIONES=true) o si se pide en la
-        // petición con ?notificar=true.
-        const notificarCarga =
+        // Aviso a los docentes de que ya tienen carga académica. Es un correo
+        // masivo: solo sale si está habilitado (EMAIL_AVISO_ASIGNACIONES=true)
+        // o si se pide con ?notificar=true, y nunca en una vista previa.
+        const notificarCarga = !simular && (
             String(process.env.EMAIL_AVISO_ASIGNACIONES).toLowerCase() === 'true' ||
-            String(req.query.notificar || req.body.notificar).toLowerCase() === 'true';
-
+            String(req.query?.notificar ?? req.body?.notificar).toLowerCase() === 'true'
+        );
         if (notificarCarga && docentesAfectados.size > 0) {
             notificaciones.background.asignacionesCargadas([...docentesAfectados], null, req.user?.id);
         }
 
+        if (!simular) {
+            await auditoria.registrar(req, {
+                accion: modo === 'importar' ? 'importar_asignaciones' : 'actualizar_asignaciones',
+                entidad: 'programa',
+                detalle: { id_programa: idPrograma, programa: nombrePrograma, id_periodo: idPeriodo, archivo: req.file.originalname, ...totales }
+            });
+        }
+
+        const docentesConAlertas = new Set(alertas.filter((a) => a.nivel === 'advertencia').map((a) => a.documento)).size;
         res.status(200).json({
-            mensaje: 'Importación procesada correctamente',
+            mensaje: simular
+                ? 'Vista previa: no se guardó ningún cambio'
+                : modo === 'importar' ? 'Importación procesada correctamente' : 'Actualización procesada correctamente',
+            simulacion: simular,
             resultados: {
-                procesados,
-                conservados,
-                erroresEncontrados: errores.length,
-                detallesErrores: errores,
-                docentesNotificados: notificarCarga ? docentesAfectados.size : 0
-            }
-        });
-
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error("Error importando Excel:", error);
-        res.status(500).json({ error: 'Ocurrió un error general durante la importación.', detalles: error.message });
-    } finally {
-        client.release();
-    }
-};
-
-// ================================================================
-// actualizarImportacion:
-// Solo AGREGA lo nuevo. No borra absolutamente nada.
-// Si la función ya existe para el docente, agrega las actividades
-// nuevas. Si no existe, la crea.
-// ================================================================
-const actualizarImportacion = async (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ error: 'No se subió ningún archivo Excel' });
-    }
-
-    // id_programa obligatorio
-    const idPrograma = parseInt(req.body?.id_programa);
-    if (!idPrograma) {
-        return res.status(400).json({ error: 'Debe seleccionar un programa académico antes de actualizar.' });
-    }
-
-    const normalizeObjectKeys = (obj) => {
-        const newObj = {};
-        for (let key in obj) {
-            const newKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-            newObj[newKey] = obj[key];
-        }
-        return newObj;
-    };
-
-    const client = await pool.connect();
-    
-    try {
-        await client.query('BEGIN');
-
-        // Verificar que el programa existe
-        const progRes = await client.query('SELECT nombre_programa FROM programa_academico WHERE id_programa = $1', [idPrograma]);
-        if (progRes.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'El programa académico seleccionado no existe.' });
-        }
-
-        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const records = xlsx.utils.sheet_to_json(sheet);
-        
-        let procesados = 0;
-        let omitidos = 0;
-        let errores = [];
-        let docentesNoEncontrados = []; // Docentes del Excel que no existen en el sistema
-
-        const pensulRes = await client.query('SELECT id_pensulaca FROM pensul_academico WHERE activo = true LIMIT 1');
-        const idPensulAca = pensulRes.rows.length > 0 ? pensulRes.rows[0].id_pensulaca : 1;
-
-        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
-        if (periodoRes.rows.length === 0) {
-            return res.status(400).json({ error: 'No hay un período académico activo para actualizar las funciones.' });
-        }
-        const idPeriodoActivo = periodoRes.rows[0].id_periodo;
-
-        // NO HAY PASO DE LIMPIEZA - Solo agregar
-
-        // Agrupar records por inscripción (documento)
-        const recordsPorDocente = {};
-        for (let i = 0; i < records.length; i++) {
-            const row = normalizeObjectKeys(records[i]);
-            const inscripcion = row['inscripcion'] || row['documento'];
-            const semestreRaw = row['semestre'];
-            const programasRaw = row['programas'];
-
-            if (String(semestreRaw).toLowerCase() === 'total' || String(programasRaw).toLowerCase() === 'total' || String(row['docentes'] || '').toLowerCase() === 'total') continue;
-
-            if (!inscripcion) {
-                if (programasRaw || row['asignaturas'] || row['espaciosacademicos'] || row['espacioacademico']) {
-                    errores.push(`Fila ${i+2}: No tiene campo Inscripción.`);
-                }
-                continue;
-            }
-
-            const docTrimmed = String(inscripcion).trim();
-            if (!recordsPorDocente[docTrimmed]) {
-                recordsPorDocente[docTrimmed] = [];
-            }
-            row._filaExcel = i + 2; 
-            recordsPorDocente[docTrimmed].push(row);
-        }
-
-        // Iterar por docente
-        for (const [inscripcion, filasDocente] of Object.entries(recordsPorDocente)) {
-            const userRes = await client.query(`
-                SELECT u.id_usuario, u.nombres, u.apellidos, tc.horas_contrato 
-                FROM usuarios u
-                LEFT JOIN tipo_contrato tc ON u.id_contrato = tc.id_contrato
-                WHERE u.numero_documento = $1 AND u.id_programa = $2
-            `, [inscripcion, idPrograma]);
-
-            if (userRes.rows.length === 0) {
-                const filaRepr = filasDocente[0];
-                const nombreDocenteExcel = filaRepr['docentes'] || filaRepr['nombre'] || filaRepr['docente'] || null;
-                const programasRaw = filaRepr['programas'];
-
-                // Comprobar si existe en otro programa
-                const userGenRes = await client.query('SELECT id_usuario FROM usuarios WHERE numero_documento = $1', [inscripcion]);
-                docentesNoEncontrados.push({
-                    fila: filaRepr._filaExcel,
-                    documento: inscripcion,
-                    nombre: nombreDocenteExcel ? String(nombreDocenteExcel).trim() : null,
-                    programa: programasRaw ? String(programasRaw).trim() : null,
-                    motivo: userGenRes.rows.length > 0 ? 'No pertenece al programa seleccionado' : 'No encontrado en el sistema'
-                });
-                continue;
-            }
-
-            const usuario = userRes.rows[0];
-            const idUsuario = usuario.id_usuario;
-            const horasContrato = usuario.horas_contrato || 0; // Podría ser null si no tiene contrato asignado
-            const nombreCompleto = `${usuario.nombres} ${usuario.apellidos}`.trim();
-
-            const savepointName = `docente_${idUsuario}`;
-            await client.query(`SAVEPOINT ${savepointName}`);
-
-            let exitoDocente = true;
-            let procesadosDocente = 0;
-
-            try {
-                // Procesar todas las filas del docente
-                for (const row of filasDocente) {
-                    const asignaturas = row['asignaturas'] || row['espaciosacademicos'] || row['espacioacademico'];
-                    const semestreRaw = row['semestre'];
-                    const programasRaw = row['programas'];
-                    const horasRaw = row['horas'] || row['horassemana'] || row['horassemanales'];
-
-                    // Semestre y Grupo
-                    const { numero, grupo } = parseSemestre(semestreRaw);
-                    let idSemestre;
-                    const semRes = await client.query('SELECT id_semestre FROM semestres WHERE nombre_sem = $1', [numero]);
-                    if (semRes.rows.length > 0) { idSemestre = semRes.rows[0].id_semestre; }
-                    else {
-                        const newSem = await client.query('INSERT INTO semestres (id_pensulaca, nombre_sem) VALUES ($1, $2) RETURNING id_semestre', [idPensulAca, numero]);
-                        idSemestre = newSem.rows[0].id_semestre;
-                    }
-                    let idGrupo;
-                    const gruRes = await client.query('SELECT id_grupos FROM grupos WHERE nombre_grupo = $1', [grupo]);
-                    if (gruRes.rows.length > 0) { idGrupo = gruRes.rows[0].id_grupos; }
-                    else {
-                        const newGru = await client.query('INSERT INTO grupos (nombre_grupo, jornada) VALUES ($1, $2) RETURNING id_grupos', [grupo, 'Diurna']);
-                        idGrupo = newGru.rows[0].id_grupos;
-                    }
-                    const sgRes = await client.query('SELECT id_semestregrupo FROM semestres_grupos WHERE id_semestre = $1 AND id_grupos = $2', [idSemestre, idGrupo]);
-                    if (sgRes.rows.length === 0) {
-                        await client.query('INSERT INTO semestres_grupos (id_semestre, id_grupos, activo) VALUES ($1, $2, true)', [idSemestre, idGrupo]);
-                    }
-
-                    // Función Sustantiva
-                    const funcionSustantivaStr = await mapFuncionSustantiva(client, programasRaw);
-
-                    // Buscar si el usuario ya tiene esta función
-                    let idFunciones;
-                    const funcAsigRes = await client.query(`
-                        SELECT af.id_funciones 
-                        FROM asignacion_funciones af
-                        JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
-                        WHERE ua.id_usuario = $1 AND af.funcion_sustantiva = $2 AND af.id_periodo = $3
-                    `, [idUsuario, funcionSustantivaStr, idPeriodoActivo]);
-
-                    let horasActividad = parseFloat(horasRaw || 0);
-
-                    if (funcAsigRes.rows.length > 0) {
-                        idFunciones = funcAsigRes.rows[0].id_funciones;
-                        // No sumar horas aquí, se recalculan al final
-                    } else {
-                        // Crear nueva función
-                        const newFunc = await client.query(`
-                            INSERT INTO asignacion_funciones (funcion_sustantiva, horas_funcion, estado_agenda, observaciones_generales, id_periodo) 
-                            VALUES ($1, $2, $3, $4, $5) RETURNING id_funciones
-                        `, [funcionSustantivaStr, 0, 'Por Aprobar', 'Agregado vía actualización Excel', idPeriodoActivo]);
-                        idFunciones = newFunc.rows[0].id_funciones;
-                        await client.query('INSERT INTO usuario_asignacion (id_usuario, id_funciones) VALUES ($1, $2)', [idUsuario, idFunciones]);
-                    }
-
-                    // Buscar o crear espacio académico
-                    let idEspacioAca = null;
-                    if (funcionSustantivaStr === 'Docencia Directa' && asignaturas) {
-                        const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 AND id_semestre = $2 LIMIT 1', [String(asignaturas).toLowerCase().trim(), idSemestre]);
-                        if (espRes.rows.length > 0) {
-                            idEspacioAca = espRes.rows[0].id_espacio_aca;
-                        } else {
-                            const newEsp = await client.query('INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca', [String(asignaturas).trim(), idSemestre]);
-                            idEspacioAca = newEsp.rows[0].id_espacio_aca;
-                        }
-                    } else if (asignaturas) {
-                        const espRes = await client.query('SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = $1 LIMIT 1', [String(asignaturas).toLowerCase().trim()]);
-                        if (espRes.rows.length > 0) {
-                            idEspacioAca = espRes.rows[0].id_espacio_aca;
-                        }
-                    }
-
-                    // Fuzzy Matching: buscar en catálogo maestro (actividades Y descripciones)
-                    let rolToInsert = asignaturas || '';
-                    const matchResult = await buscarEnCatalogo(client, asignaturas, funcionSustantivaStr);
-                    if (matchResult) {
-                        rolToInsert = matchResult.rolSeleccionado;
-                    } else {
-                        const esFuncionCatalogo = await client.query(`
-                            SELECT COUNT(*) as cnt FROM asignacion_funciones 
-                            WHERE funcion_sustantiva = $1 
-                            AND NOT EXISTS (SELECT 1 FROM usuario_asignacion ua WHERE ua.id_funciones = asignacion_funciones.id_funciones)
-                        `, [funcionSustantivaStr]);
-                        if (parseInt(esFuncionCatalogo.rows[0].cnt) > 0) {
-                            rolToInsert = '';
-                        }
-                    }
-
-                    // Verificar si esta actividad ya existe. Si tiene espacio académico
-                    // (Docencia Directa) la identidad es espacio + grupo: comparar solo por
-                    // rol_seleccionado colapsaba todas las materias con rol '' en una sola.
-                    const actExiste = idEspacioAca
-                        ? await client.query(`
-                            SELECT id_asignacionact FROM asignacion_actividades
-                            WHERE id_funciones = $1 AND id_espacio_aca = $2 AND id_grupos = $3
-                        `, [idFunciones, idEspacioAca, idGrupo])
-                        : await client.query(`
-                            SELECT id_asignacionact FROM asignacion_actividades
-                            WHERE id_funciones = $1 AND LOWER(COALESCE(rol_seleccionado,'')) = LOWER($2)
-                        `, [idFunciones, rolToInsert]);
-
-                    if (actExiste.rows.length > 0) {
-                        // Actualizar el grupo y las horas de la materia existente
-                        await client.query(`
-                            UPDATE asignacion_actividades 
-                            SET id_grupos = $1, horas_rol = $2 
-                            WHERE id_asignacionact = $3
-                        `, [idGrupo, horasActividad, actExiste.rows[0].id_asignacionact]);
-                        procesadosDocente++;
-                        continue;
-                    }
-
-                    // Insertar actividad nueva si no existía
-                    await client.query(`
-                        INSERT INTO asignacion_actividades (id_funciones, id_espacio_aca, id_grupos, rol_seleccionado, horas_rol, orden)
-                        VALUES ($1, $2, $3, $4, $5, $6)
-                    `, [idFunciones, idEspacioAca, idGrupo, rolToInsert, horasActividad, procesados + procesadosDocente + 1]);
-
-                    procesadosDocente++;
-                }
-
-                // Calcular horas totales REALES en DB del docente tras los cambios
-                const sumRes = await client.query(`
-                    SELECT COALESCE(SUM(aa.horas_rol), 0) as total_horas
-                    FROM asignacion_actividades aa
-                    JOIN asignacion_funciones af ON aa.id_funciones = af.id_funciones
-                    JOIN usuario_asignacion ua ON af.id_funciones = ua.id_funciones
-                    WHERE ua.id_usuario = $1 AND af.id_periodo = $2
-                `, [idUsuario, idPeriodoActivo]);
-
-                const totalHorasBD = parseFloat(sumRes.rows[0].total_horas);
-
-                if (horasContrato > 0 && totalHorasBD > horasContrato) {
-                    await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-                    exitoDocente = false;
-                    errores.push(`El docente ${nombreCompleto} excede sus horas de contrato (${horasContrato}h). Sus horas quedarían en ${totalHorasBD}h. No se agregaron las nuevas asignaturas/funciones.`);
-                    omitidos += procesadosDocente;
-                } else {
-                    await client.query(`RELEASE SAVEPOINT ${savepointName}`);
-                    procesados += procesadosDocente;
-                }
-
-            } catch (err) {
-                await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-                console.error(`Error procesando docente ${inscripcion}:`, err);
-                errores.push(`Error al procesar el docente con documento ${inscripcion}: ${err.message}`);
-                omitidos += procesadosDocente;
-            }
-        }
-
-        // Recalcular horas de cada función basado en la suma real de actividades
-        await client.query(`
-            UPDATE asignacion_funciones af
-            SET horas_funcion = COALESCE(sub.total, 0)
-            FROM (
-                SELECT id_funciones, SUM(horas_rol) as total
-                FROM asignacion_actividades
-                GROUP BY id_funciones
-            ) sub
-            WHERE af.id_funciones = sub.id_funciones
-            AND af.id_funciones IN (SELECT id_funciones FROM usuario_asignacion)
-        `);
-
-        await client.query('COMMIT');
-        
-        res.status(200).json({ 
-            mensaje: 'Actualización procesada correctamente',
-            resultados: {
-                procesados,
-                omitidos,
+                ...totales,
+                filasLeidas: listado.filas.length,
                 erroresEncontrados: errores.length,
                 detallesErrores: errores,
                 docentesNoEncontrados,
-                totalNoEncontrados: docentesNoEncontrados.length
+                totalNoEncontrados: docentesNoEncontrados.length,
+                alertas,
+                docentesConAlertas,
+                clasesOtrosProgramas: [...clasesOtrosProgramas].map(([programa, filas]) => ({ programa, filas })),
+                docentesNotificados: notificarCarga ? docentesAfectados.size : 0
             }
         });
-
     } catch (error) {
-        await client.query('ROLLBACK');
-        console.error("Error actualizando importación:", error);
-        res.status(500).json({ error: 'Ocurrió un error durante la actualización.', detalles: error.message });
+        await client.query('ROLLBACK').catch(() => {});
+        console.error(`Error en ${accion} asignaciones:`, error);
+        res.status(500).json({ error: `Ocurrió un error durante la ${modo === 'importar' ? 'importación' : 'actualización'}.`, detalles: error.message });
     } finally {
         client.release();
     }
 };
+
+const importarAsignaciones = (req, res) => procesarListado(req, res, 'importar');
+
+// Solo AGREGA o actualiza: no borra nada de lo que ya tienen los docentes
+const actualizarImportacion = (req, res) => procesarListado(req, res, 'actualizar');
 
 const getDashboardDirector = async (req, res) => {
     try {
@@ -881,6 +499,7 @@ const getDashboardDirector = async (req, res) => {
         let metricas = { total: 0, aceptadas: 0, pendientes: 0, total_horas: 0 };
         let distribucion = [];
         let importacionRealizada = false;
+        let programasImportados = [];
         if (idPeriodo) {
 
             let docentesQuery = `
@@ -902,7 +521,8 @@ const getDashboardDirector = async (req, res) => {
                     COUNT(CASE WHEN af.estado_agenda = 'Devuelta' THEN af.id_funciones END) AS funciones_devueltas,
                     COALESCE(SUM(af.horas_funcion), 0) AS horas_asignadas,
                     COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
-                    COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Investigación' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
+                    COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Investigación' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion,
+                    COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Indirecta' THEN af.horas_funcion ELSE 0 END), 0) AS horas_indirectas
                 FROM usuarios u
                 JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
                 JOIN programa_academico pa ON pa.id_programa = u.id_programa
@@ -932,28 +552,30 @@ const getDashboardDirector = async (req, res) => {
 
             const docentesRes = await pool.query(docentesQuery, docParams);
             docentes = docentesRes.rows.map(d => {
-                const hDirectas = parseFloat(d.horas_directas) || 0;
-                const hInvestigacion = parseFloat(d.horas_investigacion) || 0;
-                const docenciaIndirecta = Math.round(hDirectas * 0.3);
-                
-                const tipoContrato = (d.tipo_contrato || '').toUpperCase();
-                const totalHoras = parseFloat(d.horas_asignadas) || 0;
-                const horasContrato = parseFloat(d.horas_contrato) || 40;
-                let perfilDocente = (totalHoras === horasContrato) ? "AGENDA CORRECTA" : "INCONSISTENCIAS EN AGENDA AC 30";
-
+                // La indirecta se muestra como fue asignada; el 30 % solo se compara
+                const indirecta = revisarIndirecta(d.horas_directas, d.horas_indirectas);
                 return {
                     ...d,
-                    docencia_indirecta: docenciaIndirecta,
-                    perfil_docente: perfilDocente
+                    docencia_indirecta: indirecta.asignada,
+                    docencia_indirecta_esperada: indirecta.esperada,
+                    indirecta_cumple_ac030: indirecta.cumple,
+                    perfil_docente: perfilAgenda(d.horas_asignadas, d.horas_contrato)
                 };
             });
 
             // Check if import was done for this period
-            const importCheck = await pool.query(
-                'SELECT COUNT(*) as cnt FROM asignacion_funciones WHERE id_periodo = $1',
-                [idPeriodo]
-            );
-            importacionRealizada = parseInt(importCheck.rows[0].cnt) > 0;
+            // Programas que ya tienen carga en el período. Se cuenta por programa:
+            // contar cualquier función del período bloqueaba "Importar" para el
+            // segundo programa (y los restos de agendas sin docente también contaban).
+            const importCheck = await pool.query(`
+                SELECT DISTINCT u.id_programa
+                FROM asignacion_funciones af
+                JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+                JOIN usuarios u ON u.id_usuario = ua.id_usuario
+                WHERE af.id_periodo = $1 AND u.id_programa IS NOT NULL
+            `, [idPeriodo]);
+            programasImportados = importCheck.rows.map(r => r.id_programa);
+            importacionRealizada = programasImportados.length > 0;
 
             // Metricas — "diligenciada" incluye tanto Aceptado (docente la llenó)
             // como Aprobada (el Director ya le dio el visto bueno).
@@ -1005,7 +627,8 @@ const getDashboardDirector = async (req, res) => {
             docentes,
             metricas,
             distribucion,
-            importacionRealizada
+            importacionRealizada,
+            programasImportados
         });
     } catch (error) {
         console.error('Error en getDashboardDirector:', error);
