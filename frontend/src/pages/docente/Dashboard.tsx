@@ -30,6 +30,9 @@ interface DocenteData {
   totalHorasContrato: number;
   periodoActivo: boolean;
   perfilDocente: string;
+  docenciaIndirecta?: number;
+  docenciaIndirectaEsperada?: number;
+  indirectaCumpleAc030?: boolean;
 }
 
 interface PeriodoMetrica {
@@ -320,7 +323,7 @@ export default function DashboardDocente() {
           {
             label: 'Horas registradas',
             value: `${metricas.totalHorasEjecucion}h`,
-            sub: `de ${docente.totalHorasContrato}h`,
+            sub: docente.totalHorasContrato > 0 ? `de ${docente.totalHorasContrato}h` : `de ${metricas.totalHoras}h asignadas`,
             icon: Clock,
             color: 'blue',
             bg: 'bg-blue-50',
@@ -397,9 +400,14 @@ export default function DashboardDocente() {
           <div className="pt-4 border-t border-gray-100">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-gray-500">Total asignado</span>
-              <span className="text-lg font-bold text-gray-900">{metricas.totalHoras}h / {docente.totalHorasContrato}h</span>
+              <span className="text-lg font-bold text-gray-900">{metricas.totalHoras}h{docente.totalHorasContrato > 0 ? ` / ${docente.totalHorasContrato}h` : ''}</span>
             </div>
             <ProgressBar value={docente.totalHorasContrato > 0 ? Math.min((metricas.totalHoras / docente.totalHorasContrato) * 100, 100) : 0} color="indigo" />
+            {docente.indirectaCumpleAc030 === false && (
+              <p className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5">
+                Por el 30 % del Acuerdo 030 corresponden {docente.docenciaIndirectaEsperada}h de docencia indirecta; tienes {docente.docenciaIndirecta}h asignadas.
+              </p>
+            )}
           </div>
           <div className="mt-4 h-44">
             <ResponsiveContainer width="100%" height="100%">

@@ -525,6 +525,12 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
                                     </div>
                                 ))}
                             </div>
+                            {data.indirecta_cumple_ac030 === false && (
+                                <p className="flex items-start gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5">
+                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                    Por el 30 % del Acuerdo 030 corresponden {data.docencia_indirecta_esperada}h de docencia indirecta; tiene {Math.round(horasCalculadas.indirecta)}h asignadas.
+                                </p>
+                            )}
                         </div>
                         )}
 

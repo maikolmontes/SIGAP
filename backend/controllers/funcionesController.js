@@ -1,4 +1,5 @@
 const pool = require('../db/connection');
+const { condicionCatalogo } = require('../utils/catalogo');
 
 const getFunciones = async (req, res) => {
     try {
@@ -88,9 +89,7 @@ const getCatalogoJerarquico = async (req, res) => {
             LEFT JOIN asignacion_actividades aa ON af.id_funciones = aa.id_funciones
             LEFT JOIN descripcion d ON aa.id_asignacionact = d.id_asignacionact
             LEFT JOIN indicadores i ON d.id_descripcion = i.id_descripcion
-            WHERE NOT EXISTS (
-                SELECT 1 FROM usuario_asignacion ua WHERE ua.id_funciones = af.id_funciones
-            )
+            WHERE ${condicionCatalogo('af')}
             ORDER BY af.id_funciones, aa.id_asignacionact, d.id_descripcion, i.id_indicadores
         `);
 

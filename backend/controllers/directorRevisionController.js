@@ -5,6 +5,7 @@
 const pool = require('../db/connection');
 const notificaciones = require('../services/notificacionesService');
 const { alcanceProgramas, docenteEnAlcance, alcanceFunciones } = require('../utils/rolActivo');
+const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 
 const SIN_PERMISO_DOCENTE = { error: 'Este docente no pertenece a los programas que gestionas.' };
 const SIN_PERMISO_FUNCION = { error: 'Tu rol no revisa esta función sustantiva.' };
@@ -26,16 +27,8 @@ const estadoDeConjunto = (estados) => {
 // ================================================================
 // Helper: Calcular perfil docente según Acuerdo 030/2024
 // ================================================================
-const calcularPerfilDocente = (tipoContrato, horasDirectas, horasInvestigacion, totalHoras = 0, horasContrato = 40) => {
-    const th = parseFloat(totalHoras) || 0;
-    const hc = parseFloat(horasContrato) || 40;
-
-    if (th === hc) {
-        return 'AGENDA CORRECTA';
-    } else {
-        return 'INCONSISTENCIAS EN AGENDA AC 30';
-    }
-};
+const calcularPerfilDocente = (tipoContrato, horasDirectas, horasInvestigacion, totalHoras = 0, horasContrato = 0) =>
+    perfilAgenda(totalHoras, horasContrato);
 
 // ================================================================
 // GET /api/director/agendas
@@ -351,6 +344,7 @@ const getAgendaDetalle = async (req, res) => {
 
         let horasDirectas = 0;
         let horasInvestigacion = 0;
+        let horasIndirectas = 0;
         let totalHoras = 0;
 
         // Para cada función, traer actividades con descripciones, indicadores, evidencias
@@ -359,6 +353,7 @@ const getAgendaDetalle = async (req, res) => {
             const hf = parseFloat(func.horas_funcion) || 0;
             totalHoras += hf;
             if (func.funcion_sustantiva === 'Docencia Directa') horasDirectas += hf;
+            if (func.funcion_sustantiva === 'Docencia Indirecta') horasIndirectas += hf;
             if (func.funcion_sustantiva && func.funcion_sustantiva.toLowerCase().includes('investigación')) horasInvestigacion += hf;
 
             // Actividades de esta función
@@ -471,9 +466,8 @@ const getAgendaDetalle = async (req, res) => {
         // Calcular perfil docente
         const perfilDocente = calcularPerfilDocente(docente.tipo_contrato, horasDirectas, horasInvestigacion, totalHoras, docente.horas_contrato);
 
-        // Docencia indirecta calculada
-        const decimal = horasDirectas * 0.3;
-        const docenciaIndirecta = decimal % 1 >= 0.5 ? Math.ceil(decimal) : Math.floor(decimal);
+        // Docencia indirecta asignada (no se reemplaza) y la que exige el 30 %
+        const indirecta = revisarIndirecta(horasDirectas, horasIndirectas);
 
         res.json({
             docente,
@@ -481,7 +475,9 @@ const getAgendaDetalle = async (req, res) => {
             perfil_docente: perfilDocente,
             horas_directas: horasDirectas,
             horas_investigacion: horasInvestigacion,
-            docencia_indirecta: docenciaIndirecta,
+            docencia_indirecta: indirecta.asignada,
+            docencia_indirecta_esperada: indirecta.esperada,
+            indirecta_cumple_ac030: indirecta.cumple,
             // Solo el Director (rol comodín) cierra los cortes; los revisores
             // de una función se quedan en el visto bueno.
             puede_aprobar: !alcanceFunc.restringido || !!alcanceFunc.esComodin,
