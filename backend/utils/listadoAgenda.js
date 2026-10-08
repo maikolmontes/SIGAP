@@ -154,6 +154,10 @@ const ENCABEZADOS_DE_FUNCION = [
     { funcion: VICERRECTORIA, claves: ['vicerrectoria', 'proyeccion', 'bienestar', 'pastoral', 'evangelizacion'] },
 ];
 
+// Funciones que el sistema ya reconoce por palabras clave
+const FUNCIONES_DEL_SISTEMA = new Set(
+    [DIRECTA, INDIRECTA, INVESTIGACION, ACADEMICO_ADMIN, VICERRECTORIA, CALIDAD].map(normalizar));
+
 // Un nombre de programa empieza así; si el texto empieza así, es una clase
 // aunque contenga una palabra clave ("Especialización en Gestión de la Calidad").
 const PREFIJOS_DE_PROGRAMA = ['ingenieria', 'licenciatura', 'especializacion', 'maestria', 'doctorado',
@@ -166,9 +170,10 @@ const contieneClave = (texto, claves) => claves.some((c) => (' ' + texto).includ
  * Decide la función sustantiva a partir de la columna PROGRAMAS.
  * @param {string} programa   texto de la columna PROGRAMAS
  * @param {Array<{id_programa:number,nombre_programa:string}>} programas  programas registrados
+ * @param {string[]} funcionesCatalogo  funciones del catálogo (incluye las creadas por Planeación)
  * @returns {{funcion:string, esClase:boolean, programaClase?:string, idProgramaClase?:number|null}}
  */
-const clasificarFuncion = (programa, programas = []) => {
+const clasificarFuncion = (programa, programas = [], funcionesCatalogo = []) => {
     const t = normalizar(programa);
     const registrado = programas.find((p) => normalizar(p.nombre_programa) === t);
     if (registrado) {
@@ -176,6 +181,12 @@ const clasificarFuncion = (programa, programas = []) => {
     }
     const esEncabezado = /^(horas?|funcion|funciones|docencia)\b/.test(t);
     if (t && (esEncabezado || !PREFIJOS_DE_PROGRAMA.some((p) => t.startsWith(p)))) {
+        // Funciones que Planeación creó en "Parámetros generales": se reconocen por su nombre
+        // completo y tienen prioridad sobre las palabras clave generales ("proyección"...)
+        const propia = funcionesCatalogo
+            .filter((f) => !FUNCIONES_DEL_SISTEMA.has(normalizar(f)) && contieneClave(t, [normalizar(f)]))
+            .sort((a, b) => b.length - a.length)[0];
+        if (propia) return { funcion: propia, esClase: false };
         const encabezado = ENCABEZADOS_DE_FUNCION.find((e) => contieneClave(t, e.claves));
         if (encabezado) return { funcion: encabezado.funcion, esClase: encabezado.funcion === DIRECTA };
     }
@@ -194,13 +205,13 @@ const clasificarFuncion = (programa, programas = []) => {
 // función cuando el catálogo ubica ese rol en otra (Proyección social está
 // en Investigación). Si el rol no existe en el catálogo, la equivalencia se ignora.
 const EQUIVALENCIAS = [
-    { en: INVESTIGACION, patron: 'semillero', rol: 'Mentor Semilleros de investigación' },
+    { en: INVESTIGACION, patron: 'semillero', rol: 'Mentor de semilleros de investigación' },
     { en: INVESTIGACION, patron: 'direccion de grupo', rol: 'Líder de grupo de investigación' },
     { en: INVESTIGACION, patron: 'lider de grupo', rol: 'Líder de grupo de investigación' },
     { en: INVESTIGACION, patron: 'co investigador', rol: 'Co Investigador' },
     { en: INVESTIGACION, patron: 'coinvestigador', rol: 'Co Investigador' },
-    { en: INVESTIGACION, patron: 'investigador principal', ambiguo: ['Investigador principal proyecto financiación interna', 'Investigador principal proyecto financiación externa'] },
-    { en: ACADEMICO_ADMIN, patron: 'practica', rol: 'Coordinador prácticas formativas' },
+    { en: INVESTIGACION, patron: 'investigador principal', ambiguo: ['Investigador principal de proyecto con financiación interna', 'Investigador principal de proyecto con financiación externa'] },
+    { en: ACADEMICO_ADMIN, patron: 'practica', rol: 'Coordinador de prácticas formativas' },
     { en: ACADEMICO_ADMIN, patron: 'coordinacion academic', rol: 'Coordinador académico' },
     { en: ACADEMICO_ADMIN, patron: 'coordinador academic', rol: 'Coordinador académico' },
     { en: ACADEMICO_ADMIN, patron: 'postgrado', rol: 'Coordinador de programa de postgrado' },
@@ -208,7 +219,9 @@ const EQUIVALENCIAS = [
     { en: ACADEMICO_ADMIN, patron: 'director de programa', rol: 'Director de programa de pregrado' },
     { en: ACADEMICO_ADMIN, patron: 'direccion de programa', rol: 'Director de programa de pregrado' },
     { en: ACADEMICO_ADMIN, patron: 'saber pro', rol: 'Estrategias de mejoramiento Saber Pro' },
-    { en: ACADEMICO_ADMIN, patron: 'egresado', rol: 'Egresados' },
+    // En el formato institucional "Egresados" es un rol de INVESTIGACIÓN, venga el listado bajo el encabezado que venga
+    { en: INVESTIGACION, patron: 'egresado', rol: 'Egresados' },
+    { en: ACADEMICO_ADMIN, patron: 'egresado', funcion: INVESTIGACION, rol: 'Egresados' },
     { en: ACADEMICO_ADMIN, patron: 'gestion curricular', rol: 'Gestión Curricular' },
     { en: VICERRECTORIA, patron: 'proyeccion social', funcion: INVESTIGACION, rol: 'Proyección Social y Extensión' },
     { en: VICERRECTORIA, patron: 'acompanamiento integral', rol: 'Docentes de acompañamiento integral' },
@@ -289,7 +302,7 @@ const resolverRol = (texto, funcion, catalogo) => {
  * @param {{programas:Array, catalogo:Map<string,string[]>}} contexto
  */
 const clasificarFila = (fila, { programas = [], catalogo = new Map() } = {}) => {
-    const f = clasificarFuncion(fila.programa, programas);
+    const f = clasificarFuncion(fila.programa, programas, [...catalogo.keys()]);
     if (!f.funcion) return { ...f, rol: '', como: 'funcion_desconocida' };
     if (f.esClase) {
         return { ...f, rol: String(fila.asignatura || '').trim(), como: 'clase' };

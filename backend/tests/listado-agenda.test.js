@@ -13,13 +13,13 @@ const PROGRAMAS = [
 // Extracto del catálogo maestro real (funciones 'Activo' sin docente)
 const CATALOGO = new Map([
     ['Investigación', ['Co Investigador', 'Comité Institucional de investigaciones', 'Coordinación de innovación',
-        'Investigador principal proyecto financiación externa', 'Investigador principal proyecto financiación interna',
-        'Líder de grupo de investigación', 'Mentor Semilleros de investigación', 'Proyección Social y Extensión',
+        'Investigador principal de proyecto con financiación externa', 'Investigador principal de proyecto con financiación interna', 'Egresados',
+        'Líder de grupo de investigación', 'Mentor de semilleros de investigación', 'Proyección Social y Extensión',
         'Tutor de contenidos TAU']],
     ['Académico-Administrativo', ['Coordinador académico',
         'Coordinador de desarrollo académico e innovación pedagógica y curricular', 'Coordinador de programa de postgrado',
-        'Coordinador prácticas formativas', 'Dirección de grupo', 'Director de programa de pregrado', 'Egresados',
-        'Estrategias de mejoramiento Saber Pro', 'Gestión Curricular', 'Otro/Cuál']],
+        'Coordinador de prácticas formativas', 'Dirección de grupo', 'Director de programa de pregrado', 'Egresados',
+        'Estrategias de mejoramiento Saber Pro', 'Gestión Curricular', 'Comité curricular', 'Otro/Cuál']],
     ['Vicerrectoría', ['Docentes de acompañamiento académico', 'Docentes de acompañamiento integral', 'Otro, ¿Cuál?']],
     ['Aseguramiento de Calidad', ['Aseguramiento interno de la calidad']],
 ]);
@@ -121,8 +121,8 @@ test('"HORAS ..." que no corresponde a ninguna función no inventa una función'
 // ---------------- Actividad del catálogo ----------------
 
 test('equivalencias que antes se resolvían mal', () => {
-    assert.equal(clasificar('HORAS VICERRECTORIA DE INVESTIGACIONES', 'TUTORÍA DE SEMILLEROS').rol, 'Mentor Semilleros de investigación');
-    assert.equal(clasificar('HORAS ADMINISTRATIVAS', 'PRACTICA PROFESIONAL').rol, 'Coordinador prácticas formativas');
+    assert.equal(clasificar('HORAS VICERRECTORIA DE INVESTIGACIONES', 'TUTORÍA DE SEMILLEROS').rol, 'Mentor de semilleros de investigación');
+    assert.equal(clasificar('HORAS ADMINISTRATIVAS', 'PRACTICA PROFESIONAL').rol, 'Coordinador de prácticas formativas');
     assert.equal(clasificar('HORAS ADMINISTRATIVAS', 'COORDINACIÓN ACADÉMICO').rol, 'Coordinador académico');
     assert.equal(clasificar('HORAS VICERRECTORIA DE INVESTIGACIONES', 'DIRECCIÓN DE GRUPO').rol, 'Líder de grupo de investigación');
 });
@@ -134,7 +134,11 @@ test('Proyección social se carga en Investigación, donde la ubica el catálogo
 });
 
 test('coincidencia por palabras con el catálogo', () => {
-    assert.equal(clasificar('HORAS ADMINISTRATIVAS', 'GESTIÓN DE EGRESADOS').rol, 'Egresados');
+    // Egresados es un rol de Investigación en el formato, aunque el listado lo traiga como horas administrativas
+    const egresados = clasificar('HORAS ADMINISTRATIVAS', 'GESTIÓN DE EGRESADOS');
+    assert.equal(egresados.rol, 'Egresados');
+    assert.equal(egresados.funcion, 'Investigación');
+    assert.equal(clasificar('HORAS VICERRECTORIA DE INVESTIGACIONES', 'EGRESADOS').funcion, 'Investigación');
     assert.equal(clasificar('HORAS VICERRECTORIA DE INVESTIGACIONES', 'COORDINACIÓN DE INNOVACIÓN').rol, 'Coordinación de innovación');
 });
 
@@ -219,4 +223,26 @@ test('con "Otro/Cuál" en Investigación, el texto genérico se carga ahí para 
     const c = L.clasificarFila({ programa: 'HORAS VICERRECTORIA DE INVESTIGACIONES', asignatura: 'INVESTIGACIONES' }, { programas: PROGRAMAS, catalogo });
     assert.equal(c.rol, 'Otro/Cuál');
     assert.equal(c.como, 'otro');
+});
+
+test('una función creada por Planeación en Parámetros generales se reconoce en el listado', () => {
+    const catalogo = new Map(CATALOGO);
+    catalogo.set('Extensión y Proyección', ['Coordinador de extensión', 'Otro/Cuál']);
+    const c = L.clasificarFila(
+        { programa: 'HORAS EXTENSIÓN Y PROYECCIÓN', asignatura: 'COORDINADOR DE EXTENSIÓN' },
+        { programas: PROGRAMAS, catalogo });
+    assert.equal(c.funcion, 'Extensión y Proyección');
+    assert.equal(c.rol, 'Coordinador de extensión');
+});
+
+test('un encabezado que no es ninguna función se informa en lugar de inventar una función', () => {
+    const c = L.clasificarFila(
+        { programa: 'HORAS LOGÍSTICA', asignatura: 'COORDINADOR' },
+        { programas: PROGRAMAS, catalogo: CATALOGO });
+    assert.equal(c.funcion, null);
+});
+
+test('una función oculta (fuera del catálogo visible) deja de reconocerse', () => {
+    const catalogo = new Map(CATALOGO); // sin 'Extensión y Proyección': la oculta no llega al mapa
+    assert.equal(L.clasificarFuncion('HORAS EXTENSIÓN Y PROYECCIÓN', PROGRAMAS, [...catalogo.keys()]).funcion, 'Vicerrectoría'); // vuelve a la palabra clave general
 });

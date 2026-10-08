@@ -1,5 +1,5 @@
 const pool = require('../db/connection');
-const { condicionCatalogo } = require('../utils/catalogo');
+const { condicionCatalogo, asegurarEsquemaCatalogo, ordenarActividades } = require('../utils/catalogo');
 
 const getFunciones = async (req, res) => {
     try {
@@ -79,6 +79,8 @@ const asignarFuncion = async (req, res) => {
 
 const getCatalogoJerarquico = async (req, res) => {
     try {
+        await asegurarEsquemaCatalogo();
+        // Lo que Planeación oculta en "Parámetros generales" no se ofrece en las agendas nuevas
         const result = await pool.query(`
             SELECT 
                 af.id_funciones, af.funcion_sustantiva,
@@ -86,11 +88,11 @@ const getCatalogoJerarquico = async (req, res) => {
                 d.id_descripcion, d.resultado_esperado, d.meta,
                 i.id_indicadores as id_indicador, i.nombre_indicador
             FROM asignacion_funciones af
-            LEFT JOIN asignacion_actividades aa ON af.id_funciones = aa.id_funciones
-            LEFT JOIN descripcion d ON aa.id_asignacionact = d.id_asignacionact
-            LEFT JOIN indicadores i ON d.id_descripcion = i.id_descripcion
+            LEFT JOIN asignacion_actividades aa ON af.id_funciones = aa.id_funciones AND aa.activo IS NOT FALSE
+            LEFT JOIN descripcion d ON aa.id_asignacionact = d.id_asignacionact AND d.activo IS NOT FALSE
+            LEFT JOIN indicadores i ON d.id_descripcion = i.id_descripcion AND i.activo IS NOT FALSE
             WHERE ${condicionCatalogo('af')}
-            ORDER BY af.id_funciones, aa.id_asignacionact, d.id_descripcion, i.id_indicadores
+            ORDER BY af.id_funciones, (aa.rol_seleccionado ILIKE 'otro%'), aa.orden NULLS LAST, aa.id_asignacionact, d.id_descripcion, i.id_indicadores
         `);
 
         // Procesar rows para armar el JSON anidado
@@ -128,7 +130,8 @@ const getCatalogoJerarquico = async (req, res) => {
                         const d = {
                             id_descripcion: row.id_descripcion,
                             resultado_esperado: row.resultado_esperado,
-                            meta: '',
+                            // La meta se devolvía siempre vacía: Docencia Directa la necesita del catálogo
+                            meta: row.meta === null || row.meta === undefined ? '' : Number(row.meta),
                             indicadores: []
                         };
                         descMap.set(row.id_descripcion, d);
@@ -146,6 +149,7 @@ const getCatalogoJerarquico = async (req, res) => {
             }
         });
 
+        catalogo.forEach((f) => ordenarActividades(f.actividades, (a) => a.rol_seleccionado));
         res.json(catalogo);
     } catch (error) {
         console.error('Error en getCatalogoJerarquico:', error.message);

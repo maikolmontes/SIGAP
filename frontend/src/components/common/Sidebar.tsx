@@ -22,7 +22,8 @@ import {
     Plus,
     ShieldCheck,
     Crown,
-    Mail
+    Mail,
+    ListTree
 } from 'lucide-react'
 
 type MenuItem = {
@@ -46,6 +47,7 @@ const menuPlaneacion: MenuItem[] = [
     { label: 'Períodos', path: '/planeacion/periodos', icon: Calendar },
     { label: 'Docentes', path: '/planeacion/docentes', icon: Users },
     { label: 'Semanas', path: '/planeacion/semanas', icon: Clock },
+    { label: 'Parámetros generales', path: '/planeacion/parametros', icon: ListTree },
     { label: 'Seguridad y Accesos', isHeader: true },
     { label: 'Gestión de Perfiles', path: '/planeacion/perfiles', icon: ShieldCheck },
     { label: 'Notificaciones', path: '/planeacion/notificaciones', icon: Mail },
@@ -105,6 +107,7 @@ const PATH_TO_PAGINA: Record<string, string> = {
     '/planeacion/programas': 'Programas Académicos',
     '/planeacion/periodos': 'Períodos Académicos',
     '/planeacion/semanas': 'Semanas y Cortes',
+    '/planeacion/parametros': 'Parámetros Generales',
     '/planeacion/analitica': 'Analítica y Reportes',
     '/planeacion/perfiles': 'Gestión de Perfiles y Permisos',
     '/planeacion/permisos': 'Gestión de Perfiles y Permisos',
@@ -296,13 +299,13 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
         <aside className="w-64 h-screen overflow-y-auto bg-[#063759] flex flex-col shadow-2xl lg:shadow-none overflow-x-hidden relative">
             <div className="px-4 py-4 border-b border-white/10 flex justify-between items-center sticky top-0 bg-[#063759] z-10">
                 <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-lg bg-white p-1 flex items-center justify-center shadow-md overflow-hidden shrink-0">
-                        <img 
-                            src="/logo_cesmag.png" 
-                            alt="Universidad CESMAG" 
-                            className="w-full h-full object-contain" 
-                        />
-                    </div>
+                    <img
+                        src="/logo_cesmag.png"
+                        alt="Universidad CESMAG"
+                        width={40}
+                        height={40}
+                        className="w-10 h-10 object-contain shrink-0 drop-shadow-md"
+                    />
                     <div>
                         <div className="text-white font-black text-sm tracking-wide">SIGAP</div>
                         <div className="text-white/70 text-[11px] mt-0.5 font-medium leading-tight truncate max-w-[135px]">
