@@ -20,6 +20,7 @@ const RUTA_PAGINA_MAP: Record<string, string> = {
     '/planeacion/facultades': 'Facultades',
     '/planeacion/programas': 'Programas',
     '/planeacion/periodos': 'Períodos Académicos',
+    '/planeacion/parametros': 'Parámetros Generales',
     '/planeacion/gestion-perfiles': 'Gestión de Perfiles',
     '/planeacion/dashboard': 'Dashboard Planeación',
     '/docente/avance-semana-1': 'Avance Semana 1',

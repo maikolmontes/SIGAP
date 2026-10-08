@@ -3,7 +3,7 @@ const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
 const notificaciones = require('../services/notificacionesService');
 const { respaldarAgendas } = require('../services/respaldoAgendasService');
 const auditoria = require('../services/auditoriaService');
-const { condicionCatalogo } = require('../utils/catalogo');
+const { condicionCatalogo, asegurarEsquemaCatalogo } = require('../utils/catalogo');
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 const {
     leerListado, clasificarFila, clasificarVinculacion, revisarCarga, normalizar, TIPO_CONTRATO_POR_SIGLA,
@@ -48,7 +48,7 @@ const cargarContextoListado = async (client) => {
     const cat = await client.query(`
         SELECT af.funcion_sustantiva, aa.rol_seleccionado
         FROM asignacion_funciones af
-        JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones
+        JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones AND aa.activo IS NOT FALSE
         WHERE ${condicionCatalogo('af')}
         ORDER BY af.id_funciones, aa.id_asignacionact
     `);
@@ -76,7 +76,22 @@ const cargarContextoListado = async (client) => {
         semestres: new Map(),
         grupos: new Map(),
         semestresGrupos: new Set(),
+        espacios: null, // se carga la primera vez que hace falta (ver obtenerEspacios)
     };
+};
+
+// Asignaturas existentes, indexadas por semestre y nombre sin tildes, mayúsculas ni espacios de más:
+// "INTRODUCCIÓN A LA  INGENIERÍA" y "Introduccion a la ingenieria" son la misma asignatura.
+const obtenerEspacios = async (client, ctx) => {
+    if (!ctx.espacios) {
+        ctx.espacios = new Map();
+        const filas = await client.query('SELECT id_espacio_aca, id_semestre, nombre_espacio FROM espacio_academico ORDER BY id_espacio_aca');
+        for (const f of filas.rows) {
+            const clave = `${f.id_semestre}|${normalizar(f.nombre_espacio)}`;
+            if (!ctx.espacios.has(clave)) ctx.espacios.set(clave, f.id_espacio_aca); // si ya había repetidas, se usa la más antigua
+        }
+    }
+    return ctx.espacios;
 };
 
 const obtenerSemestreGrupo = async (client, ctx, semestreRaw) => {
@@ -185,14 +200,16 @@ const registrarFila = async (client, ctx, d) => {
         const sg = await obtenerSemestreGrupo(client, ctx, fila.semestre);
         idGrupo = sg.idGrupo;
         if (clas.rol) {
-            const esp = await client.query(
-                'SELECT id_espacio_aca FROM espacio_academico WHERE LOWER(nombre_espacio) = LOWER($1) AND id_semestre = $2 ORDER BY id_espacio_aca LIMIT 1',
-                [clas.rol, sg.idSemestre]
-            );
-            idEspacioAca = esp.rows[0]?.id_espacio_aca || (await client.query(
-                'INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca',
-                [clas.rol, sg.idSemestre]
-            )).rows[0].id_espacio_aca;
+            const espacios = await obtenerEspacios(client, ctx);
+            const clave = `${sg.idSemestre}|${normalizar(clas.rol)}`;
+            idEspacioAca = espacios.get(clave);
+            if (!idEspacioAca) {
+                idEspacioAca = (await client.query(
+                    'INSERT INTO espacio_academico (nombre_espacio, id_semestre, activo) VALUES ($1, $2, true) RETURNING id_espacio_aca',
+                    [clas.rol, sg.idSemestre]
+                )).rows[0].id_espacio_aca;
+                espacios.set(clave, idEspacioAca);
+            }
         }
     }
 
@@ -247,6 +264,7 @@ const procesarListado = async (req, res, modo) => {
         });
     }
 
+    await asegurarEsquemaCatalogo();
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -410,6 +428,7 @@ const procesarListado = async (req, res, modo) => {
                 ctx.semestres.clear();
                 ctx.grupos.clear();
                 ctx.semestresGrupos.clear();
+                ctx.espacios = null;
                 console.error(`Error procesando docente ${documento}:`, err);
                 errores.push(`No se pudo cargar la agenda de ${docente} (${documento}): ${err.message}`);
                 totales.omitidos += filas.length;

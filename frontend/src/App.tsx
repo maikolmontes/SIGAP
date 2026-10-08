@@ -13,6 +13,7 @@ const Facultades = lazy(() => import('./pages/planeacion/Facultades'))
 const Programas = lazy(() => import('./pages/planeacion/Programas'))
 const GestionPerfiles = lazy(() => import('./pages/planeacion/GestionPerfiles'))
 const Notificaciones = lazy(() => import('./pages/planeacion/Notificaciones'))
+const ParametrosGenerales = lazy(() => import('./pages/planeacion/ParametrosGenerales'))
 const DashboardDirector = lazy(() => import('./pages/director/DashboardDirector'))
 const AgendasPorRevisar = lazy(() => import('./pages/director/AgendasPorRevisar'))
 const DetalleAgenda = lazy(() => import('./pages/director/DetalleAgenda'))
@@ -70,6 +71,7 @@ function App() {
           <Route path="/planeacion/docentes" element={<Docentes />} />
           <Route path="/planeacion/periodos" element={<Periodos />} />
           <Route path="/planeacion/semanas" element={<Semanas />} />
+          <Route path="/planeacion/parametros" element={<ParametrosGenerales />} />
           <Route path="/planeacion/facultades" element={<Facultades />} />
           <Route path="/planeacion/programas" element={<Programas />} />
           <Route path="/planeacion/perfiles" element={<GestionPerfiles />} />

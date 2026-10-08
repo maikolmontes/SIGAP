@@ -39,6 +39,7 @@ app.use('/api/observaciones', require('./routes/observaciones'));
 app.use('/api/permisos', require('./routes/permisos'));
 app.use('/api/notificaciones', require('./routes/notificaciones'));
 app.use('/api/analitica', require('./routes/analitica'));
+app.use('/api/parametros', require('./routes/parametros'));
 
 // Evidencias: ya no son una carpeta pública. Pasan por token + permiso por docente.
 const { verifyTokenFlexible, servirArchivo } = require('./middleware/accesoEvidencias');

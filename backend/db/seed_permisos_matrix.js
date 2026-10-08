@@ -26,6 +26,10 @@ const matrixData = [
         descripcion: 'Programación de semanas críticas (Semana 8 y Semana 16)'
       },
       {
+        nombre: 'Parámetros Generales',
+        descripcion: 'Administración del catálogo de funciones, actividades, descripciones e indicadores de la agenda'
+      },
+      {
         nombre: 'Analítica y Reportes',
         descripcion: 'Métricas institucionales, cumplimiento y avance general'
       }
