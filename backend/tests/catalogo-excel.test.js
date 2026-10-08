@@ -130,3 +130,10 @@ test('el catálogo leído del formato no deja ninguna palabra mal escrita conoci
         assert.ok(!todo.includes(mala), `quedó "${mala}"`);
     }
 });
+
+test('lo que sobra pero ya está oculto no vuelve a aparecer en el plan', () => {
+    const actual = base().filter((a) => a.id !== 2);
+    actual[0].descripciones[0].indicadores[1].activo = false; // "Sobra", ya oculto
+    const objetivo = [{ nombre: 'Co Investigador', descripciones: [{ texto: 'Proyecto de investigación', indicadores: ['Informe avance'] }] }];
+    assert.deepEqual(planificarFuncion(objetivo, actual), []);
+});

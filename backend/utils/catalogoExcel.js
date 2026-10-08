@@ -366,13 +366,13 @@ const planificarFuncion = (objetivo, actual) => {
                     if (i.activo === false) ops.push({ op: 'mostrar', tipo: 'indicadores', id: i.id, nombre: ind });
                 }
             });
-            d.indicadores.forEach((i, m) => { if (!pi.includes(m)) ops.push({ op: 'quitar_indicador', id: i.id, nombre: i.nombre, descripcion: desc.texto }); });
+            d.indicadores.forEach((i, m) => { if (!pi.includes(m) && i.activo !== false) ops.push({ op: 'quitar_indicador', id: i.id, nombre: i.nombre, descripcion: desc.texto }); });
         });
         a.descripciones.forEach((d, k) => {
-            if (!pd.includes(k)) ops.push({ op: 'quitar_descripcion', id: d.id, texto: d.texto, actividad: rol.nombre });
+            if (!pd.includes(k) && d.activo !== false) ops.push({ op: 'quitar_descripcion', id: d.id, texto: d.texto, actividad: rol.nombre });
         });
     });
-    propias.forEach((a, k) => { if (!par.includes(k)) ops.push({ op: 'quitar_actividad', id: a.id, nombre: a.nombre }); });
+    propias.forEach((a, k) => { if (!par.includes(k) && a.activo !== false) ops.push({ op: 'quitar_actividad', id: a.id, nombre: a.nombre }); });
     return ops;
 };
 
