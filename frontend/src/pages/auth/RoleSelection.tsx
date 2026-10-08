@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Users, Settings, Eye, ChevronRight, LogOut, Check, ArrowRight, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import LogoSigap from '../../components/common/LogoSigap';
+import { rutaInicialDeRol } from '../../utils/roles';
 // @ts-ignore
 import api from '../../services/api';
 
@@ -137,16 +139,9 @@ const RoleSelection = () => {
 
     localStorage.setItem('sigap_active_role', JSON.stringify(finalRole));
 
-    const nombreNormalizado = finalRole.nombre_rol.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    if (nombreNormalizado.includes('docente')) navigate('/docente/dashboard');
-    else if (nombreNormalizado.includes('director')) navigate('/director/dashboard');
-    else if (nombreNormalizado.includes('planeacion') || nombreNormalizado.includes('admin')) navigate('/planeacion/dashboard');
-    else if (nombreNormalizado.includes('consultor') || nombreNormalizado.includes('auditor')) navigate('/consultor/dashboard');
-    // Cualquier otro rol que revise funciones sustantivas (Investigaci\u00f3n y los
-    // que se creen despu\u00e9s) entra al m\u00f3dulo gen\u00e9rico de revisi\u00f3n. Antes ca\u00eda en
-    // navigate('/') y el usuario se quedaba sin pantalla.
-    else if (finalRole.funciones_revisa?.length) navigate('/revision/dashboard');
-    else navigate('/perfil');
+    // Cualquier rol que revise funciones sustantivas (Investigación y los que se creen
+    // después) entra al módulo genérico de revisión; ver utils/roles.ts
+    navigate(rutaInicialDeRol(finalRole));
   };
 
   const handleRoleSelectionWithDelay = async (rolItem: Rol) => {
@@ -174,13 +169,20 @@ const RoleSelection = () => {
       <div className="hidden lg:flex w-5/12 relative bg-[#172554] text-white flex-col justify-between overflow-hidden shadow-2xl">
         <div className="absolute inset-0 bg-[#172554]"></div>
         <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-50 transition-opacity duration-700"
-          style={{ backgroundImage: 'url("/edificio.jpg")' }}
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700"
+          style={{ backgroundImage: 'url("/SedeCentroUCESMAG.webp")' }}
         ></div>
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0f172a]/90 via-[#0f172a]/40 to-transparent pointer-events-none"></div>
+        <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(15,23,42,0.92) 0%, rgba(15,23,42,0.65) 45%, rgba(15,23,42,0.40) 100%)' }}></div>
 
         <div className="relative z-10 p-16 xl:p-24 flex flex-col h-full justify-center">
           <div className="mb-10">
+            <div className="flex items-center gap-3 mb-6">
+              <img src="/logo_cesmag.png" alt="CESMAG" className="h-14 w-14 object-contain drop-shadow-lg" />
+              <div>
+                <div className="text-white font-black text-2xl leading-none tracking-tight">CESMAG</div>
+                <div className="text-blue-200/70 text-xs font-semibold uppercase tracking-widest">Pasto · Colombia</div>
+              </div>
+            </div>
             <span className="bg-white/10 border border-white/20 text-blue-100 text-xs font-bold px-4 py-1.5 uppercase tracking-widest rounded-full backdrop-blur-md shadow-lg">
               Selección de Perfil
             </span>
@@ -220,9 +222,7 @@ const RoleSelection = () => {
           {/* Cabecera con logo y perfil de usuario */}
           <div className="flex items-center justify-between mb-12">
             <div className="flex items-center gap-3">
-              <div className="bg-gradient-to-br from-[#172554] to-blue-800 p-2.5 rounded-xl shadow-lg shadow-blue-900/20">
-                <BookOpen className="text-white h-6 w-6" />
-              </div>
+              <LogoSigap className="h-12 w-12 shrink-0 drop-shadow-lg" />
               <span className="text-[#172554] font-black text-2xl tracking-tight">SIGAP</span>
             </div>
 

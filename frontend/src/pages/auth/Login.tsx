@@ -4,8 +4,10 @@ import type { CredentialResponse } from '@react-oauth/google';
 // @ts-ignore
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import LogoSigap from '../../components/common/LogoSigap';
+import { etiquetaPublicaDeRol, ROLES_PUBLICOS_POR_DEFECTO } from '../../utils/roles';
 import {
-  ShieldCheck, BookOpen, AlertCircle, Clock,
+  ShieldCheck, AlertCircle, Clock,
   GraduationCap, Users, X, Lock, FileText
 } from 'lucide-react';
 
@@ -21,6 +23,7 @@ export default function Login() {
   const [showPrivacidad, setShowPrivacidad] = useState(false);
   const [showTerminos, setShowTerminos] = useState(false);
   const [stats, setStats] = useState({ docentes: 23, programas: 6 });
+  const [roles, setRoles] = useState<string[]>(ROLES_PUBLICOS_POR_DEFECTO);
 
   // Cargar el botón de Google cuando el navegador esté libre (tras el primer pintado)
   useEffect(() => {
@@ -41,6 +44,10 @@ export default function Login() {
             docentes: res.data.docentesActivos ?? 23,
             programas: res.data.programasActivos ?? 6,
           });
+          // Todos los perfiles que existen en el sistema; si no llegan, quedan los de por defecto
+          if (Array.isArray(res.data.roles) && res.data.roles.length > 0) {
+            setRoles(res.data.roles.map(etiquetaPublicaDeRol));
+          }
         }
       })
       .catch(() => {});
@@ -88,16 +95,16 @@ export default function Login() {
             {/* Imagen edificio */}
             <div
               className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: 'url("/edificio.jpg")', opacity: 0.4 }}
+              style={{ backgroundImage: 'url("/SedeCentroUCESMAG.webp")' }}
             />
-            {/* Overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1f4b]/90 via-[#0f1f4b]/40 to-transparent" />
+            {/* Overlay: oscurece para legibilidad del texto */}
+            <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(15,31,75,0.92) 0%, rgba(15,31,75,0.65) 45%, rgba(15,31,75,0.40) 100%)' }} />
 
             {/* ── Móvil ── */}
             <div className="lg:hidden relative z-10 h-full flex flex-col justify-between p-4 sm:p-6">
               <div className="flex items-center gap-2.5">
                 <img src="/logo_cesmag.png" alt="CESMAG"
-                  className="h-8 w-8 rounded-lg object-contain bg-white/10 p-0.5" />
+                  className="h-8 w-8 object-contain" />
                 <div>
                   <div className="text-white font-black text-sm leading-none tracking-tight">CESMAG</div>
                   <div className="text-blue-200/60 text-[9px] font-semibold uppercase tracking-widest">Pasto · Colombia</div>
@@ -115,7 +122,7 @@ export default function Login() {
             <div className="hidden lg:flex relative z-10 h-full flex-col justify-between p-14 xl:p-20">
               <div className="flex items-center gap-3">
                 <img src="/logo_cesmag.png" alt="CESMAG"
-                  className="h-11 w-11 rounded-xl object-contain bg-white/10 p-1" />
+                  className="h-11 w-11 object-contain" />
                 <div>
                   <div className="text-white font-black text-xl leading-none tracking-tight">CESMAG</div>
                   <div className="text-blue-200/60 text-[11px] font-semibold uppercase tracking-widest">Pasto · Colombia</div>
@@ -160,9 +167,7 @@ export default function Login() {
 
             {/* Logo SIGAP — solo desktop */}
             <div className="hidden lg:flex items-center gap-3 mb-10">
-              <div className="bg-gradient-to-br from-[#0f1f4b] to-blue-700 p-2.5 rounded-xl shadow-lg shadow-blue-900/20">
-                <BookOpen className="text-white h-7 w-7" />
-              </div>
+              <LogoSigap className="h-14 w-14 shrink-0 drop-shadow-lg" />
               <div>
                 <span className="text-[#0f1f4b] font-black text-3xl tracking-tight">SIGAP</span>
                 <div className="text-gray-500 text-[10px] font-semibold uppercase tracking-widest">v2.0 · 2026</div>
@@ -224,7 +229,7 @@ export default function Login() {
 
             {/* Chips roles — solo desktop */}
             <div className="hidden lg:flex flex-wrap gap-2 mt-6">
-              {['Planeación', 'Docentes', 'Directores', 'Consultores'].map(rol => (
+              {roles.map(rol => (
                 <span key={rol} className="text-xs font-semibold text-gray-600 bg-gray-100 border border-gray-200 px-3 py-1 rounded-full">
                   {rol}
                 </span>

@@ -86,9 +86,13 @@ const getPublicStats = async (req, res) => {
             WHERE activo = true
         `);
 
+        // Solo los nombres: la pantalla de inicio muestra qué perfiles existen
+        const rolesRes = await pool.query('SELECT nombre_rol FROM roles ORDER BY id_rol');
+
         res.json({
             docentesActivos: docRes.rows[0]?.count || 0,
-            programasActivos: progRes.rows[0]?.count || 0
+            programasActivos: progRes.rows[0]?.count || 0,
+            roles: rolesRes.rows.map((r) => r.nombre_rol)
         });
     } catch (error) {
         console.error('Error al obtener estadísticas públicas:', error);
