@@ -13,6 +13,7 @@
 const pool = require('../db/connection');
 const { sendEmail, resolverRemitente } = require('./emailService');
 const plantillas = require('../utils/emailTemplates');
+const notificacionesApp = require('./notificacionesApp');
 
 // ----------------------------------------------------------------
 // Utilidades internas
@@ -82,7 +83,7 @@ const ETIQUETA_PLANEACION = 'Planeación';
 const getDirectoresDePrograma = async (idPrograma, client = pool) => {
     if (idPrograma) {
         const res = await client.query(
-            `SELECT DISTINCT u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
+            `SELECT DISTINCT u.id_usuario, u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
              FROM usuarios u
              JOIN director_programa dp ON dp.id_usuario = u.id_usuario
              JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
@@ -97,7 +98,7 @@ const getDirectoresDePrograma = async (idPrograma, client = pool) => {
     }
 
     const respaldo = await client.query(
-        `SELECT DISTINCT u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
+        `SELECT DISTINCT u.id_usuario, u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
          FROM usuarios u
          JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
          JOIN roles r ON r.id_rol = ur.id_rol
@@ -252,6 +253,15 @@ const notificarAgendaEnviada = async (idUsuario) => {
     const directores = await getDirectoresDePrograma(docente.id_programa);
     if (directores.length === 0) return { ok: false, motivo: 'sin_directores' };
 
+    // Campana: el mismo aviso, para los mismos directores
+    await notificacionesApp.crearParaVarios(directores.map((d) => d.id_usuario), {
+        tipo: 'agenda_enviada',
+        titulo: 'Agenda lista para revisión',
+        mensaje: `${docente.nombre_completo} radicó su agenda del período ${nombrePeriodo(periodo)} (${total === 1 ? '1 función' : total + ' funciones'}).`,
+        enlace: `/director/agendas/${idUsuario}`,
+        clave: `agenda_enviada:${idUsuario}`,
+    });
+
     const resultados = [];
     for (const director of directores) {
         const { subject, html } = plantillas.plantillaAgendaEnviada({
@@ -276,9 +286,19 @@ const notificarAgendaEnviada = async (idUsuario) => {
 const notificarAgendaAprobada = async (idUsuario, idDirector) => {
     const periodo = await getPeriodoActivo();
     const docente = await getUsuario(idUsuario);
-    if (!docente || !docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
-
     const director = idDirector ? await getUsuario(idDirector) : null;
+
+    // Campana: llega aunque el docente no tenga correo o el envío falle
+    if (docente) {
+        await notificacionesApp.crear({
+            idUsuario,
+            tipo: 'agenda_aprobada',
+            titulo: 'Tu agenda fue aprobada',
+            mensaje: `${director ? director.nombre_completo : 'La dirección de programa'} aprobó tu agenda${periodo ? ` del período ${nombrePeriodo(periodo)}` : ''}.`,
+            enlace: '/docente/agenda',
+        });
+    }
+    if (!docente || !docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
 
     let totalHoras = null;
     if (periodo) {
@@ -320,9 +340,20 @@ const notificarAgendaAprobada = async (idUsuario, idDirector) => {
 const notificarAgendaDevuelta = async (idUsuario, idDirector, observaciones) => {
     const periodo = await getPeriodoActivo();
     const docente = await getUsuario(idUsuario);
-    if (!docente || !docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
-
     const director = idDirector ? await getUsuario(idDirector) : null;
+
+    if (docente) {
+        await notificacionesApp.crear({
+            idUsuario,
+            tipo: 'agenda_devuelta',
+            titulo: 'Tu agenda fue devuelta con observaciones',
+            mensaje: observaciones
+                ? `${director ? director.nombre_completo : 'La dirección de programa'}: ${observaciones}`
+                : 'Revisa las observaciones y vuelve a enviarla.',
+            enlace: '/docente/agenda',
+        });
+    }
+    if (!docente || !docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
 
     const { subject, html } = plantillas.plantillaAgendaDevuelta({
         docente: docente.nombre_completo,
@@ -360,6 +391,16 @@ const notificarBienvenida = async ({ idUsuario = null, correo, nombre, roles, pr
         }
     }
 
+    if (idUsuario) {
+        await notificacionesApp.crear({
+            idUsuario,
+            tipo: 'bienvenida',
+            titulo: '¡Bienvenido(a) a SIGAP!',
+            mensaje: 'Tu cuenta quedó creada. Completa tu perfil para empezar.',
+            enlace: '/perfil',
+            clave: 'bienvenida',
+        });
+    }
     if (!correo) return { ok: false, motivo: 'sin_correo' };
 
     const { subject, html } = plantillas.plantillaBienvenida({
@@ -542,6 +583,18 @@ const notificarRecordatorioPlazo = async ({ idPrograma = null, idRemitente = nul
     let enviados = 0;
     let omitidos = 0;
     for (const docente of pendientes.rows) {
+        // Campana: un recordatorio por docente y día, mientras no lo lea
+        await notificacionesApp.crear({
+            idUsuario: docente.id_usuario,
+            tipo: 'recordatorio_plazo',
+            titulo: docente.alguna_devuelta ? 'Tienes una agenda devuelta por corregir' : 'Recuerda completar tu agenda',
+            mensaje: diasRestantes !== null && diasRestantes >= 0
+                ? `El período ${nombrePeriodo(periodo)} cierra en ${diasRestantes} día${diasRestantes === 1 ? '' : 's'}.`
+                : `El período ${nombrePeriodo(periodo)} sigue abierto y tu agenda está pendiente.`,
+            enlace: '/docente/agenda',
+            clave: `recordatorio:${periodo.id_periodo}`,
+        });
+
         // Como máximo un recordatorio por docente y día
         const clave = `recordatorio:${docente.id_usuario}:${periodo.id_periodo}:${hoyISO}`;
         if (await yaNotificado(clave)) {

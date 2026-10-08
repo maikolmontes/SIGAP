@@ -1,6 +1,7 @@
 const pool = require('../db/connection');
 const { alcanceProgramas, docenteEnAlcance } = require('../utils/rolActivo');
 const notificaciones = require('../services/notificacionesService');
+const notificacionesApp = require('../services/notificacionesApp');
 const { respaldarAgendas } = require('../services/respaldoAgendasService');
 const auditoria = require('../services/auditoriaService');
 const { condicionCatalogo, asegurarEsquemaCatalogo } = require('../utils/catalogo');
@@ -458,6 +459,10 @@ const procesarListado = async (req, res, modo) => {
             String(process.env.EMAIL_AVISO_ASIGNACIONES).toLowerCase() === 'true' ||
             String(req.query?.notificar ?? req.body?.notificar).toLowerCase() === 'true'
         );
+        // La campana avisa siempre que se cargó de verdad; el correo masivo, solo si está habilitado
+        if (!simular && docentesAfectados.size > 0) {
+            notificacionesApp.background.asignacionesCargadas([...docentesAfectados], idPeriodo);
+        }
         if (notificarCarga && docentesAfectados.size > 0) {
             notificaciones.background.asignacionesCargadas([...docentesAfectados], null, req.user?.id);
         }
