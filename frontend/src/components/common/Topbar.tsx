@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
+import CampanaNotificaciones from './CampanaNotificaciones';
 
 interface TopbarProps {
     path: string
@@ -90,6 +91,8 @@ export default function Topbar({ path, rol, onOpenMenu, onToggleDesktop }: Topba
                         <span className="text-xs font-medium hidden sm:inline">Cambiar de Rol</span>
                     </button>
                 )}
+
+                <CampanaNotificaciones />
 
                 {/* Contenedor del Dropdown */}
                 <div className="relative">

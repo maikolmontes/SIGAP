@@ -167,7 +167,7 @@ export default function Login() {
 
             {/* Logo SIGAP — solo desktop */}
             <div className="hidden lg:flex items-center gap-3 mb-10">
-              <LogoSigap className="h-14 w-14 shrink-0 drop-shadow-lg" />
+              <LogoSigap className="h-16 w-auto shrink-0" />
               <div>
                 <span className="text-[#0f1f4b] font-black text-3xl tracking-tight">SIGAP</span>
                 <div className="text-gray-500 text-[10px] font-semibold uppercase tracking-widest">v2.0 · 2026</div>

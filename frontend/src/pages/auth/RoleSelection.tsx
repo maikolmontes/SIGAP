@@ -222,7 +222,7 @@ const RoleSelection = () => {
           {/* Cabecera con logo y perfil de usuario */}
           <div className="flex items-center justify-between mb-12">
             <div className="flex items-center gap-3">
-              <LogoSigap className="h-12 w-12 shrink-0 drop-shadow-lg" />
+              <LogoSigap className="h-14 w-auto shrink-0" />
               <span className="text-[#172554] font-black text-2xl tracking-tight">SIGAP</span>
             </div>
 
