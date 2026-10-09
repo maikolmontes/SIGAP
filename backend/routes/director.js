@@ -5,6 +5,7 @@ const { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDi
 const { getAgendas, getAgendaDetalle, aprobarAgenda, devolverAgenda, getReportesResumen, getMisProgramas } = require('../controllers/directorRevisionController');
 const { getAsignaciones, corregirAsignaciones, aprobarAsignaciones, marcarVistoBueno } = require('../controllers/asignacionesController');
 const { darVistoBueno, aprobarCorte, devolverCorte } = require('../controllers/cortesController');
+const { getBalanceGestion } = require('../controllers/balanceGestionController');
 const verifyToken = require('../middleware/verifyToken');
 const verifyRole = require('../middleware/verifyRole');
 const { puedeVerRevision, puedeRevisar } = require('../middleware/verifyRevisor');
@@ -45,6 +46,7 @@ router.put('/agendas/:id/devolver', verifyToken, puedeRevisar, devolverAgenda);
 router.get('/mis-programas', verifyToken, verifyRole('Director', 'Planeacion', 'Admin', 'Consultor'), getMisProgramas);
 
 // Reportes
+router.get('/balance-gestion', verifyToken, verifyRole('Director', 'Planeacion', 'Admin', 'Consultor'), getBalanceGestion);
 router.get('/reportes/resumen', verifyToken, verifyRole('Director', 'Planeacion', 'Admin', 'Consultor'), getReportesResumen);
 
 module.exports = router;

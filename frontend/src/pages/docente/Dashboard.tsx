@@ -20,6 +20,8 @@ import {
   Target
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { etiquetaSemestre, rotularCortes } from '../../utils/periodo'
+import useSemestreActivo from '../../hooks/useSemestreActivo'
 
 interface DocenteData {
   nombre: string;
@@ -130,6 +132,7 @@ function EstadoBadge({ value, total }: { value: number; total: number }) {
 const POLL_INTERVAL = 15000; // 15 segundos
 
 export default function DashboardDocente() {
+  const semestreActivo = useSemestreActivo();
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -495,7 +498,7 @@ export default function DashboardDocente() {
             <div className="flex flex-col items-center justify-center py-12 text-gray-400 flex-1">
               <FileCheck className="w-12 h-12 mb-3 text-gray-300" />
               <p className="text-sm font-medium">Sin datos de avance registrados</p>
-              <p className="text-xs text-gray-400 mt-1">Acepta tu agenda y registra avances en Semana 8 y 16</p>
+              <p className="text-xs text-gray-400 mt-1">{rotularCortes('Acepta tu agenda y registra avances en Semana 8 y 16', semestreActivo)}</p>
             </div>
           )}
         </div>
@@ -582,8 +585,8 @@ export default function DashboardDocente() {
               <span className="text-sm font-bold text-gray-700">Estado de la agenda</span>
             </div>
             {[
-              { label: `Corte 1 (Sem 8)`, estado: estadoAgenda.semana8 },
-              { label: `Corte 2 (Sem 16)`, estado: estadoAgenda.semana16 },
+              { label: rotularCortes('Corte 1 (Sem 8)', semestreActivo), estado: estadoAgenda.semana8 },
+              { label: rotularCortes('Corte 2 (Sem 16)', semestreActivo), estado: estadoAgenda.semana16 },
             ].map(e => (
               <div key={e.label} className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
                 <span className={`w-2.5 h-2.5 rounded-full ${getEstadoColor(e.estado)}`} />
@@ -618,7 +621,7 @@ export default function DashboardDocente() {
             {historicalAgendas.map((agenda, index) => (
               <div key={index} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="bg-gray-50 px-6 py-3 border-b border-gray-100 flex justify-between items-center">
-                  <span className="font-bold text-blue-900">Período {agenda.periodo.anio}-{agenda.periodo.semestre}</span>
+                  <span className="font-bold text-blue-900">Período {agenda.periodo.anio}-{etiquetaSemestre(agenda.periodo.semestre)}</span>
                   <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded font-bold uppercase">Cerrado (Solo Lectura)</span>
                 </div>
                 <div className="p-6">

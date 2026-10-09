@@ -3,10 +3,13 @@ import type { MetricaAnalitica } from '../../services/analiticaService';
 import { aDatosGrafico } from '../../services/analiticaService';
 import { CESMAG, estiloTooltip } from './paleta';
 import PanelGrafico from './PanelGrafico';
+import useSemestreActivo from '../../hooks/useSemestreActivo';
+import { rotularCortes } from '../../utils/periodo';
 
 const abreviar = (s: string) => (s.length > 18 ? s.slice(0, 17) + '…' : s);
 
 export default function CortesComparisonChart({ metrica }: { metrica?: MetricaAnalitica }) {
+  const semestreActivo = useSemestreActivo();
   if (!metrica) return null;
 
   const datos = aDatosGrafico<{ avance8: number; avance16: number }>(metrica, {
@@ -22,7 +25,7 @@ export default function CortesComparisonChart({ metrica }: { metrica?: MetricaAn
       descripcion={metrica.descripcion}
       notaTecnica={metrica.notaTecnica}
       vacio={datos.length === 0 || sinEjecucion}
-      mensajeVacio="Aún no hay ejecución registrada en los cortes de semana 8 y 16 para este período."
+      mensajeVacio={rotularCortes('Aún no hay ejecución registrada en los cortes de semana 8 y 16 para este período.', semestreActivo)}
       acciones={
         <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">
           {metrica.resumenNumerico.porcentajeGlobal ?? 0}% acumulado
@@ -68,7 +71,7 @@ export default function CortesComparisonChart({ metrica }: { metrica?: MetricaAn
           <Area
             type="monotone"
             dataKey="avance8"
-            name="Corte I · Semana 8"
+            name={rotularCortes('Corte I · Semana 8', semestreActivo)}
             stroke={CESMAG.azul}
             strokeWidth={2}
             fill="url(#gradSemana8)"
@@ -76,7 +79,7 @@ export default function CortesComparisonChart({ metrica }: { metrica?: MetricaAn
           <Area
             type="monotone"
             dataKey="avance16"
-            name="Acumulado · Semana 16"
+            name={rotularCortes('Acumulado · Semana 16', semestreActivo)}
             stroke={CESMAG.verde}
             strokeWidth={2}
             fill="url(#gradSemana16)"

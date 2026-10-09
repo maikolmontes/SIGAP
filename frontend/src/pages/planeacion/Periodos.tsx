@@ -15,6 +15,7 @@ import {
 import { getPeriodos, createPeriodo, cerrarPeriodo, habilitarPeriodo, getDocentesPeriodo, asignarDocentesPeriodo, desasignarDocentePeriodo } from '../../services/periodosService'
 // @ts-ignore
 import { getUsuarios } from '../../services/usuariosService'
+import { SEMESTRES, etiquetaCorte, etiquetaSemestre } from '../../utils/periodo'
 
 interface Periodo {
     id_periodo: number
@@ -278,7 +279,7 @@ export default function Periodos() {
         return new Date(f).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' })
     }
 
-    const etiquetaPeriodo = (p: Periodo) => `${p.anio}-${p.semestre === 1 ? 'I' : 'II'}`
+    const etiquetaPeriodo = (p: Periodo) => `${p.anio}-${etiquetaSemestre(p.semestre)}`
 
     const abrirModalReportes = async (periodo: Periodo) => {
         setPeriodoReporte(periodo)
@@ -628,7 +629,7 @@ export default function Periodos() {
                             {/* Preview de etiqueta */}
                             <div className="bg-purple-50 border border-purple-100 rounded-lg px-4 py-3 text-center">
                                 <p className="text-xs text-purple-500 font-semibold uppercase tracking-wider mb-1">Período resultante</p>
-                                <p className="text-2xl font-black text-purple-800">{formPeriodo.anio}-{formPeriodo.semestre === 1 ? 'I' : 'II'}</p>
+                                <p className="text-2xl font-black text-purple-800">{formPeriodo.anio}-{etiquetaSemestre(formPeriodo.semestre)}</p>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
@@ -650,8 +651,11 @@ export default function Periodos() {
                                         onChange={e => setFormPeriodo(p => ({ ...p, semestre: parseInt(e.target.value) }))}
                                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-200 focus:border-purple-400 bg-white"
                                     >
-                                        <option value={1}>I (Primer semestre)</option>
-                                        <option value={2}>II (Segundo semestre)</option>
+                                        {SEMESTRES.map(o => (
+                                            <option key={o.valor} value={o.valor}>
+                                                {o.valor <= 2 ? `${o.romano} (${o.nombre})` : o.nombre}
+                                            </option>
+                                        ))}
                                     </select>
                                 </div>
                             </div>
@@ -902,7 +906,7 @@ export default function Periodos() {
                                         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
                                             <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center gap-2">
                                                 <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                                <h5 className="text-sm font-bold text-blue-800">Semana 8</h5>
+                                                <h5 className="text-sm font-bold text-blue-800">{etiquetaCorte(8, periodoReporte?.semestre)}</h5>
                                             </div>
                                             <div className="p-4 text-center text-gray-400">
                                                 <div className="py-6">
@@ -917,7 +921,7 @@ export default function Periodos() {
                                         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
                                             <div className="bg-purple-50 px-4 py-3 border-b border-purple-100 flex items-center gap-2">
                                                 <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                                <h5 className="text-sm font-bold text-purple-800">Semana 16</h5>
+                                                <h5 className="text-sm font-bold text-purple-800">{etiquetaCorte(16, periodoReporte?.semestre)}</h5>
                                             </div>
                                             <div className="p-4 text-center text-gray-400">
                                                 <div className="py-6">

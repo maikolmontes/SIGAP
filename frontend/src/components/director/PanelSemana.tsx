@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { agendaDiligenciada } from './agendaDiligenciada';
 import { Search, RefreshCw, Eye, Clock, Lock, Unlock } from 'lucide-react';
+import { etiquetaSemestre } from '../../utils/periodo'
 
 const badgeRevision = (estado: string) => {
     switch (estado) {
@@ -101,7 +102,7 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
     const paginaSegura = Math.min(paginaActual, totalPaginas);
     const filtPagina = filtradas.slice((paginaSegura - 1) * regPorPag, paginaSegura * regPorPag);
 
-    const periodoLabel = periodo ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}` : 'Sin periodo';
+    const periodoLabel = periodo ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}` : 'Sin periodo';
 
     // 'habilitada' es el interruptor de Planeación. Mientras esté apagado el
     // docente no puede guardar su avance; si ya hay reportes, es que el corte

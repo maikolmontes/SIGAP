@@ -1,6 +1,7 @@
 const pool = require('../db/connection');
 const notificaciones = require('../services/notificacionesService');
 const notificacionesApp = require('../services/notificacionesApp');
+const { semestreValido, etiquetaPeriodo } = require('../utils/periodo');
 
 // El aviso de apertura llega a todos los docentes del período: solo se envía
 // automáticamente si EMAIL_AVISO_PERIODO=true en el .env, o si la petición lo
@@ -76,11 +77,17 @@ const getById = async (req, res) => {
 };
 
 const create = async (req, res) => {
-    const { anio, semestre, fecha_inicio, fecha_fin } = req.body;
+    const { anio, fecha_inicio, fecha_fin } = req.body;
+    const semestre = Number(req.body.semestre);
 
     if (!anio || !semestre || !fecha_inicio || !fecha_fin) {
         return res.status(400).json({
             error: 'Todos los campos son obligatorios: año, semestre, fecha inicio y fecha fin.'
+        });
+    }
+    if (!semestreValido(semestre)) {
+        return res.status(400).json({
+            error: 'El semestre debe ser I, II, Intersemestral I o Intersemestral II.'
         });
     }
 
@@ -100,7 +107,7 @@ const create = async (req, res) => {
         );
         if (duplicado.rows.length > 0) {
             return res.status(409).json({
-                error: `El período ${anio}-${semestre === 1 ? 'I' : 'II'} ya existe.`
+                error: `El período ${etiquetaPeriodo({ anio, semestre })} ya existe.`
             });
         }
 

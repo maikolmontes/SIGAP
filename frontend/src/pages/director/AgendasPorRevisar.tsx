@@ -6,6 +6,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import AsignacionesPorCorregir from '../../components/director/AsignacionesPorCorregir';
 import PanelAgendas from '../../components/director/PanelAgendas';
 import PanelSemana from '../../components/director/PanelSemana';
+import { etiquetaSemestre, rotularCortes } from '../../utils/periodo'
 
 
 type TabId = 'asignaciones' | 'diligenciadas' | 'agendas' | 'semana8' | 'semana16';
@@ -69,7 +70,7 @@ export default function AgendasPorRevisar() {
     const agendasPagina = agendasFiltradas.slice(inicio, inicio + registrosPorPagina);
 
     const programas = [...new Set(agendas.map(a => a.nombre_programa).filter(Boolean))];
-    const periodoLabel = periodo ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}` : 'Sin periodo';
+    const periodoLabel = periodo ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}` : 'Sin periodo';
 
     // Contadores
     const totalPendientes = agendas.filter(a => a.estado_general === 'Pendiente' || a.estado_general === 'Aceptado').length;
@@ -119,7 +120,7 @@ export default function AgendasPorRevisar() {
                         ? 'bg-[#1a2744] text-white shadow-md'
                         : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
                 >
-                    Agenda Semana 8
+                    {rotularCortes('Agenda Semana 8', periodo?.semestre)}
                 </button>
                 <button
                     onClick={() => setTab('semana16')}
@@ -127,7 +128,7 @@ export default function AgendasPorRevisar() {
                         ? 'bg-[#1a2744] text-white shadow-md'
                         : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'}`}
                 >
-                    Agenda Semana 16
+                    {rotularCortes('Agenda Semana 16', periodo?.semestre)}
                 </button>
             </div>
 

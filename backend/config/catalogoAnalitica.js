@@ -138,6 +138,35 @@ const INDICADORES = Object.freeze({
         unidad: 'docentes',
         dimensiones: ['programa', 'facultad', 'periodo'],
         rolesAutorizados: TODOS_SUPERVISORES
+    },
+    'IND-10': {
+        id: 'IND-10',
+        nombre: 'Peso de cada Función en la Meta',
+        descripcion: 'Qué parte de la meta total aporta cada función sustantiva y cuánto ha avanzado cada una, además del avance sin contar Docencia Directa.',
+        tipoGrafico: 'bar',
+        unidad: '%',
+        dimensiones: ['funcion_sustantiva', 'periodo', 'programa'],
+        rolesAutorizados: TODOS_SUPERVISORES,
+        notaTecnica: 'Docencia Directa tiene una meta por cada clase y por cada indicador, por eso suele concentrar casi toda la meta.'
+    },
+    'IND-11': {
+        id: 'IND-11',
+        nombre: 'Revisión de los Cortes',
+        descripcion: 'Estado de la revisión de las funciones de las agendas en cada corte: aprobadas, con visto bueno, devueltas y pendientes.',
+        tipoGrafico: 'stacked_bar',
+        unidad: 'funciones',
+        dimensiones: ['corte', 'periodo', 'programa'],
+        rolesAutorizados: TODOS_SUPERVISORES,
+        notaTecnica: 'Cada función de cada agenda se revisa por separado en cada corte; lo aprobado en el primer corte no cuenta para el segundo.'
+    },
+    'IND-12': {
+        id: 'IND-12',
+        nombre: 'Cobertura de Agendas',
+        descripcion: 'De los docentes asignados al período, cuántos tienen la agenda enviada, cuántos la están construyendo, cuántos la tienen devuelta y cuántos aún no tienen agenda.',
+        tipoGrafico: 'bar',
+        unidad: 'docentes',
+        dimensiones: ['periodo', 'programa'],
+        rolesAutorizados: TODOS_SUPERVISORES
     }
 });
 

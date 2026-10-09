@@ -14,15 +14,14 @@ const pool = require('../db/connection');
 const { sendEmail, resolverRemitente } = require('./emailService');
 const plantillas = require('../utils/emailTemplates');
 const notificacionesApp = require('./notificacionesApp');
+const { etiquetaPeriodo } = require('../utils/periodo');
 
 // ----------------------------------------------------------------
 // Utilidades internas
 // ----------------------------------------------------------------
 
 const nombrePeriodo = (periodo) => {
-    if (!periodo) return null;
-    const romano = Number(periodo.semestre) === 1 ? 'I' : 'II';
-    return `${periodo.anio}-${romano}`;
+    return etiquetaPeriodo(periodo);
 };
 
 const formatearFecha = (fecha) => {

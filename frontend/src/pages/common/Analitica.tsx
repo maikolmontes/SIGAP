@@ -13,6 +13,9 @@ import KpiGrid from '../../components/analitica/KpiGrid';
 import AgendasChart from '../../components/analitica/AgendasChart';
 import HorasChart from '../../components/analitica/HorasChart';
 import CortesComparisonChart from '../../components/analitica/CortesComparisonChart';
+import CoberturaAgendasChart from '../../components/analitica/CoberturaAgendasChart';
+import RevisionCortesChart from '../../components/analitica/RevisionCortesChart';
+import PesoMetasChart from '../../components/analitica/PesoMetasChart';
 import DocentesAnalyticsTable from '../../components/analitica/DocentesAnalyticsTable';
 import ConsolidadoProgramasTable from '../../components/analitica/ConsolidadoProgramasTable';
 import BrechaEvidenciasTable from '../../components/analitica/BrechaEvidenciasTable';
@@ -230,6 +233,13 @@ export default function Analitica({ rol }: AnaliticaProps) {
           </div>
 
           <CortesComparisonChart metrica={buscar('IND-06')} />
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <CoberturaAgendasChart metrica={buscar('IND-12')} />
+            <RevisionCortesChart metrica={buscar('IND-11')} />
+          </div>
+
+          <PesoMetasChart metrica={buscar('IND-10')} />
 
           <InterpretacionCard
             interpretacion={interpretacion}

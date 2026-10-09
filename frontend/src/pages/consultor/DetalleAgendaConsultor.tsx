@@ -2,12 +2,15 @@ import { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/common/Layout';
 import api, { getArchivoUrl } from '../../services/api';
 import { useParams, useNavigate } from 'react-router-dom';
+import useSemestreActivo from '../../hooks/useSemestreActivo'
+import { rotularCortes } from '../../utils/periodo'
 import {
     ArrowLeft, CheckCircle, XCircle, AlertTriangle, FileText,
     ChevronDown, ChevronRight, Eye, MessageSquare, ExternalLink
 } from 'lucide-react';
 
 export default function DetalleAgendaConsultor() {
+    const semestreActivo = useSemestreActivo();
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const [data, setData] = useState<any>(null);
@@ -208,13 +211,13 @@ export default function DetalleAgendaConsultor() {
                                                                                         </div>
                                                                                         <div className="grid grid-cols-2 gap-4 mb-4">
                                                                                             <div className="bg-white p-3 rounded-md border border-slate-200 text-sm">
-                                                                                                <div className="text-slate-500 mb-1">Ejecución Semana 8</div>
+                                                                                                <div className="text-slate-500 mb-1">{rotularCortes('Ejecución Semana 8', semestreActivo)}</div>
                                                                                                 <div className="font-bold text-slate-800 text-lg">
                                                                                                     {ej8} <span className="text-xs font-normal text-slate-500 ml-1">({Math.round(avanceParcial)}%)</span>
                                                                                                 </div>
                                                                                             </div>
                                                                                             <div className="bg-white p-3 rounded-md border border-slate-200 text-sm">
-                                                                                                <div className="text-slate-500 mb-1">Ejecución Semana 16</div>
+                                                                                                <div className="text-slate-500 mb-1">{rotularCortes('Ejecución Semana 16', semestreActivo)}</div>
                                                                                                 <div className="font-bold text-slate-800 text-lg">{ej16}</div>
                                                                                             </div>
                                                                                         </div>

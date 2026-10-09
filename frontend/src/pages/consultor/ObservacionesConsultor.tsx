@@ -3,6 +3,7 @@ import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import { MessageSquare, Search, Eye, Filter, ChevronDown, Calendar, BookOpen, Clock, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { etiquetaSemestre, rotularCortes } from '../../utils/periodo'
 
 export default function ObservacionesConsultor() {
     const [observaciones, setObservaciones] = useState<any[]>([]);
@@ -48,7 +49,7 @@ export default function ObservacionesConsultor() {
     }).sort((a, b) => (a.docente_nombre || '').localeCompare(b.docente_nombre || '', 'es', { sensitivity: 'base' }));
 
     const periodoLabel = periodo
-        ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}`
+        ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}`
         : 'Sin periodo activo';
 
     // Contadores rápidos
@@ -77,8 +78,8 @@ export default function ObservacionesConsultor() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 {[
                     { label: 'Total Registros', value: observacionesFiltradas.length, icon: MessageSquare, color: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-100' },
-                    { label: 'Corte I (Sem 8)', value: obsSem8, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-                    { label: 'Corte II (Sem 16)', value: obsSem16, icon: Clock, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
+                    { label: rotularCortes('Corte I (Sem 8)', periodo?.semestre), value: obsSem8, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
+                    { label: rotularCortes('Corte II (Sem 16)', periodo?.semestre), value: obsSem16, icon: Clock, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
                     { label: 'Docentes Observados', value: docentesUnicos, icon: User, color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100' },
                 ].map(m => (
                     <div key={m.label} className={`bg-white rounded-2xl p-4 shadow-sm border ${m.border} hover:shadow-md transition-all`}>
@@ -122,8 +123,8 @@ export default function ObservacionesConsultor() {
                             className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-teal-400"
                         >
                             <option value="">Todas las semanas</option>
-                            <option value="8">Corte I — Semana 8</option>
-                            <option value="16">Corte II — Semana 16</option>
+                            <option value="8">{rotularCortes('Corte I — Semana 8', periodo?.semestre)}</option>
+                            <option value="16">{rotularCortes('Corte II — Semana 16', periodo?.semestre)}</option>
                         </select>
                         <select
                             value={filtroFuncion}
@@ -175,7 +176,7 @@ export default function ObservacionesConsultor() {
                                                 ? 'bg-blue-50 text-blue-700 border-blue-100'
                                                 : 'bg-emerald-50 text-emerald-700 border-emerald-100'
                                         }`}>
-                                            {obs.semana === 8 ? 'Corte I · Semana 8' : 'Corte II · Semana 16'}
+                                            {rotularCortes(obs.semana === 8 ? 'Corte I · Semana 8' : 'Corte II · Semana 16', periodo?.semestre)}
                                         </span>
                                         <span className="text-xs font-medium px-2.5 py-1 bg-teal-50 text-teal-700 border border-teal-100 rounded-lg flex items-center gap-1">
                                             <BookOpen className="w-3 h-3" />

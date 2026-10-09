@@ -6,6 +6,7 @@ import {
     BookOpen, Clock, User, X, LayoutGrid, List
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { etiquetaSemestre, rotularCortes } from '../../utils/periodo'
 
 interface Observacion {
     id: number;
@@ -144,7 +145,7 @@ export default function ObservacionesDirector() {
     };
 
     const periodoLabel = periodo
-        ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}`
+        ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}`
         : 'Sin periodo activo';
 
     const programaLabel = observaciones[0]?.nombre_programa || 'Programa académico';
@@ -183,8 +184,8 @@ export default function ObservacionesDirector() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                 {[
                     { label: 'Total', value: totalObs, icon: MessageSquare, color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100', active: !filtroSemana, onClick: () => setFiltroSemana('') },
-                    { label: 'Corte I · Sem 8', value: obsSem8, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', active: filtroSemana === '8', onClick: () => setFiltroSemana(filtroSemana === '8' ? '' : '8') },
-                    { label: 'Corte II · Sem 16', value: obsSem16, icon: Clock, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100', active: filtroSemana === '16', onClick: () => setFiltroSemana(filtroSemana === '16' ? '' : '16') },
+                    { label: rotularCortes('Corte I · Sem 8', periodo?.semestre), value: obsSem8, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', active: filtroSemana === '8', onClick: () => setFiltroSemana(filtroSemana === '8' ? '' : '8') },
+                    { label: rotularCortes('Corte II · Sem 16', periodo?.semestre), value: obsSem16, icon: Clock, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100', active: filtroSemana === '16', onClick: () => setFiltroSemana(filtroSemana === '16' ? '' : '16') },
                     { label: 'Docentes', value: docentesUnicos, icon: User, color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100', active: false, onClick: undefined },
                 ].map(m => (
                     <div
@@ -525,7 +526,7 @@ export default function ObservacionesDirector() {
                                                                                     ? 'bg-blue-50 text-blue-700 border-blue-200'
                                                                                     : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                                                             }`}>
-                                                                                {esCorteI ? 'Corte I · Sem 8' : 'Corte II · Sem 16'}
+                                                                                {rotularCortes(esCorteI ? 'Corte I · Sem 8' : 'Corte II · Sem 16', periodo?.semestre)}
                                                                             </span>
                                                                         </div>
 
@@ -573,7 +574,7 @@ export default function ObservacionesDirector() {
                                                                                     ? 'bg-blue-50 text-blue-700 border-blue-200'
                                                                                     : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                                                             }`}>
-                                                                                {esCorteI ? 'Corte I · Sem 8' : 'Corte II · Sem 16'}
+                                                                                {rotularCortes(esCorteI ? 'Corte I · Sem 8' : 'Corte II · Sem 16', periodo?.semestre)}
                                                                             </span>
                                                                             <span className="font-bold text-xs text-gray-900">
                                                                                 {obs.rol_seleccionado || 'Actividad sin nombre'}

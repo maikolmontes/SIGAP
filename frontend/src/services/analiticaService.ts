@@ -9,7 +9,7 @@
 import api from './api';
 
 export type TipoGrafico = 'kpi_card' | 'bar' | 'stacked_bar' | 'donut' | 'area' | 'table';
-export type Unidad = '%' | 'h' | 'docentes' | 'evidencias';
+export type Unidad = '%' | 'h' | 'docentes' | 'evidencias' | 'funciones';
 
 export interface SerieAnalitica {
   nombre: string;
@@ -22,6 +22,13 @@ export interface ResumenNumerico {
   total?: number;
   promedio?: number;
   porcentajeGlobal?: number;
+  /** IND-10: avance acumulado sin contar Docencia Directa (null si no hay meta fuera de ella) */
+  porcentajeSinDocenciaDirecta?: number | null;
+  /** IND-10: parte de la meta total que aporta Docencia Directa */
+  pesoDocenciaDirecta?: number | null;
+  /** IND-11: % de funciones aprobadas en cada corte */
+  porcentajeCorte1?: number;
+  porcentajeCorte2?: number;
 }
 
 export interface FilaBalanceDocente {

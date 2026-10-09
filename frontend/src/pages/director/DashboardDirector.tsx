@@ -7,6 +7,7 @@ import {
   Filter, ChevronDown
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { etiquetaSemestreLarga } from '../../utils/periodo'
 
 const PIE_COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ef4444'];
 
@@ -97,7 +98,7 @@ export default function DashboardDirector() {
 
   const docentesFiltrados = useMemo(() => docentes.filter(d => {
     const q = searchQuery.toLowerCase();
-    const coincide = d.nombre.toLowerCase().includes(q) || d.correo?.toLowerCase().includes(q);
+    const coincide = d.nombre.toLowerCase().includes(q) || d.correo?.toLowerCase().includes(q) || d.nombre_programa?.toLowerCase().includes(q);
     const coincideContrato = !filtroContrato || d.tipo_contrato === filtroContrato;
     const estado = getEstadoDocente(d).label;
     const coincideEstado = !filtroEstado || estado === filtroEstado;
@@ -111,7 +112,7 @@ export default function DashboardDirector() {
   const hayFiltros = !!(filtroEstado || filtroContrato);
 
   const periodoLabel = periodoActivo
-    ? `${periodoActivo.anio} - ${periodoActivo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`
+    ? `${periodoActivo.anio} - ${etiquetaSemestreLarga(periodoActivo.semestre)}`
     : 'Sin periodo activo';
 
   if (loading && !data) {
@@ -202,7 +203,7 @@ export default function DashboardDirector() {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
-                      placeholder="Buscar docente..."
+                      placeholder="Buscar docente o programa..."
                       value={searchQuery}
                       onChange={(e) => { setSearchQuery(e.target.value); setPaginaActual(1); }}
                       className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-400 w-40"
@@ -253,6 +254,7 @@ export default function DashboardDirector() {
                   <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                     <tr>
                       <th className="px-5 py-3 text-left font-bold">Docente</th>
+                      <th className="px-5 py-3 text-left font-bold">Programa</th>
                       <th className="px-5 py-3 text-left font-bold">Contrato</th>
                       <th className="px-5 py-3 text-center font-bold">Horas</th>
                       <th className="px-5 py-3 text-center font-bold">Funciones</th>
@@ -262,7 +264,7 @@ export default function DashboardDirector() {
                   <tbody className="divide-y divide-gray-50">
                     {docentesFiltrados.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-5 py-10 text-center text-gray-400 text-sm">
+                        <td colSpan={6} className="px-5 py-10 text-center text-gray-400 text-sm">
                           {importacionRealizada
                             ? 'No se encontraron docentes'
                             : 'Aún no hay asignaciones cargadas para este periodo. Planeación debe importarlas.'}
@@ -293,6 +295,9 @@ export default function DashboardDirector() {
                                 <p className="text-xs text-gray-400">{d.correo}</p>
                               </div>
                             </div>
+                          </td>
+                          <td className="px-5 py-3.5 text-sm text-gray-700 max-w-[14rem]" title={d.nombre_programa}>
+                            {d.nombre_programa || <span className="text-xs text-gray-400">Sin programa</span>}
                           </td>
                           <td className="px-5 py-3.5">
                             <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-100">{d.tipo_contrato}</span>

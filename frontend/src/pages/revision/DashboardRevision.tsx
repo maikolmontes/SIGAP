@@ -7,6 +7,7 @@ import {
     RefreshCw, Search, Eye, Calendar, PieChart as PieIcon
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { etiquetaSemestreLarga, rotularCortes } from '../../utils/periodo'
 
 // Este panel mide la revisión de los cortes (semana 8 y 16), no la
 // aprobación de la agenda: el rol revisor no aprueba agendas.
@@ -123,7 +124,7 @@ export default function DashboardRevision() {
     }));
 
     const periodoLabel = periodo
-        ? `${periodo.anio} - ${periodo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`
+        ? `${periodo.anio} - ${etiquetaSemestreLarga(periodo.semestre)}`
         : 'Sin periodo activo';
 
     if (loading) {
@@ -237,8 +238,8 @@ export default function DashboardRevision() {
                                             {/* El nombre sale del rol activo: con otro revisor dirá "Horas Docencia", etc. */}
                                             <th className="px-5 py-3 text-center font-bold">Horas {funciones.join(' / ') || 'de mi función'}</th>
                                             {/* La revisión es por corte: la semana 8 no cuenta para la 16 */}
-                                            <th className="px-5 py-3 text-center font-bold">Semana 8</th>
-                                            <th className="px-5 py-3 text-center font-bold">Semana 16</th>
+                                            <th className="px-5 py-3 text-center font-bold">{rotularCortes('Semana 8', periodo?.semestre)}</th>
+                                            <th className="px-5 py-3 text-center font-bold">{rotularCortes('Semana 16', periodo?.semestre)}</th>
                                             <th className="px-5 py-3 text-center font-bold"></th>
                                         </tr>
                                     </thead>

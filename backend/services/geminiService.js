@@ -104,6 +104,12 @@ const guardarCache = (clave, resultado) => {
 // Sanitización: se queda solo con cifras y etiquetas de categoría.
 // Cualquier campo ajeno al contrato se descarta de forma explícita.
 // ----------------------------------------------------------------
+// Cifras agregadas extra que algunos indicadores aportan (IND-10 e IND-11). Solo números.
+const RESUMEN_EXTRA = ['porcentajeSinDocenciaDirecta', 'pesoDocenciaDirecta', 'porcentajeCorte1', 'porcentajeCorte2'];
+const resumenExtra = (resumen = {}) => Object.fromEntries(
+    RESUMEN_EXTRA.filter((k) => resumen[k] !== undefined && resumen[k] !== null).map((k) => [k, Number(resumen[k]) || 0])
+);
+
 const sanitizarMetrica = (m) => ({
     indicador: m.indicadorId,
     titulo: m.titulo,
@@ -119,7 +125,8 @@ const sanitizarMetrica = (m) => ({
     resumen: {
         total: Number(m.resumenNumerico?.total) || 0,
         promedio: Number(m.resumenNumerico?.promedio) || 0,
-        porcentajeGlobal: Number(m.resumenNumerico?.porcentajeGlobal) || 0
+        porcentajeGlobal: Number(m.resumenNumerico?.porcentajeGlobal) || 0,
+        ...resumenExtra(m.resumenNumerico)
     }
 });
 
@@ -141,7 +148,7 @@ Reglas estrictas:
 1. Basa tu análisis EXCLUSIVAMENTE en las cifras del JSON que recibes.
 2. NO inventes datos, porcentajes, causas ni nombres de personas.
 3. NO emitas recomendaciones estratégicas, juicios sobre contratación ni cambios de política.
-4. Limítate a describir: proporciones, funciones con mayor y menor carga, variaciones entre la semana 8 y la semana 16, y niveles de cumplimiento.
+4. Limítate a describir: proporciones, funciones con mayor y menor carga, variaciones entre la semana 8 y la semana 16, y niveles de cumplimiento. Si hay un indicador de peso de las funciones en la meta, di cuánto pesa Docencia Directa y compara el avance total con el avance sin ella; si hay revisión de cortes, describe cuántas funciones están aprobadas, devueltas y pendientes en cada corte; si hay cobertura de agendas, describe cuántos docentes tienen agenda enviada y cuántos no tienen agenda.
 5. Si un indicador viene en cero o vacío, dilo como un hecho ("no hay ejecución registrada"), sin especular por qué.
 6. Escribe en español de Colombia, en tercera persona, sin adjetivos valorativos.`;
 
