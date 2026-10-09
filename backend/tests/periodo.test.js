@@ -9,11 +9,11 @@ test('los semestres ordinarios conservan su nombre de siempre', () => {
     assert.equal(etiquetaPeriodo({ anio: 2026, semestre: '2' }), '2026-II', 'también si llega como texto');
 });
 
-test('los intersemestrales se llaman Inter I e Inter II', () => {
-    assert.equal(etiquetaSemestre(3), 'Inter I');
-    assert.equal(etiquetaSemestre(4), 'Inter II');
-    assert.equal(etiquetaPeriodo({ anio: 2026, semestre: 3 }), '2026-Inter I');
-    assert.equal(etiquetaPeriodo({ anio: 2027, semestre: 4 }), '2027-Inter II');
+test('los intersemestrales se llaman Intersemestral I e Intersemestral II', () => {
+    assert.equal(etiquetaSemestre(3), 'Intersemestral I');
+    assert.equal(etiquetaSemestre(4), 'Intersemestral II');
+    assert.equal(etiquetaPeriodo({ anio: 2026, semestre: 3 }), '2026-Intersemestral I');
+    assert.equal(etiquetaPeriodo({ anio: 2027, semestre: 4 }), '2027-Intersemestral II');
 });
 
 test('solo se aceptan los semestres 1 a 4', () => {

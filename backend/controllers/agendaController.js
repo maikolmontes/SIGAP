@@ -14,7 +14,7 @@ const getAgenda = async (req, res) => {
                 tc.horas_contrato,
                 pa.nombre_programa,
                 na.nombre_titulo    AS nivel_academico,
-                per.anio || '-' || CASE per.semestre WHEN 3 THEN 'Inter I' WHEN 4 THEN 'Inter II' ELSE per.semestre::text END AS periodo
+                per.anio || '-' || CASE per.semestre WHEN 3 THEN 'Intersemestral I' WHEN 4 THEN 'Intersemestral II' ELSE per.semestre::text END AS periodo
             FROM usuarios u
             JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
             JOIN programa_academico pa  ON u.id_programa  = pa.id_programa

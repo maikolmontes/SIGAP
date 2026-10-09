@@ -13,18 +13,18 @@
 const SEMESTRES = {
     1: { romano: 'I', nombre: 'Primer semestre' },
     2: { romano: 'II', nombre: 'Segundo semestre' },
-    3: { romano: 'Inter I', nombre: 'Intersemestral I' },
-    4: { romano: 'Inter II', nombre: 'Intersemestral II' },
+    3: { romano: 'Intersemestral I', nombre: 'Intersemestral I' },
+    4: { romano: 'Intersemestral II', nombre: 'Intersemestral II' },
 };
 
 const semestreValido = (semestre) => Object.prototype.hasOwnProperty.call(SEMESTRES, Number(semestre));
 
 const esIntersemestral = (semestre) => Number(semestre) >= 3;
 
-/** "I", "II", "Inter I" o "Inter II". */
+/** "I", "II", "Intersemestral I" o "Intersemestral II". */
 const etiquetaSemestre = (semestre) => (SEMESTRES[Number(semestre)] ? SEMESTRES[Number(semestre)].romano : String(semestre ?? ''));
 
-/** "2026-I", "2026-Inter II"… (null si no hay período). */
+/** "2026-I", "2026-Intersemestral II"… (null si no hay período). */
 const etiquetaPeriodo = (periodo) => (periodo ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}` : null);
 
 /** Cómo se llama un corte en pantalla: "Semana 8" / "Semana 16", o "Semana X" en los intersemestrales. */

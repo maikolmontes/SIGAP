@@ -11,21 +11,21 @@ export interface PeriodoBasico {
 export const SEMESTRES: { valor: number; romano: string; nombre: string }[] = [
     { valor: 1, romano: 'I', nombre: 'Primer semestre' },
     { valor: 2, romano: 'II', nombre: 'Segundo semestre' },
-    { valor: 3, romano: 'Inter I', nombre: 'Intersemestral I' },
-    { valor: 4, romano: 'Inter II', nombre: 'Intersemestral II' },
+    { valor: 3, romano: 'Intersemestral I', nombre: 'Intersemestral I' },
+    { valor: 4, romano: 'Intersemestral II', nombre: 'Intersemestral II' },
 ]
 
 export const esIntersemestral = (semestre?: number | string | null): boolean => Number(semestre) >= 3
 
-/** "I", "II", "Inter I" o "Inter II". */
+/** "I", "II", "Intersemestral I" o "Intersemestral II". */
 export const etiquetaSemestre = (semestre?: number | string | null): string =>
     SEMESTRES.find(s => s.valor === Number(semestre))?.romano ?? String(semestre ?? '')
 
-/** Variante de los tableros de Planeación: "IP", "IIP", "Inter I", "Inter II". */
+/** Variante de los tableros de Planeación: "IP", "IIP", "Intersemestral I", "Intersemestral II". */
 export const etiquetaSemestreP = (semestre?: number | string | null): string =>
     esIntersemestral(semestre) ? etiquetaSemestre(semestre) : `${etiquetaSemestre(semestre)}P`
 
-/** "2026-I", "2026-Inter II"… */
+/** "2026-I", "2026-Intersemestral II"… */
 export const etiquetaPeriodo = (p?: PeriodoBasico | null): string =>
     p ? `${p.anio}-${etiquetaSemestre(p.semestre)}` : ''
 

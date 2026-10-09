@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../services/api'
 
-// Semestre (1, 2, 3 = Inter I, 4 = Inter II) del período activo. Sirve para rotular
+// Semestre (1, 2, 3 = Intersemestral I, 4 = Intersemestral II) del período activo. Sirve para rotular
 // los cortes: en un intersemestral se muestran "Semana X" en vez de "Semana 8/16".
 // Se consulta una sola vez y se comparte entre pantallas (se renueva cada 30 s).
 
