@@ -128,6 +128,8 @@ Endpoints: /api/analitica/periodos, /catalogo, /resumen, /docentes-detalle, /int
 Catálogo de indicadores: backend/config/catalogoAnalitica.js (IND-01 a IND-07, con roles autorizados)
 Consultas: backend/controllers/analiticaController.js — parametrizadas, sin vistas SQL
 Interpretación IA: backend/services/geminiService.js — degrada sin romper si falta GEMINI_API_KEY
+Asistente de preguntas: POST /api/analitica/preguntar { pregunta, periodoId?, programaId?, facultadId? } → services/geminiService.js responderPregunta. El SERVIDOR calcula las cifras con el alcance del usuario (armarResumen en analiticaController); el navegador nunca manda cifras. A la IA solo salen indicadores agregados (sin IND-04, sin nombres); la pregunta va marcada como texto no confiable; solo se aceptan ids de indicadores enviados; caché por pregunta+cifras; tope por usuario y día (ANALYTICS_QA_DAILY_LIMIT, 15 por omisión) y por minuto (ANALYTICS_AI_RATE_LIMIT); modelo opcional GEMINI_QA_MODEL (por omisión GEMINI_MODEL). Degrada con motivo (no_configurado, limite_diario, cuota_agotada…) sin romper el panel
+IND-10 (peso de cada función en la meta y avance sin Docencia Directa), IND-11 (revisión de cortes) e IND-12 (cobertura de agendas) viven en backend/services/analiticaDescriptiva.js
 Frontend: frontend/src/pages/common/Analitica.tsx + components/analitica/ + services/analiticaService.ts
 El backend entrega datos sin colores ni estilos; la paleta se decide en components/analitica/paleta.ts
 La analítica excluye el catálogo maestro (funciones sin docente) uniendo contra usuario_asignacion

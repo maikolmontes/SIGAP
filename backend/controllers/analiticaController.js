@@ -181,13 +181,20 @@ const getPeriodos = async (req, res) => {
 // GET /api/analitica/resumen?periodoId=X
 // Entrega el paquete completo de indicadores del panel.
 // ================================================================
-const getResumen = async (req, res) => {
+/** Se lanza cuando no hay ningún período que consultar. */
+class SinPeriodoError extends Error {}
+
+/**
+ * Calcula todos los indicadores del resumen para el período y el ámbito de la
+ * petición. Lo usan el panel (GET /resumen) y el asistente de preguntas, que
+ * necesita las MISMAS cifras con el MISMO alcance del usuario, calculadas aquí
+ * y no enviadas por el navegador.
+ */
+const armarResumen = async (req) => {
     const inicio = Date.now();
-    try {
+    {
         const periodo = await resolverPeriodo(req);
-        if (!periodo) {
-            return res.status(404).json({ error: 'No hay un período académico disponible.' });
-        }
+        if (!periodo) throw new SinPeriodoError('No hay un período académico disponible.');
 
         const ambito = await resolverAmbito(req);
         const { filtro, extra } = filtroAmbito(ambito);
@@ -390,7 +397,7 @@ const getResumen = async (req, res) => {
         const ms = Date.now() - inicio;
         if (ms > 1000) console.warn(`[analitica] getResumen tardó ${ms} ms (período ${periodo.id_periodo})`);
 
-        res.json({
+        return {
             periodo: { id_periodo: periodo.id_periodo, etiqueta, activo: periodo.activo },
             programa,
             ambito: {
@@ -404,8 +411,15 @@ const getResumen = async (req, res) => {
             },
             generadoEn: new Date().toISOString(),
             indicadores
-        });
+        };
+    }
+};
+
+const getResumen = async (req, res) => {
+    try {
+        res.json(await armarResumen(req));
     } catch (error) {
+        if (error instanceof SinPeriodoError) return res.status(404).json({ error: error.message });
         console.error('Error en getResumen (analitica):', error);
         res.status(500).json({ error: 'Error al calcular el resumen analítico.', detalles: error.message });
     }
@@ -596,10 +610,10 @@ const getBrechaEvidencias = async (req, res) => {
 // GET /api/analitica/consolidado-programas?periodoId=X
 // IND-09 — Una fila por programa, para compararlos lado a lado.
 // ================================================================
-const getConsolidadoProgramas = async (req, res) => {
-    try {
+const armarConsolidado = async (req) => {
+    {
         const periodo = await resolverPeriodo(req);
-        if (!periodo) return res.status(404).json({ error: 'No hay un período académico disponible.' });
+        if (!periodo) throw new SinPeriodoError('No hay un período académico disponible.');
 
         const ambito = await resolverAmbito(req);
         const { filtro, extra } = filtroAmbito(ambito);
@@ -665,7 +679,7 @@ const getConsolidadoProgramas = async (req, res) => {
             avance: pct(p.acumulado, p.meta)
         }));
 
-        res.json(catalogo.construirMetrica('IND-09', {
+        return catalogo.construirMetrica('IND-09', {
             periodo: etiquetaPeriodo(periodo),
             programa: await describirAmbito(ambito),
             categorias: filas.map((f) => f.programa),
@@ -682,8 +696,15 @@ const getConsolidadoProgramas = async (req, res) => {
                     : 0
             },
             filasTabla: filas
-        }));
+        });
+    }
+};
+
+const getConsolidadoProgramas = async (req, res) => {
+    try {
+        res.json(await armarConsolidado(req));
     } catch (error) {
+        if (error instanceof SinPeriodoError) return res.status(404).json({ error: error.message });
         console.error('Error en getConsolidadoProgramas (analitica):', error);
         res.status(500).json({ error: 'Error al calcular el consolidado por programa.', detalles: error.message });
     }
@@ -825,12 +846,61 @@ const getEstadoIA = async (req, res) => {
     res.json({
         habilitado: gemini.estaHabilitado(),
         modelo: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
-        limitePorMinuto: gemini.limitePorMinuto()
+        limitePorMinuto: gemini.limitePorMinuto(),
+        preguntasPorDia: gemini.limiteDiarioPreguntas()
     });
+};
+
+// ================================================================
+// POST /api/analitica/preguntar
+// Cuerpo: { pregunta, periodoId?, programaId?, facultadId? }
+// El usuario le pregunta a los RESULTADOS del panel. Las cifras las calcula el
+// servidor con el alcance del usuario (un director solo ve sus programas);
+// el navegador solo manda la pregunta y los filtros que ya usa el panel.
+// A la IA solo salen cifras agregadas, nunca nombres ni correos.
+// ================================================================
+const preguntarAnalitica = async (req, res) => {
+    try {
+        const cuerpo = req.body || {};
+        // Las funciones de consulta leen los filtros de req.query: se presta un req con los del cuerpo
+        const reqEnAmbito = Object.create(req, { query: { value: {
+            periodoId: cuerpo.periodoId, programaId: cuerpo.programaId, facultadId: cuerpo.facultadId
+        } } });
+
+        const resumen = await armarResumen(reqEnAmbito);
+        let indicadores = resumen.indicadores;
+
+        // Si el alcance incluye varios programas, también se puede comparar entre ellos
+        const { roles } = calcularAlcance(req);
+        if (catalogo.puedeVer('IND-09', roles) && resumen.ambito.tipo !== 'programa') {
+            try {
+                const consolidado = await armarConsolidado(reqEnAmbito);
+                if ((consolidado.filasTabla?.length ?? 0) > 1) indicadores = [...indicadores, consolidado];
+            } catch (e) {
+                console.warn('[analitica] El asistente seguirá sin el consolidado por programa:', e.message);
+            }
+        }
+
+        const respuesta = await gemini.responderPregunta({
+            pregunta: cuerpo.pregunta,
+            indicadores,
+            periodo: resumen.periodo.etiqueta,
+            idUsuario: req.user?.id
+        });
+
+        res.json({ ...respuesta, periodo: resumen.periodo.etiqueta, alcance: resumen.programa });
+    } catch (error) {
+        if (error instanceof SinPeriodoError) {
+            return res.json({ disponible: false, motivo: 'sin_periodo', respuesta: '', indicadoresUsados: [] });
+        }
+        console.error('Error en preguntarAnalitica:', error);
+        // Como el resto de la capa de IA: un fallo inesperado no rompe el panel
+        res.json({ disponible: false, motivo: 'error_interno', respuesta: '', indicadoresUsados: [] });
+    }
 };
 
 module.exports = {
     getPeriodos, getAmbito, getResumen, getDetalleDocentes, getCatalogo,
     getBrechaEvidencias, getConsolidadoProgramas,
-    interpretarMetricas, getEstadoIA
+    interpretarMetricas, getEstadoIA, preguntarAnalitica
 };
