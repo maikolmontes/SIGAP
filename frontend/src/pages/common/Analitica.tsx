@@ -20,6 +20,7 @@ import DocentesAnalyticsTable from '../../components/analitica/DocentesAnalytics
 import ConsolidadoProgramasTable from '../../components/analitica/ConsolidadoProgramasTable';
 import BrechaEvidenciasTable from '../../components/analitica/BrechaEvidenciasTable';
 import InterpretacionCard from '../../components/analitica/InterpretacionCard';
+import AsistentePreguntas from '../../components/analitica/AsistentePreguntas';
 
 interface AnaliticaProps {
   rol: 'planeacion' | 'director' | 'consultor';
@@ -245,6 +246,14 @@ export default function Analitica({ rol }: AnaliticaProps) {
             interpretacion={interpretacion}
             cargando={cargandoIA}
             onReintentar={() => pedirInterpretacion(indicadores)}
+          />
+
+          <AsistentePreguntas
+            periodoId={periodoId}
+            filtro={filtro}
+            etiquetaPeriodo={etiquetaPeriodo}
+            programa={programa}
+            indicadores={indicadores}
           />
 
           {/* Comparación entre programas: pierde sentido con uno solo */}

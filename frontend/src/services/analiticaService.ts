@@ -197,6 +197,40 @@ export const interpretar = async (indicadores: MetricaAnalitica[]): Promise<Inte
   return data;
 };
 
+/** Respuesta del asistente de preguntas (la IA solo ve cifras agregadas). */
+export interface RespuestaAsistente {
+  pregunta: string;
+  respuesta: string;
+  respondible: boolean;
+  indicadoresUsados: string[];
+  disponible: boolean;
+  motivo?: string;
+  restantesHoy?: number;
+  esperaSeg?: number;
+  deCache?: boolean;
+  /** Período y alcance que el servidor usó de verdad para calcular las cifras */
+  periodo?: string;
+  alcance?: string | null;
+}
+
+/** Estado de la capa de IA: si está configurada y cuántas preguntas permite por día a cada persona. */
+export interface EstadoIA {
+  habilitado: boolean;
+  limitePorMinuto: number;
+  preguntasPorDia: number;
+}
+
+export const getEstadoIA = async (): Promise<EstadoIA> => {
+  const { data } = await api.get('/analitica/ia/estado');
+  return data;
+};
+
+/** Una pregunta libre sobre los resultados. El servidor calcula las cifras con el alcance del usuario. */
+export const preguntar = async (pregunta: string, periodoId?: number, filtro?: FiltroAmbito): Promise<RespuestaAsistente> => {
+  const { data } = await api.post('/analitica/preguntar', { pregunta, ...params(periodoId, filtro) });
+  return data;
+};
+
 /** Busca una serie por su clave dentro de una métrica. */
 export const serie = (metrica: MetricaAnalitica | undefined, clave: string): number[] =>
   metrica?.series.find((s) => s.clave === clave)?.datos ?? [];

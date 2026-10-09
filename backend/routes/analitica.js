@@ -23,5 +23,7 @@ router.get('/evidencias-brecha', verifyToken, verifyRole('Planeacion', 'Admin', 
 // Interpretación descriptiva con IA — capa opcional, degrada sin romper
 router.get('/ia/estado', verifyToken, supervisores, controller.getEstadoIA);
 router.post('/interpretar', verifyToken, supervisores, controller.interpretarMetricas);
+// Preguntas libres a los resultados del panel (las cifras las calcula el servidor, no el cliente)
+router.post('/preguntar', verifyToken, supervisores, controller.preguntarAnalitica);
 
 module.exports = router;
