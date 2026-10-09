@@ -28,6 +28,7 @@ const pool = require('../db/connection');
 const { calcularAlcance, alcanceProgramas } = require('../utils/rolActivo');
 const catalogo = require('../config/catalogoAnalitica');
 const gemini = require('../services/geminiService');
+const { indicadorPesoMetas, indicadorRevisionCortes, indicadorCobertura } = require('../services/analiticaDescriptiva');
 
 // ----------------------------------------------------------------
 // Utilidades internas
@@ -375,9 +376,15 @@ const getResumen = async (req, res) => {
             resumenNumerico: { total: totalEvidencias }
         });
 
+        // --- IND-10 / IND-11 / IND-12: peso de las funciones, revisión de cortes y cobertura ---
+        const contexto = { periodo, etiqueta, programa, params, filtro };
+        const indPeso = indicadorPesoMetas({ filas: cortes.rows, etiqueta, programa });
+        const indRevision = await indicadorRevisionCortes(pool, contexto);
+        const indCobertura = await indicadorCobertura(pool, contexto);
+
         // --- Filtrado por rol: cada indicador declara quién puede verlo ---
         const { roles } = calcularAlcance(req);
-        const indicadores = [indAgendas, indDevolucion, indHoras, indCorte1, indCorte2, indEvidencias]
+        const indicadores = [indAgendas, indDevolucion, indHoras, indCorte1, indCorte2, indEvidencias, indPeso, indRevision, indCobertura]
             .filter((m) => catalogo.puedeVer(m.indicadorId, roles));
 
         const ms = Date.now() - inicio;
