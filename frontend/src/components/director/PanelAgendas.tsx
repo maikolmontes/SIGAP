@@ -7,6 +7,7 @@ import {
     GraduationCap, BookOpen, FlaskConical, Users, Briefcase, Layers,
     Mail, Building2, Target, ClipboardList, CheckCircle2
 } from 'lucide-react';
+import { etiquetaSemestre } from '../../utils/periodo'
 
 // Icono y color por función sustantiva (mismo criterio que el detalle de revisión)
 function getFuncionMeta(nombre: string) {
@@ -311,7 +312,7 @@ export default function PanelAgendas() {
     const filtPagina = filtradas.slice((paginaSegura - 1) * regPorPag, paginaSegura * regPorPag);
 
     const periodoLabel = periodo
-        ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}`
+        ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}`
         : 'Sin periodo';
 
     return (

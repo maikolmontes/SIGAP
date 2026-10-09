@@ -33,8 +33,8 @@ const gemini = require('../services/geminiService');
 // Utilidades internas
 // ----------------------------------------------------------------
 
-const etiquetaPeriodo = (p) =>
-    p ? `${p.anio}-${Number(p.semestre) === 1 ? 'I' : 'II'}` : null;
+const { etiquetaPeriodo: etiquetaPeriodoBase } = require('../utils/periodo');
+const etiquetaPeriodo = (p) => etiquetaPeriodoBase(p);
 
 const num = (v) => Number(v) || 0;
 

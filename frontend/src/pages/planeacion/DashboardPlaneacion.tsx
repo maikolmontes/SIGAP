@@ -29,6 +29,7 @@ import {
     Filter,
     ChevronDown
 } from 'lucide-react'
+import { etiquetaSemestreP } from '../../utils/periodo'
 
 interface Periodo {
     id_periodo: number
@@ -430,7 +431,7 @@ export default function DashboardPlaneacion() {
         try {
             await exportarDocentesExcel(
                 docentes,
-                periodoActivo ? `Período ${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : undefined
+                periodoActivo ? `Período ${periodoActivo.anio} ${etiquetaSemestreP(periodoActivo.semestre)}` : undefined
             )
         } catch (err) {
             console.error('Error al exportar Excel:', err)
@@ -446,7 +447,7 @@ export default function DashboardPlaneacion() {
                 <div>
                     <h2 className="text-white text-lg font-medium">Bienvenido, Planeación</h2>
                     <p className="text-white/50 text-xs mt-0.5">
-                        {periodoActivo ? `Período ${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : 'Cargando período...'} · Facultad de Ingeniería
+                        {periodoActivo ? `Período ${periodoActivo.anio} ${etiquetaSemestreP(periodoActivo.semestre)}` : 'Cargando período...'} · Facultad de Ingeniería
                     </p>
                 </div>
             </div>
@@ -537,7 +538,7 @@ export default function DashboardPlaneacion() {
                                 </div>
                                 <div>
                                     <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Período Activo</p>
-                                    <p className="text-xl font-black text-gray-800 tracking-tight">{periodoActivo ? `${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : 'Cargando...'}</p>
+                                    <p className="text-xl font-black text-gray-800 tracking-tight">{periodoActivo ? `${periodoActivo.anio} ${etiquetaSemestreP(periodoActivo.semestre)}` : 'Cargando...'}</p>
                                 </div>
                             </div>
                         </div>

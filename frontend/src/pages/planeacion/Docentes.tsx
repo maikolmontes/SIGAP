@@ -49,6 +49,7 @@ import {
 } from '../../services/periodosService';
 import { getProgramas } from '../../services/programasService';
 import { exportarDocentesExcel } from '../../utils/exportExcelDocentes';
+import { etiquetaSemestreP } from '../../utils/periodo'
 
 interface ProgramaItem {
   id_programa: number;
@@ -841,7 +842,7 @@ export default function Docentes() {
     try {
       await exportarDocentesExcel(
         usuarios,
-        periodoActivo ? `Período ${periodoActivo.anio} ${periodoActivo.semestre === 1 ? 'IP' : 'IIP'}` : undefined
+        periodoActivo ? `Período ${periodoActivo.anio} ${etiquetaSemestreP(periodoActivo.semestre)}` : undefined
       );
     } catch (err) {
       console.error('Error al exportar Excel:', err);

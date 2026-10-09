@@ -4,6 +4,7 @@ import api, { getArchivoUrl } from '../../services/api';
 import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
 import { useAuth } from '../../context/AuthContext';
 import { FileText, FileImage, FileArchive, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, AlertCircle, Calendar, Target, Eye, FileSpreadsheet } from 'lucide-react';
+import { etiquetaCorte, etiquetaSemestre, rotularCortes } from '../../utils/periodo'
 
 interface Evidencia {
     id_evidencias: number;
@@ -63,6 +64,7 @@ const Evidencias: React.FC = () => {
     const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null);
     const [selectedWeek, setSelectedWeek] = useState<string>('8');
     const [activePeriodId, setActivePeriodId] = useState<number | null>(null);
+    const semestreActivo = periodos.find(p => p.id_periodo === activePeriodId)?.semestre;
 
     useEffect(() => {
         if (user) {
@@ -251,7 +253,7 @@ const Evidencias: React.FC = () => {
                 <div className="bg-white p-8 rounded-xl shadow-sm text-center border-2 border-dashed border-gray-200 mt-4">
                     <FileIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                     <h3 className="text-lg font-bold text-gray-800">No hay evidencias</h3>
-                    <p className="text-gray-500 text-sm mt-1">Aún no has subido ninguna evidencia. Ve a los Reportes de Semana 8 o 16 para subir tus archivos o enlaces.</p>
+                    <p className="text-gray-500 text-sm mt-1">Aún no has subido ninguna evidencia. {rotularCortes('Ve a los Reportes de Semana 8 o 16 para subir tus archivos o enlaces.', semestreActivo)}</p>
                 </div>
             ) : (
                 <div className="space-y-6">
@@ -264,7 +266,7 @@ const Evidencias: React.FC = () => {
                                 <div className="w-full bg-gray-100 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-600 flex items-center justify-between cursor-not-allowed">
                                     <span>
                                         {periodos.find(p => p.id_periodo === activePeriodId)
-                                            ? `Período ${periodos.find(p => p.id_periodo === activePeriodId)?.anio} - ${periodos.find(p => p.id_periodo === activePeriodId)?.semestre === 1 ? 'I' : 'II'} (Activo)`
+                                            ? `Período ${periodos.find(p => p.id_periodo === activePeriodId)?.anio} - ${etiquetaSemestre(periodos.find(p => p.id_periodo === activePeriodId)?.semestre)} (Activo)`
                                             : 'No hay período activo'}
                                     </span>
                                 </div>
@@ -275,8 +277,8 @@ const Evidencias: React.FC = () => {
                                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Semana de Reporte</label>
                                 <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
                                     {[
-                                        { key: '8', label: 'Semana 8' },
-                                        { key: '16', label: 'Semana 16' },
+                                        { key: '8', label: etiquetaCorte(8, semestreActivo) },
+                                        { key: '16', label: etiquetaCorte(16, semestreActivo) },
                                     ].map((w) => (
                                         <button
                                             key={w.key}

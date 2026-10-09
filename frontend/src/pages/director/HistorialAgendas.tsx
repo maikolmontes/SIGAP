@@ -3,6 +3,7 @@ import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import { History, Search, Eye, Filter, ChevronDown, CheckCircle2, XCircle, AlertTriangle, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { etiquetaSemestre } from '../../utils/periodo'
 
 const estadoBadge: Record<string, { bg: string; text: string; dot: string }> = {
     Pendiente: { bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-500' },
@@ -82,7 +83,7 @@ export default function HistorialAgendas() {
     const revPagina = enRevision.slice((pagRevSeg - 1) * regPorPag, pagRevSeg * regPorPag);
 
     const periodoLabel = periodo
-        ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}`
+        ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}`
         : 'Sin periodo';
 
     const totalAprobadas = agendas.filter(a => a.estado_general === 'Aprobada').length;
@@ -158,7 +159,7 @@ export default function HistorialAgendas() {
                             <option value="">Periodo activo</option>
                             {periodos.map((p: any) => (
                                 <option key={p.id_periodo} value={p.id_periodo}>
-                                    {p.anio}-{p.semestre === 1 ? 'I' : 'II'}
+                                    {p.anio}-{etiquetaSemestre(p.semestre)}
                                 </option>
                             ))}
                         </select>

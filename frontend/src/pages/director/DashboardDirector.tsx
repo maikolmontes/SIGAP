@@ -7,6 +7,7 @@ import {
   Filter, ChevronDown
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { etiquetaSemestreLarga } from '../../utils/periodo'
 
 const PIE_COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ef4444'];
 
@@ -111,7 +112,7 @@ export default function DashboardDirector() {
   const hayFiltros = !!(filtroEstado || filtroContrato);
 
   const periodoLabel = periodoActivo
-    ? `${periodoActivo.anio} - ${periodoActivo.semestre === 1 ? 'Semestre I' : 'Semestre II'}`
+    ? `${periodoActivo.anio} - ${etiquetaSemestreLarga(periodoActivo.semestre)}`
     : 'Sin periodo activo';
 
   if (loading && !data) {

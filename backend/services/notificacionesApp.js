@@ -14,6 +14,7 @@
 //  - La tabla se crea sola si no existe (database/notificaciones_app.sql).
 // ================================================================
 const pool = require('../db/connection');
+const { etiquetaPeriodo } = require('../utils/periodo');
 
 const MAX_TITULO = 200;
 const MAX_MENSAJE = 600;
@@ -46,7 +47,7 @@ const recortar = (texto, max) => {
     return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
 };
 
-const nombrePeriodo = (periodo) => (periodo ? `${periodo.anio}-${Number(periodo.semestre) === 1 ? 'I' : 'II'}` : null);
+const nombrePeriodo = (periodo) => etiquetaPeriodo(periodo);
 
 /**
  * Crea una notificación para un usuario. Devuelve true si se creó.

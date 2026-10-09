@@ -1,5 +1,6 @@
 const pool = require('../db/connection');
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
+const { etiquetaSemestre } = require('../utils/periodo');
 
 const getDashboard = async (req, res) => {
     const idUsuario = req.user.id;
@@ -220,20 +221,20 @@ const getDashboard = async (req, res) => {
 
         // Formatear período usando periodoRow
         const periodoLabel = periodoRow
-            ? `${periodoRow.semestre === 1 ? 'I' : 'II'} - ${periodoRow.anio}`
+            ? `${etiquetaSemestre(periodoRow.semestre)} - ${periodoRow.anio}`
             : 'Sin período activo';
 
         // Preparar evidencias por período para UI
         const evidenciasPorPeriodo = evidenciasPorPeriodoQuery.rows.map(row => ({
             idPeriodo: row.id_periodo,
-            label: `${row.semestre === 1 ? 'I' : 'II'} - ${row.anio}`,
+            label: `${etiquetaSemestre(row.semestre)} - ${row.anio}`,
             pendientes: parseInt(row.pendientes, 10) || 0
         }));
 
         // Preparar evidencias subidas por período para UI
         const evidenciasSubidasPorPeriodo = evidenciasSubidasPorPeriodoQuery.rows.map(row => ({
             idPeriodo: row.id_periodo,
-            label: `${row.semestre === 1 ? 'I' : 'II'} - ${row.anio}`,
+            label: `${etiquetaSemestre(row.semestre)} - ${row.anio}`,
             subidas: parseInt(row.subidas, 10) || 0
         }));
 

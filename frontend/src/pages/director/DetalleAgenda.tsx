@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api, { getArchivoUrl } from '../../services/api';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import useSemestreActivo from '../../hooks/useSemestreActivo'
+import { rotularCortes } from '../../utils/periodo'
 import {
     ArrowLeft, CheckCircle, XCircle, AlertTriangle, FileText,
     ChevronDown, ChevronRight, Send, Eye, MessageSquare, ExternalLink,
@@ -92,6 +94,7 @@ interface DetalleAgendaProps {
 }
 
 export default function DetalleAgenda({ modulo = 'director', soloLectura = false }: DetalleAgendaProps) {
+    const semestreActivo = useSemestreActivo();
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const location = useLocation();
@@ -615,7 +618,7 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
                         <div>
                             <h4 className="font-extrabold text-emerald-950 text-sm">Agenda aprobada</h4>
                             <p className="text-xs text-emerald-700 mt-0.5">
-                                La revisión oficial fue completada para el período activo. Puedes seguir agregando observaciones de seguimiento en los cortes de semana 8 y 16.
+                                La revisión oficial fue completada para el período activo. Puedes seguir agregando observaciones de seguimiento en los cortes de {rotularCortes('semana 8 y 16', semestreActivo)}.
                             </p>
                         </div>
                     </div>
@@ -874,7 +877,7 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
                                                                                                 <div className="grid grid-cols-2 gap-3">
                                                                                                     <div className="bg-slate-50/80 p-3 rounded-lg border border-slate-200/80">
                                                                                                         <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                                                                                                            Corte Semana 8
+                                                                                                            {rotularCortes('Corte Semana 8', semestreActivo)}
                                                                                                         </div>
                                                                                                         <div className="text-base font-extrabold text-slate-800 mt-0.5">
                                                                                                             {ej8}{' '}
@@ -886,7 +889,7 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
 
                                                                                                     <div className="bg-slate-50/80 p-3 rounded-lg border border-slate-200/80">
                                                                                                         <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                                                                                                            Corte Semana 16
+                                                                                                            {rotularCortes('Corte Semana 16', semestreActivo)}
                                                                                                         </div>
                                                                                                         <div className="text-base font-extrabold text-slate-800 mt-0.5">
                                                                                                             {ej16}

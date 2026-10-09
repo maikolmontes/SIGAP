@@ -25,6 +25,7 @@ import {
     Mail,
     ListTree
 } from 'lucide-react'
+import { etiquetaSemestre, rotularCortes } from '../../utils/periodo'
 
 type MenuItem = {
     label: string;
@@ -151,6 +152,7 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
     const { user } = useAuth()
     const [periodoEtiqueta, setPeriodoEtiqueta] = useState<string>('Cargando...')
     const [tienePeriodo, setTienePeriodo] = useState<boolean>(false)
+    const [semestreActivo, setSemestreActivo] = useState<number | null>(null)
     const [paginasPermitidas, setPaginasPermitidas] = useState<string[] | null>(null)
     const location = useLocation()
     const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
@@ -261,7 +263,8 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                 const res = await api.get('/periodos')
                 const activo = res.data.find((p: any) => p.activo)
                 if (activo) {
-                    setPeriodoEtiqueta(`${activo.anio}-${activo.semestre === 1 ? 'I' : 'II'}`)
+                    setPeriodoEtiqueta(`${activo.anio}-${etiquetaSemestre(activo.semestre)}`)
+                    setSemestreActivo(activo.semestre)
                     setTienePeriodo(true)
                 } else {
                     setPeriodoEtiqueta('Sin período activo')
@@ -371,7 +374,7 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                                                         }`} 
                                                     />
                                                 )}
-                                                <span>{item.label}</span>
+                                                <span>{rotularCortes(item.label, semestreActivo)}</span>
                                             </div>
                                             {isExpanded ? (
                                                 <ChevronDown className="w-3.5 h-3.5 text-white/50 group-hover:text-white transition-transform" />
@@ -400,7 +403,7 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                                                 {child.icon && (
                                                     <child.icon className="w-3 h-3 text-white/40 group-hover:text-white transition-colors" />
                                                 )}
-                                                <span>{child.label}</span>
+                                                <span>{rotularCortes(child.label, semestreActivo)}</span>
                                             </NavLink>
                                         ))}
                                     </div>
@@ -445,7 +448,7 @@ export default function Sidebar({ rol, onClose }: SidebarProps) {
                                     }`} 
                                 />
                             )}
-                            <span>{item.label}</span>
+                            <span>{rotularCortes(item.label, semestreActivo)}</span>
                         </Link>
                     );
                 })}

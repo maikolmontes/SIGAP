@@ -6,6 +6,8 @@ import { useAuth } from '../../context/AuthContext';
 import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
 import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
 import type { EvidenciaVisor } from '../../components/evidencias/VisorEvidenciaModal';
+import useSemestreActivo from '../../hooks/useSemestreActivo'
+import { etiquetaCorte, rotularCortes } from '../../utils/periodo'
 
 interface AvanceSemanaProps {
   semana: '8' | '16';
@@ -13,6 +15,8 @@ interface AvanceSemanaProps {
 }
 
 export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSemanaProps) {
+  const semestreActivo = useSemestreActivo();
+  const nombreCorte = etiquetaCorte(semana, semestreActivo);
   const { user } = useAuth();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +131,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
         if (response.data.advertencias?.length > 0) {
           setMensaje({ tipo: 'advertencia', texto: response.data.mensaje });
         } else {
-          setMensaje({ tipo: 'exito', texto: `¡Avance de la Semana ${semana} guardado correctamente!` });
+          setMensaje({ tipo: 'exito', texto: `¡Avance de la ${nombreCorte} guardado correctamente!` });
         }
         
         // Refetch to ensure data is in sync
@@ -198,7 +202,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
   if (loading) {
     return (
-      <Layout rol="docente" path={`Registro de Actividades / Reporte Semana ${semana}`}>
+      <Layout rol="docente" path={`Registro de Actividades / Reporte ${nombreCorte}`}>
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
         </div>
@@ -208,14 +212,14 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
   if (sinPermiso) {
     return (
-      <Layout rol="docente" path={`Registro de Actividades / Reporte Semana ${semana}`}>
+      <Layout rol="docente" path={`Registro de Actividades / Reporte ${nombreCorte}`}>
         <div className="flex flex-col items-center justify-center min-h-[50vh] text-center p-8 bg-white rounded-2xl border border-gray-200 mt-6 shadow-sm max-w-lg mx-auto">
           <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-4 shadow-inner">
             <AlertCircle className="w-8 h-8" />
           </div>
           <h2 className="text-lg font-bold text-gray-800 mb-1">Acceso Restringido por Permisos</h2>
           <p className="text-xs text-gray-500 max-w-md mb-6 leading-relaxed">
-            Tu perfil de docente no tiene permisos activos de visualización para el Reporte de la Semana {semana}. Este acceso es administrado por el equipo de Planeación en la Gestión de Perfiles.
+            Tu perfil de docente no tiene permisos activos de visualización para el Reporte de la {nombreCorte}. Este acceso es administrado por el equipo de Planeación en la Gestión de Perfiles.
           </p>
           <a
             href="/docente/dashboard"
@@ -230,12 +234,12 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
   if (!semanaInfo?.habilitada) {
     return (
-      <Layout rol="docente" path={`Registro de Actividades / Reporte Semana ${semana}`}>
+      <Layout rol="docente" path={`Registro de Actividades / Reporte ${nombreCorte}`}>
         <div className="bg-white p-8 rounded-xl shadow-lg max-w-md mx-auto text-center mt-10">
           <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-gray-900 mb-2">Semana Cerrada</h2>
           <p className="text-gray-600 mb-4">
-            El reporte de evidencias para la Semana {semana} no está habilitado en este momento. Consulta con Planeación si necesitas realizar ajustes.
+            El reporte de evidencias para la {nombreCorte} no está habilitado en este momento. Consulta con Planeación si necesitas realizar ajustes.
           </p>
         </div>
       </Layout>
@@ -243,11 +247,11 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   }
 
   return (
-    <Layout rol="docente" path={`Registro de Actividades / Reporte Semana ${semana}`}>
+    <Layout rol="docente" path={`Registro de Actividades / Reporte ${nombreCorte}`}>
       <div className="bg-[#1a2744] rounded-xl px-6 py-6 mb-8 shadow-sm">
         <h1 className="text-2xl font-bold text-white flex items-center gap-2">
           <ClipboardList className="w-6 h-6 text-blue-400" />
-          Reporte de Avance Académico - Semana {semana}
+          Reporte de Avance Académico - {nombreCorte}
         </h1>
         <p className="text-blue-100 text-sm mt-1">
           Gestiona el cumplimiento de tus actividades según el periodo académico activo.
@@ -381,8 +385,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                             Indicador
                                         </th>
                                         <th className="px-4 py-3 text-center">Meta</th>
-                                        <th className="px-4 py-3 text-center">Ejecución Sem 8</th>
-                                        {semana === '16' && <th className="px-4 py-3 text-center">Ejecución Sem 16</th>}
+                                        <th className="px-4 py-3 text-center">{rotularCortes('Ejecución Sem 8', semestreActivo)}</th>
+                                        {semana === '16' && <th className="px-4 py-3 text-center">{rotularCortes('Ejecución Sem 16', semestreActivo)}</th>}
                                         <th className="px-4 py-3 text-center">% Avance</th>
                                         <th className="px-4 py-3 text-center min-w-[120px]">Estado</th>
                                         <th className="px-4 py-3 min-w-[200px]">

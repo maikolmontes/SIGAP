@@ -9,10 +9,13 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend
 } from 'recharts';
+import { etiquetaSemestre, rotularCortes } from '../../utils/periodo'
+import useSemestreActivo from '../../hooks/useSemestreActivo'
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ef4444', '#ec4899', '#6366f1'];
 
 export default function ReportesDirector() {
+    const semestreActivo = useSemestreActivo();
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [busquedaPrograma, setBusquedaPrograma] = useState('');
@@ -37,7 +40,7 @@ export default function ReportesDirector() {
     }, []);
 
     const { periodo, estadisticas_programa, distribucion_perfiles, avance_por_bloque, totales } = data || {};
-    const periodoLabel = periodo ? `${periodo.anio}-${periodo.semestre === 1 ? 'I' : 'II'}` : '';
+    const periodoLabel = periodo ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}` : '';
 
     // Filtrado y paginación de la tabla de programas
     const programasFiltrados = useMemo(() => {
@@ -220,7 +223,7 @@ export default function ReportesDirector() {
                     <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 text-green-500" /> Logro Parcial vs Logro Final por Bloque
                     </h3>
-                    <p className="text-xs text-gray-400 mb-4">Semana 8 (parcial) vs Semana 8+16 (final) — promedios globales</p>
+                    <p className="text-xs text-gray-400 mb-4">{rotularCortes('Semana 8 (parcial) vs Semana 8+16 (final) — promedios globales', semestreActivo)}</p>
                     <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={datosAvance} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
