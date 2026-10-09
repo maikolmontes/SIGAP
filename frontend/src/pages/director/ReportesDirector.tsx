@@ -2,20 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import {
-    BarChart3, PieChart as PieChartIcon, TrendingUp, Users, RefreshCw,
-    Search, X, Filter
+    BarChart3, TrendingUp, Users, RefreshCw,
+    Search, X
 } from 'lucide-react';
-import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    PieChart, Pie, Cell, Legend
-} from 'recharts';
-import { etiquetaSemestre, rotularCortes } from '../../utils/periodo'
-import useSemestreActivo from '../../hooks/useSemestreActivo'
-
-const COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ef4444', '#ec4899', '#6366f1'];
+import { etiquetaSemestre } from '../../utils/periodo'
+import BalanceGestionPanel from '../../components/director/BalanceGestionPanel'
 
 export default function ReportesDirector() {
-    const semestreActivo = useSemestreActivo();
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [busquedaPrograma, setBusquedaPrograma] = useState('');
@@ -39,7 +32,8 @@ export default function ReportesDirector() {
         cargarReportes();
     }, []);
 
-    const { periodo, estadisticas_programa, distribucion_perfiles, avance_por_bloque, totales } = data || {};
+    const { periodo, estadisticas_programa, totales: totalesApi } = data || {};
+    const totales = totalesApi || {};
     const periodoLabel = periodo ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}` : '';
 
     // Filtrado y paginación de la tabla de programas
@@ -77,41 +71,6 @@ export default function ReportesDirector() {
         );
     }
 
-    if (!data || !data.periodo) {
-        return (
-            <Layout rol="director" path="Reportes">
-                <div className="text-center py-16 text-gray-400">
-                    <BarChart3 className="w-16 h-16 mx-auto mb-4 opacity-30" />
-                    <p className="text-lg font-medium">No hay período activo</p>
-                    <p className="text-sm mt-1">Se requiere un período activo para generar reportes.</p>
-                </div>
-            </Layout>
-        );
-    }
-
-    // Datos para gráfico de torta de estados
-    const datosEstados = [
-        { name: 'Aprobadas', value: parseInt(totales.docentes_aprobados) || 0 },
-        { name: 'Devueltas', value: parseInt(totales.docentes_devueltos) || 0 },
-        { name: 'Pendientes', value: parseInt(totales.docentes_pendientes) || 0 },
-    ].filter(d => d.value > 0);
-    const coloresEstados = ['#10b981', '#ef4444', '#f59e0b'];
-
-    // Datos de perfiles para bar chart
-    const datosPerfiles = (distribucion_perfiles || []).map((p: any) => ({
-        perfil: p.perfil.length > 25 ? p.perfil.substring(0, 22) + '...' : p.perfil,
-        perfilCompleto: p.perfil,
-        cantidad: p.cantidad
-    }));
-
-    // Datos de avance por bloque para bar chart comparativo
-    const datosAvance = (avance_por_bloque || []).map((b: any) => ({
-        bloque: b.bloque.length > 15 ? b.bloque.substring(0, 12) + '...' : b.bloque,
-        bloqueCompleto: b.bloque,
-        'Logro Parcial (Sem 8)': Math.round(b.logro_parcial * 100),
-        'Logro Final': Math.round(b.logro_final * 100),
-    }));
-
     return (
         <Layout rol="director" path="Reportes / Resumen">
             {/* Encabezado */}
@@ -121,7 +80,7 @@ export default function ReportesDirector() {
                         <BarChart3 className="w-6 h-6 text-blue-500" />
                         Reportes del Director
                     </h1>
-                    <p className="text-sm text-gray-500 mt-1">Periodo: {periodoLabel} · Estadísticas generales</p>
+                    <p className="text-sm text-gray-500 mt-1">{periodoLabel ? `Período activo: ${periodoLabel}` : 'No hay período activo'} · Informe de gestión y estadísticas</p>
                 </div>
                 <button
                     onClick={cargarReportes}
@@ -131,6 +90,14 @@ export default function ReportesDirector() {
                 </button>
             </div>
 
+            <BalanceGestionPanel />
+
+            {!periodo ? (
+                <p className="text-sm text-gray-500 bg-white border border-gray-100 rounded-2xl px-5 py-4">
+                    No hay un período activo, por eso no se muestran las estadísticas del período en curso. El informe de gestión de arriba sí sirve para períodos anteriores.
+                </p>
+            ) : (
+            <>
             {/* Tarjetas totales */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-7">
                 {[
@@ -148,100 +115,6 @@ export default function ReportesDirector() {
                     </div>
                 ))}
             </div>
-
-            {/* Gráficos en grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-7">
-
-                {/* Gráfico: Docentes por Perfil Docente */}
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                    <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">
-                        <BarChart3 className="w-4 h-4 text-blue-500" /> Docentes por Perfil Docente
-                    </h3>
-                    <p className="text-xs text-gray-400 mb-4">Distribución según Acuerdo 030/2024</p>
-                    {datosPerfiles.length > 0 ? (
-                        <div className="h-64">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={datosPerfiles} layout="vertical" margin={{ top: 5, right: 30, left: 5, bottom: 5 }}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                    <XAxis type="number" tick={{ fontSize: 11 }} />
-                                    <YAxis dataKey="perfil" type="category" width={130} tick={{ fontSize: 10 }} />
-                                    <Tooltip
-                                        formatter={(v: any, _: any, props: any) => [v, props.payload.perfilCompleto]}
-                                        contentStyle={{ borderRadius: '10px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.1)' }}
-                                    />
-                                    <Bar dataKey="cantidad" radius={[0, 6, 6, 0]}>
-                                        {datosPerfiles.map((_: any, i: number) => (
-                                            <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                                        ))}
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    ) : (
-                        <div className="h-64 flex items-center justify-center text-gray-400 text-sm">Sin datos</div>
-                    )}
-                </div>
-
-                {/* Gráfico: Estado de agendas (pie) */}
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                    <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">
-                        <PieChartIcon className="w-4 h-4 text-purple-500" /> Estado de Agendas
-                    </h3>
-                    <p className="text-xs text-gray-400 mb-4">% agendas aprobadas, devueltas y pendientes</p>
-                    {datosEstados.length > 0 ? (
-                        <div className="h-64">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={datosEstados}
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={55}
-                                        outerRadius={85}
-                                        paddingAngle={4}
-                                        dataKey="value"
-                                        stroke="none"
-                                        label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
-                                    >
-                                        {datosEstados.map((_, i) => (
-                                            <Cell key={i} fill={coloresEstados[i % coloresEstados.length]} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip contentStyle={{ borderRadius: '10px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.1)' }} />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
-                    ) : (
-                        <div className="h-64 flex items-center justify-center text-gray-400 text-sm">Sin datos</div>
-                    )}
-                </div>
-            </div>
-
-            {/* Gráfico de avance por bloque */}
-            {datosAvance.length > 0 && (
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-7">
-                    <h3 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-green-500" /> Logro Parcial vs Logro Final por Bloque
-                    </h3>
-                    <p className="text-xs text-gray-400 mb-4">{rotularCortes('Semana 8 (parcial) vs Semana 8+16 (final) — promedios globales', semestreActivo)}</p>
-                    <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={datosAvance} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis dataKey="bloque" tick={{ fontSize: 10 }} />
-                                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}%`} />
-                                <Tooltip
-                                    formatter={(v: any) => `${v}%`}
-                                    contentStyle={{ borderRadius: '10px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.1)' }}
-                                />
-                                <Legend />
-                                <Bar dataKey="Logro Parcial (Sem 8)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                                <Bar dataKey="Logro Final" fill="#10b981" radius={[4, 4, 0, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-            )}
 
             {/* Tabla de estadísticas por programa */}
             {estadisticas_programa && estadisticas_programa.length > 0 && (
@@ -406,6 +279,8 @@ export default function ReportesDirector() {
                         </div>
                     )}
                 </div>
+            )}
+            </>
             )}
         </Layout>
     );

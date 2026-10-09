@@ -132,6 +132,12 @@ Frontend: frontend/src/pages/common/Analitica.tsx + components/analitica/ + serv
 El backend entrega datos sin colores ni estilos; la paleta se decide en components/analitica/paleta.ts
 La analítica excluye el catálogo maestro (funciones sin docente) uniendo contra usuario_asignacion
 horas_contrato puede ser 0 (Hora Cátedra, Por Definir): toda división usa NULLIF
+Balance de gestión (Reportes del Director)
+GET /api/director/balance-gestion?programa=&periodo= — devuelve el documento YA REDACTADO: backend/services/balanceGestion.js junta los datos y backend/services/balanceDocumento.js escribe el texto (secciones con párrafos, listas y tablas); el frontend solo lo muestra y lo convierte en Word (utils/balanceWord.ts, armado a mano con jszip) y PDF (utils/balancePdf.ts, jsPDF), cargados solo al descargar
+El alcance del Director sale de alcanceProgramas (403 si el programa no es suyo). Mismas definiciones que la analítica: estado de agenda por precedencia (Devuelta > Aprobada > En revisión > Pendiente), avance = ejecución de indicadores / meta, solo funciones con docente
+Cada actividad aparece con su descripción (resultado esperado), indicadores y evidencias; en Docencia Directa las descripciones repetidas por clase se agrupan. La valoración del director (logros, dificultades…) se escribe en pantalla y va al documento; no se guarda
+Períodos intersemestrales: periodo.semestre 1=I, 2=II, 3=Intersemestral I, 4=Intersemestral II. El nombre sale SIEMPRE de backend/utils/periodo.js o frontend/src/utils/periodo.ts (no usar semestre === 1 ? 'I' : 'II'). En un intersemestral los cortes (internos 8 y 16) se muestran "Semana X" hasta definir las semanas
+
 Notificaciones por correo (Gmail / Nodemailer)
 
 Servicio central: backend/services/emailService.js (transporte SMTP, sendEmail, sendEmailAsync, verificarConexion)
