@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '../../components/common/Layout';
 import { FileText, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare, Trash2 } from 'lucide-react';
 import api from '../../services/api';
@@ -9,6 +9,8 @@ import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal
 import type { EvidenciaVisor } from '../../components/evidencias/VisorEvidenciaModal';
 import useSemestreActivo from '../../hooks/useSemestreActivo'
 import { etiquetaCorte, rotularCortes } from '../../utils/periodo'
+
+type CampoAvance = 'ejecucion_8' | 'ejecucion_16';
 
 interface AvanceSemanaProps {
   semana: '8' | '16';
@@ -31,6 +33,13 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
   const [selectedFunctionIndex, setSelectedFunctionIndex] = useState(0);
   const [selectedActivityIndex, setSelectedActivityIndex] = useState(0);
+  // Selección de varias filas de una columna de avance (como en una hoja de cálculo): sirve para copiar el
+  // avance de una actividad y pegarlo en otra. Se guarda con la función y actividad donde se hizo.
+  const [seleccion, setSeleccion] = useState<{ f: number; a: number; campo: CampoAvance; desde: number; hasta: number } | null>(null);
+  const anclaRef = useRef<{ campo: CampoAvance; fila: number } | null>(null);
+  // true mientras SE mueve el foco desde el teclado o con Mayús+clic: ese foco no debe cambiar el punto de partida
+  const conservarAnclaRef = useRef(false);
+  const [avisoCopia, setAvisoCopia] = useState<string | null>(null);
   const [modalEvidencia, setModalEvidencia] = useState({ isOpen: false, idIndicador: 0, nombreIndicador: '' });
   // Evidencia abierta en el visor (vista previa sin descargar)
   const [evidenciaVisor, setEvidenciaVisor] = useState<EvidenciaVisor | null>(null);
@@ -48,13 +57,13 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   const claveAviso = `sigap_aviso_avance_${semana}`;
   useEffect(() => {
     // Solo si el reporte está abierto y se puede editar (con la semana cerrada no hay nada que registrar)
-    if (loading || sinPermiso || !semanaInfo?.habilitada || !puedeEditar) return;
+    if (loading || sinPermiso || !semanaInfo?.abierta || !puedeEditar) return;
     let oculto = false;
     try { oculto = localStorage.getItem(claveAviso) === '1'; } catch { /* sin almacenamiento: se mostrará */ }
     setNoMostrarAviso(false);
     setAvisoEntrada(!oculto);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, sinPermiso, semanaInfo?.habilitada, puedeEditar, semana]);
+  }, [loading, sinPermiso, semanaInfo?.abierta, puedeEditar, semana]);
 
   const cerrarAvisoEntrada = () => {
     if (noMostrarAviso) {
@@ -194,12 +203,12 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
             f.actividades.flatMap((a: any) => a.indicadores)
         );
 
-        const response = await api.post('/agenda/guardar-avance', { indicadores });
+        const response = await api.post('/agenda/guardar-avance', { indicadores, semana });
 
         if (response.data.advertencias?.length > 0) {
           void avisar({ tipo: 'advertencia', titulo: 'Avance guardado con observaciones', mensaje: response.data.mensaje });
         } else {
-          void avisar({ tipo: 'exito', titulo: 'Avance guardado', mensaje: `¡Avance de la ${nombreCorte} guardado correctamente!`, cerrarEn: 4000 });
+          void avisar({ tipo: 'exito', titulo: 'Avance guardado', mensaje: `¡Avance de la ${nombreCorte} guardado correctamente!`, cerrarEn: 2000 });
         }
         
         // Refetch to ensure data is in sync
@@ -226,13 +235,100 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     return { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Sin iniciar', dot: 'bg-gray-400' };
   };
 
+  // ---- Selección y copiado de varias filas de una columna de avance ----
+  const seleccionEn = (campo: CampoAvance) =>
+    seleccion && seleccion.f === selectedFunctionIndex && seleccion.a === selectedActivityIndex && seleccion.campo === campo ? seleccion : null;
+  const rangoSeleccion = (campo: CampoAvance) => {
+    const sel = seleccionEn(campo);
+    return sel ? { desde: Math.min(sel.desde, sel.hasta), hasta: Math.max(sel.desde, sel.hasta) } : null;
+  };
+  const filaSeleccionada = (campo: CampoAvance, fila: number) => {
+    const r = rangoSeleccion(campo);
+    return !!r && r.desde !== r.hasta && fila >= r.desde && fila <= r.hasta;
+  };
+  const seleccionar = (campo: CampoAvance, desde: number, hasta: number) =>
+    setSeleccion({ f: selectedFunctionIndex, a: selectedActivityIndex, campo, desde, hasta });
+  const mostrarAvisoCopia = (texto: string) => {
+    setAvisoCopia(texto);
+    setTimeout(() => setAvisoCopia(null), 2500);
+  };
+
+  const conservarAncla = () => {
+    conservarAnclaRef.current = true;
+    setTimeout(() => { conservarAnclaRef.current = false; }, 0); // por si no llega ningún evento de foco
+  };
+  // Al enfocar un campo (clic, Tab…) ese campo pasa a ser el punto de partida de una futura selección
+  const alEnfocarCampo = (e: React.FocusEvent<HTMLInputElement>, campo: CampoAvance, fila: number) => {
+    e.target.select();
+    if (conservarAnclaRef.current) { conservarAnclaRef.current = false; return; }
+    anclaRef.current = { campo, fila };
+  };
+
+  // Ratón: clic en un campo fija el punto de partida; arrastrar sobre otros campos o Mayús+clic extiende la selección
+  const alPresionarCampo = (e: React.MouseEvent<HTMLInputElement>, campo: CampoAvance, fila: number) => {
+    if (e.shiftKey && anclaRef.current?.campo === campo) {
+      conservarAncla();
+      seleccionar(campo, anclaRef.current.fila, fila);
+    } else {
+      anclaRef.current = { campo, fila };
+      setSeleccion(null);
+    }
+  };
+  const alArrastrar = (e: React.MouseEvent) => {
+    const ancla = anclaRef.current;
+    if (e.buttons !== 1 || !ancla) return;
+    const bajoElPuntero = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLInputElement>(`input[data-avance="${ancla.campo}"]`);
+    const fila = Number(bajoElPuntero?.dataset.fila);
+    if (!bajoElPuntero || Number.isNaN(fila)) return;
+    const actual = seleccionEn(ancla.campo);
+    if (fila === ancla.fila && !actual) return; // aún no salió del primer campo
+    if (actual && actual.desde === ancla.fila && actual.hasta === fila) return; // ya está así
+    seleccionar(ancla.campo, ancla.fila, fila);
+  };
+
+  // Ctrl+C con varias filas seleccionadas: se copian sus valores, uno por línea (también se pueden pegar en Excel)
+  const alCopiar = (e: React.ClipboardEvent<HTMLInputElement>, campo: CampoAvance, indicadores: { [k: string]: unknown }[]) => {
+    const r = rangoSeleccion(campo);
+    if (!r || r.desde === r.hasta) return; // una sola celda: copia normal
+    e.preventDefault();
+    const valores = indicadores.slice(r.desde, r.hasta + 1).map(i => (i[campo] === null || i[campo] === undefined ? '' : String(i[campo])));
+    e.clipboardData.setData('text/plain', valores.join('\n'));
+    mostrarAvisoCopia(`${valores.length} valores copiados`);
+  };
+
+  // Ctrl+V: varios valores (de este sistema o de Excel) se reparten hacia abajo desde la fila actual;
+  // un solo valor con varias filas seleccionadas se aplica a todas. Cada valor respeta 0 y la meta de su fila.
+  const alPegar = (e: React.ClipboardEvent<HTMLInputElement>, campo: CampoAvance, fila: number, totalFilas: number) => {
+    const valores = e.clipboardData.getData('text').split(/\r?\n|\t/).map(v => v.trim().replace(',', '.'));
+    while (valores.length > 1 && valores[valores.length - 1] === '') valores.pop(); // Excel deja una línea vacía al final
+    const r = rangoSeleccion(campo);
+    const variasFilas = !!r && r.desde !== r.hasta;
+    if (valores.length <= 1 && !variasFilas) return; // un valor en un campo: pegado normal
+
+    e.preventDefault();
+    const inicio = variasFilas ? r!.desde : fila;
+    const destinos: { fila: number; valor: string }[] = [];
+    if (valores.length === 1) {
+      for (let k = r!.desde; k <= r!.hasta; k++) destinos.push({ fila: k, valor: valores[0] });
+    } else {
+      valores.forEach((valor, k) => { if (inicio + k < totalFilas) destinos.push({ fila: inicio + k, valor }); });
+    }
+    const validos = destinos.filter(d => d.valor !== '' && !Number.isNaN(Number(d.valor)));
+    validos.forEach(d => handleIndicadorChange(selectedFunctionIndex, selectedActivityIndex, d.fila, campo, d.valor));
+    if (validos.length > 0) {
+      seleccionar(campo, validos[0].fila, validos[validos.length - 1].fila);
+      mostrarAvisoCopia(`${validos.length} valores pegados`);
+    }
+  };
+
   // Teclado en el campo de avance (como en una hoja de cálculo):
-  //  · ↑ / ↓  pasan al campo de la fila de arriba / abajo (se salta lo deshabilitado)
+  //  · ↑ / ↓  pasan al campo de la fila de arriba / abajo (se salta lo deshabilitado); con Mayús extienden la selección
   //  · ← / →  bajan / suben el número en 1 (sin pasar de 0 ni de la meta: eso lo cuida handleIndicadorChange)
+  //  · Ctrl+A selecciona toda la columna; Esc quita la selección
   const teclasAvance = (
     e: React.KeyboardEvent<HTMLInputElement>,
-    campo: 'ejecucion_8' | 'ejecucion_16',
-    fIndex: number, aIndex: number, iIndex: number
+    campo: CampoAvance,
+    fIndex: number, aIndex: number, iIndex: number, totalFilas: number
   ) => {
     const input = e.currentTarget;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -241,12 +337,29 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
       );
       const destino = campos[campos.indexOf(input) + (e.key === 'ArrowDown' ? 1 : -1)];
       e.preventDefault(); // el número no cambia con estas flechas
-      destino?.focus();
+      if (!destino) return;
+      const filaDestino = campos.indexOf(destino);
+      if (e.shiftKey) {
+        const partida = anclaRef.current?.campo === campo ? anclaRef.current.fila : iIndex;
+        anclaRef.current = { campo, fila: partida };
+        seleccionar(campo, partida, filaDestino);
+      } else {
+        anclaRef.current = { campo, fila: filaDestino };
+        setSeleccion(null);
+      }
+      conservarAncla();
+      destino.focus();
     } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
       e.preventDefault();
       const actual = parseFloat(input.value) || 0;
       const nuevoValor = Math.max(0, Math.round((actual + (e.key === 'ArrowRight' ? 1 : -1)) * 1000) / 1000);
       handleIndicadorChange(fIndex, aIndex, iIndex, campo, String(nuevoValor));
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      anclaRef.current = { campo, fila: 0 };
+      seleccionar(campo, 0, totalFilas - 1);
+    } else if (e.key === 'Escape') {
+      setSeleccion(null);
     }
   };
 
@@ -293,6 +406,9 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     setData(newData);
   };
 
+  // Pasada la fecha de cierre el docente solo puede consultar su avance y sus evidencias
+  const soloLectura = semanaInfo?.motivo_cierre === 'cerrada';
+
   if (loading) {
     return (
       <Layout rol="docente" path={`Registro de Actividades / Reporte ${nombreCorte}`}>
@@ -325,14 +441,14 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     );
   }
 
-  if (!semanaInfo?.habilitada) {
+  if (!semanaInfo?.abierta && !soloLectura) {
     return (
       <Layout rol="docente" path={`Registro de Actividades / Reporte ${nombreCorte}`}>
         <div className="bg-white p-8 rounded-xl shadow-lg max-w-md mx-auto text-center mt-10">
           <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Semana Cerrada</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">{semanaInfo?.motivo_cierre === 'no_inicia' ? 'Semana aún no disponible' : 'Semana Cerrada'}</h2>
           <p className="text-gray-600 mb-4">
-            El reporte de evidencias para la {nombreCorte} no está habilitado en este momento. Consulta con Planeación si necesitas realizar ajustes.
+            {semanaInfo?.mensaje_cierre || `El reporte de la ${nombreCorte} no está habilitado en este momento.`} Consulta con Planeación si necesitas realizar ajustes.
           </p>
         </div>
       </Layout>
@@ -350,6 +466,15 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
           Gestiona el cumplimiento de tus actividades según el periodo académico activo.
         </p>
       </div>
+
+      {soloLectura && (
+        <div className="p-4 mb-6 rounded-xl flex items-start gap-3 border bg-amber-50 border-amber-200 text-amber-800">
+          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+          <p className="font-medium text-sm">
+            {semanaInfo?.mensaje_cierre} Aquí ves tu avance y tus evidencias tal como quedaron, pero ya no se pueden modificar.
+          </p>
+        </div>
+      )}
 
       {avisoEntrada && (
         <div
@@ -496,6 +621,14 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                         </div>
                                     </div>
                                     
+                                    <div className={`flex items-center justify-between gap-3 mb-2 min-h-[20px] ${soloLectura ? 'hidden' : ''}`}>
+                                        <p className="text-[11px] text-gray-400">
+                                            Para copiar el avance a otra actividad: selecciona varias filas (arrastra, Mayús+↑/↓ o clic en el título de la columna), <strong className="font-semibold">Ctrl+C</strong>, ve a la otra actividad y <strong className="font-semibold">Ctrl+V</strong>.
+                                        </p>
+                                        {avisoCopia && (
+                                            <span className="shrink-0 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-3 py-0.5">{avisoCopia}</span>
+                                        )}
+                                    </div>
                                     <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-gray-50 text-gray-600 font-semibold border-b border-gray-200">
@@ -505,8 +638,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                             Indicador
                                         </th>
                                         <th className="px-4 py-3 text-center">Meta</th>
-                                        <th className="px-4 py-3 text-center leading-tight">{rotularCortes('Avance Sem 8', semestreActivo)}<span className="block text-[10px] font-normal text-gray-400">según la meta</span></th>
-                                        {semana === '16' && <th className="px-4 py-3 text-center leading-tight">{rotularCortes('Avance Sem 16', semestreActivo)}<span className="block text-[10px] font-normal text-gray-400">según la meta</span></th>}
+                                        <th className="px-4 py-3 text-center leading-tight cursor-pointer select-none hover:bg-blue-50 transition-colors" title="Clic para seleccionar toda la columna" onClick={() => { anclaRef.current = { campo: 'ejecucion_8', fila: 0 }; seleccionar('ejecucion_8', 0, (actividad.indicadores?.length || 1) - 1); }}>{rotularCortes('Avance Sem 8', semestreActivo)}<span className="block text-[10px] font-normal text-gray-400">según la meta</span></th>
+                                        {semana === '16' && <th className="px-4 py-3 text-center leading-tight cursor-pointer select-none hover:bg-blue-50 transition-colors" title="Clic para seleccionar toda la columna" onClick={() => { anclaRef.current = { campo: 'ejecucion_16', fila: 0 }; seleccionar('ejecucion_16', 0, (actividad.indicadores?.length || 1) - 1); }}>{rotularCortes('Avance Sem 16', semestreActivo)}<span className="block text-[10px] font-normal text-gray-400">según la meta</span></th>}
                                         <th className="px-4 py-3 text-center">% Avance</th>
                                         <th className="px-4 py-3 text-center min-w-[120px]">Estado</th>
                                         <th className="px-4 py-3 min-w-[200px]">
@@ -518,7 +651,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                         <th className="px-4 py-3 text-center">Evidencia</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-100">
+                                {/* dragstart cancelado: el valor ya está seleccionado al enfocar y, sin esto, arrastrar movería el texto en vez de seleccionar filas */}
+                                <tbody className="divide-y divide-gray-100" onMouseMove={alArrastrar} onDragStart={(e) => e.preventDefault()}>
                                     {actividad.indicadores?.map((ind: any, iIndex: number) => {
                                         const meta = Number(ind.meta) || Number(actividad.meta) || 0;
                                         const ejec8 = ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined && ind.ejecucion_8 !== '' ? parseFloat(String(ind.ejecucion_8)) : 0;
@@ -540,11 +674,15 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                         max={meta > 0 ? meta : undefined}
                                                         value={ind.ejecucion_8 !== null && ind.ejecucion_8 !== undefined ? ind.ejecucion_8 : ''}
                                                         data-avance="ejecucion_8"
-                                                        onKeyDown={(e) => teclasAvance(e, 'ejecucion_8', selectedFunctionIndex, aIndex, iIndex)}
-                                                        onFocus={(e) => e.target.select()}
+                                                        onMouseDown={(e) => alPresionarCampo(e, 'ejecucion_8', iIndex)}
+                                                        data-fila={iIndex}
+                                                        onCopy={(e) => alCopiar(e, 'ejecucion_8', actividad.indicadores)}
+                                                        onPaste={(e) => alPegar(e, 'ejecucion_8', iIndex, actividad.indicadores.length)}
+                                                        onKeyDown={(e) => teclasAvance(e, 'ejecucion_8', selectedFunctionIndex, aIndex, iIndex, actividad.indicadores.length)}
+                                                        onFocus={(e) => alEnfocarCampo(e, 'ejecucion_8', iIndex)}
                                                         onChange={(e) => handleIndicadorChange(selectedFunctionIndex, aIndex, iIndex, 'ejecucion_8', e.target.value)}
-                                                        disabled={semana !== '8'}
-                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${semana !== '8' ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : 'bg-white border-gray-300'}`}
+                                                        disabled={semana !== '8' || soloLectura}
+                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${semana !== '8' || soloLectura ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : filaSeleccionada('ejecucion_8', iIndex) ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 font-semibold' : 'bg-white border-gray-300'}`}
                                                     />
                                                 </td>
                                                 {semana === '16' && (
@@ -556,10 +694,15 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                         max={meta > 0 ? Math.max(0, meta - ejec8) : undefined}
                                                         value={ind.ejecucion_16 !== null && ind.ejecucion_16 !== undefined ? ind.ejecucion_16 : ''}
                                                         data-avance="ejecucion_16"
-                                                        onKeyDown={(e) => teclasAvance(e, 'ejecucion_16', selectedFunctionIndex, aIndex, iIndex)}
-                                                        onFocus={(e) => e.target.select()}
+                                                        disabled={soloLectura}
+                                                        onMouseDown={(e) => alPresionarCampo(e, 'ejecucion_16', iIndex)}
+                                                        data-fila={iIndex}
+                                                        onCopy={(e) => alCopiar(e, 'ejecucion_16', actividad.indicadores)}
+                                                        onPaste={(e) => alPegar(e, 'ejecucion_16', iIndex, actividad.indicadores.length)}
+                                                        onKeyDown={(e) => teclasAvance(e, 'ejecucion_16', selectedFunctionIndex, aIndex, iIndex, actividad.indicadores.length)}
+                                                        onFocus={(e) => alEnfocarCampo(e, 'ejecucion_16', iIndex)}
                                                         onChange={(e) => handleIndicadorChange(selectedFunctionIndex, aIndex, iIndex, 'ejecucion_16', e.target.value)}
-                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors bg-white border-gray-300`}
+                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${soloLectura ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : filaSeleccionada('ejecucion_16', iIndex) ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 font-semibold' : 'bg-white border-gray-300'}`}
                                                     />
                                                 </td>
                                                 )}
@@ -618,13 +761,15 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex flex-col gap-2">
-                                                        <button 
+                                                        {!soloLectura && (
+<button 
                                                             onClick={() => setModalEvidencia({ isOpen: true, idIndicador: ind.id_indicador, nombreIndicador: ind.nombre_indicador })}
                                                             className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-200 text-xs font-medium transition-colors w-full"
                                                         >
                                                             <UploadCloud className="w-3.5 h-3.5" />
                                                             Subir
                                                         </button>
+)}
                                                         {ind.evidencias?.filter((ev: any) => String(ev.semana) === semana).length > 0 && (
                                                             <div className="flex flex-col gap-1.5 mt-2">
                                                                 <span className="text-[10px] font-bold text-gray-400 uppercase">Cargadas:</span>
@@ -639,7 +784,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                                             {ev.tipo_archivo === 'enlace' ? <ExternalLink className="w-3.5 h-3.5 shrink-0" /> : <Eye className="w-3.5 h-3.5 shrink-0" />}
                                                                             <span className="truncate max-w-[100px]">{ev.nombre_archivo}</span>
                                                                         </button>
-                                                                        <button
+                                                                        {!soloLectura && (
+<button
                                                                             type="button"
                                                                             onClick={() => eliminarEvidencia(ev)}
                                                                             disabled={eliminandoEvidencia === ev.id_evidencias}
@@ -649,6 +795,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                                         >
                                                                             <Trash2 className="w-3.5 h-3.5" />
                                                                         </button>
+)}
                                                                     </div>
                                                                 ))}
                                                             </div>
@@ -696,7 +843,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                  )}
                  </div>
 
-                 <div className="bg-gray-50 px-6 py-4 flex justify-end border-t border-gray-200">
+                 {!soloLectura && (
+<div className="bg-gray-50 px-6 py-4 flex justify-end border-t border-gray-200">
                     <button 
                         onClick={guardarAvance}
                         disabled={guardando}
@@ -710,6 +858,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                         {guardando ? 'Guardando...' : `Guardar Avance Semanal`}
                     </button>
                  </div>
+)}
             </div>
           </>
       ) : (

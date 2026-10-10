@@ -3,8 +3,9 @@ import Layout from '../../components/common/Layout';
 import api, { getArchivoUrl } from '../../services/api';
 import { confirmar } from '../../components/common/dialogo';
 import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
+import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
 import { useAuth } from '../../context/AuthContext';
-import { FileText, FileImage, FileArchive, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, AlertCircle, Calendar, Target, Eye, FileSpreadsheet } from 'lucide-react';
+import { FileText, FileImage, FileArchive, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, AlertCircle, Calendar, Target, Eye, FileSpreadsheet, Plus } from 'lucide-react';
 import { etiquetaCorte, etiquetaSemestre, rotularCortes } from '../../utils/periodo'
 
 interface Evidencia {
@@ -30,6 +31,9 @@ interface Semana {
     numero_semana: string;
     etiqueta: string;
     habilitada: boolean;
+    /** El servidor la calcula: habilitada y hoy dentro de sus fechas de inicio y cierre */
+    abierta?: boolean;
+    mensaje_cierre?: string | null;
     id_periodo: number;
 }
 
@@ -59,6 +63,8 @@ const Evidencias: React.FC = () => {
     const [mensaje, setMensaje] = useState<{ tipo: string, texto: string } | null>(null);
     const [eliminandoId, setEliminandoId] = useState<number | null>(null);
     const [preview, setPreview] = useState<Evidencia | null>(null);
+    // Indicador al que se le está agregando una evidencia (archivo o enlace) desde esta pantalla
+    const [agregando, setAgregando] = useState<{ idIndicador: number; nombreIndicador: string } | null>(null);
 
     const [periodos, setPeriodos] = useState<Periodo[]>([]);
     const [semanas, setSemanas] = useState<Semana[]>([]);
@@ -95,7 +101,7 @@ const Evidencias: React.FC = () => {
             setSemanas(semanasRes.data);
 
             // Pre-seleccionar la semana habilitada (si hay una habilitada)
-            const semanaHabilitada = semanasRes.data.find((s: Semana) => s.habilitada && s.numero_semana !== '0');
+            const semanaHabilitada = semanasRes.data.find((s: Semana) => (s.abierta ?? s.habilitada) && s.numero_semana !== '0');
             if (semanaHabilitada) {
                 setSelectedWeek(semanaHabilitada.numero_semana);
             }
@@ -144,6 +150,18 @@ const Evidencias: React.FC = () => {
         return getArchivoUrl(ev.ruta_archivo);
     };
 
+    const recargarEvidencias = async () => {
+        try {
+            const userId = (user as unknown as { id_usuario?: number } | null)?.id_usuario || user?.id;
+            if (!userId) return;
+            const response = await api.get(`/evidencias/${userId}`);
+            setData(response.data);
+        } catch (error) {
+            // La evidencia ya quedó guardada: si no se pudo refrescar la lista, aparecerá al volver a entrar
+            console.error('No se pudo actualizar la lista de evidencias:', error);
+        }
+    };
+
     const isImage = (type: string) => type && type.startsWith('image/');
     const isPdf = (type: string) => type && type.includes('pdf');
     const isLink = (type: string) => type === 'enlace';
@@ -190,8 +208,11 @@ const Evidencias: React.FC = () => {
     const isWeekHabilitada = React.useMemo(() => {
         if (selectedPeriod !== activePeriodId) return false;
         const sem = semanas.find((s) => s.numero_semana === selectedWeek);
-        return sem ? sem.habilitada : false;
+        return sem ? (sem.abierta ?? sem.habilitada) : false;
     }, [selectedPeriod, activePeriodId, selectedWeek, semanas]);
+
+    // Por qué la semana seleccionada está en solo lectura (lo dice el servidor: cerró el..., inicia el..., no habilitada)
+    const motivoSoloLectura = semanas.find((s) => s.numero_semana === selectedWeek)?.mensaje_cierre;
 
     const filteredFunctionData = React.useMemo(() => {
         if (!activeFunctionData || selectedPeriod === null) return null;
@@ -311,7 +332,7 @@ const Evidencias: React.FC = () => {
                                 <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3.5 flex items-center gap-3">
                                     <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
                                     <div className="text-xs">
-                                        <span className="font-bold">Modo de solo lectura.</span> La semana seleccionada no está habilitada o pertenece a un período cerrado.
+                                        <span className="font-bold">Modo de solo lectura.</span> {selectedPeriod !== activePeriodId ? 'Pertenece a un período cerrado.' : (motivoSoloLectura || 'La semana seleccionada no está habilitada.')}
                                     </div>
                                 </div>
                             )}
@@ -364,12 +385,22 @@ const Evidencias: React.FC = () => {
                                                         <div className="mt-1 bg-orange-100 p-1.5 rounded-md">
                                                             <Target className="w-4 h-4 text-orange-600" />
                                                         </div>
-                                                        <div>
+                                                        <div className="flex-1 min-w-0">
                                                             <h4 className="text-sm font-bold text-gray-800">{ind.nombre_indicador}</h4>
                                                             {!tieneEvidencias && (
                                                                 <p className="text-xs text-gray-400 mt-1 italic">Sin evidencias cargadas</p>
                                                             )}
                                                         </div>
+                                                        {isWeekHabilitada && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setAgregando({ idIndicador: ind.id_indicadores, nombreIndicador: ind.nombre_indicador })}
+                                                                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded border border-blue-200 text-xs font-medium transition-colors"
+                                                            >
+                                                                <Plus className="w-3.5 h-3.5" />
+                                                                Agregar archivo o enlace
+                                                            </button>
+                                                        )}
                                                     </div>
 
                                                     {/* Grilla de Evidencias con mini-preview */}
@@ -474,6 +505,16 @@ const Evidencias: React.FC = () => {
                     )}
                 </div>
             )}
+
+            {/* Subir un archivo o pegar un enlace: el mismo modal de los reportes de semana 8 y 16 */}
+            <SubirEvidenciaModal
+                isOpen={agregando !== null}
+                onClose={() => setAgregando(null)}
+                idIndicador={agregando?.idIndicador ?? 0}
+                nombreIndicador={agregando?.nombreIndicador ?? ''}
+                semana={selectedWeek}
+                onUploadSuccess={recargarEvidencias}
+            />
 
             {/* Visor compartido: mismo modal que usa la revisión de cortes */}
             {preview && (
