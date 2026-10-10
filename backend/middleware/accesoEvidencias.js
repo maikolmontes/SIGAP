@@ -14,11 +14,11 @@
 const jwt = require('jsonwebtoken');
 const { JWT_SECRET } = require('../config/jwt');
 const path = require('path');
-const fs = require('fs');
 const pool = require('../db/connection');
 const { rolesEfectivos, docenteEnAlcance } = require('../utils/rolActivo');
+const almacen = require('../services/almacenEvidencias');
 
-const UPLOADS_EVIDENCIAS = path.join(__dirname, '..', 'uploads', 'evidencias');
+const UPLOADS_EVIDENCIAS = almacen.CARPETA_EVIDENCIAS;
 
 // Extensiones permitidas (coinciden con el selector del frontend)
 const EXTENSIONES_PERMITIDAS = new Set([
@@ -102,8 +102,8 @@ const servirArchivo = async (req, res) => {
             return res.status(403).json({ error: 'No tienes permiso para ver esta evidencia.' });
         }
 
-        const archivo = path.join(UPLOADS_EVIDENCIAS, nombre);
-        if (!fs.existsSync(archivo)) {
+        const archivo = await almacen.abrir(nombre);
+        if (!archivo) {
             return res.status(404).json({ error: 'El archivo ya no está en el servidor.' });
         }
 
@@ -111,7 +111,15 @@ const servirArchivo = async (req, res) => {
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Content-Disposition',
             `inline; filename*=UTF-8''${encodeURIComponent(ev.rows[0].nombre_archivo || nombre)}`);
-        res.sendFile(archivo);
+        // El tipo se deduce de la extensión (lista blanca), no de lo que diga el archivo
+        res.type(path.extname(nombre) || 'application/octet-stream');
+        if (archivo.tamano) res.setHeader('Content-Length', String(archivo.tamano));
+        archivo.stream.on('error', (error) => {
+            console.error('Error leyendo la evidencia:', error.message);
+            if (!res.headersSent) res.status(500).json({ error: 'No se pudo abrir el archivo.' });
+            else res.destroy(error);
+        });
+        archivo.stream.pipe(res);
     } catch (error) {
         console.error('Error sirviendo evidencia:', error);
         res.status(500).json({ error: 'No se pudo abrir el archivo.' });

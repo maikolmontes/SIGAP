@@ -1,15 +1,10 @@
 const pool = require('../db/connection');
 const path = require('path');
-const fs = require('fs');
 const { rolesEfectivos } = require('../utils/rolActivo');
 const {
     idUsuarioDe, puedeVerDocente, duenoDeIndicador, duenoDeEvidencia,
 } = require('../middleware/accesoEvidencias');
-
-// Borra el archivo que multer ya escribió cuando la petición se rechaza
-const descartarArchivo = (req) => {
-    try { if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path); } catch { /* sin acción */ }
-};
+const almacen = require('../services/almacenEvidencias');
 
 // Obtener evidencias por docente (organizadas por función y actividad)
 const obtenerEvidenciasDocente = async (req, res) => {
@@ -132,27 +127,26 @@ const subirEvidencia = async (req, res) => {
     const { id_indicador, tipo_evidencia, enlace_texto, semana } = req.body;
 
     if (!id_indicador) {
-        descartarArchivo(req);
         return res.status(400).json({ error: 'Se requiere el id del indicador' });
     }
+
+    // Se declara fuera del try: el catch lo necesita para no dejar un archivo huérfano
+    let guardadoEnAlmacen = null;
 
     try {
         // Solo el docente dueño del indicador puede subirle evidencias
         const dueno = await duenoDeIndicador(id_indicador);
         if (!dueno) {
-            descartarArchivo(req);
-            return res.status(404).json({ error: 'El indicador no existe.' });
+                return res.status(404).json({ error: 'El indicador no existe.' });
         }
         if (dueno !== idUsuarioDe(req)) {
-            descartarArchivo(req);
-            return res.status(403).json({ error: 'Solo el docente dueño del indicador puede subir evidencias.' });
+                return res.status(403).json({ error: 'Solo el docente dueño del indicador puede subir evidencias.' });
         }
 
         // Solo cortes de evidencia válidos y habilitados por Planeación
         const semanaNum = String(semana || '8');
         if (!['8', '16'].includes(semanaNum)) {
-            descartarArchivo(req);
-            return res.status(400).json({ error: 'La semana debe ser 8 o 16.' });
+                return res.status(400).json({ error: 'La semana debe ser 8 o 16.' });
         }
         const corte = await pool.query(`
             SELECT s.habilitada FROM semana s
@@ -160,8 +154,7 @@ const subirEvidencia = async (req, res) => {
             WHERE s.numero_semana = $1 LIMIT 1
         `, [semanaNum]);
         if (!corte.rows[0]?.habilitada) {
-            descartarArchivo(req);
-            return res.status(403).json({ error: `La Semana ${semanaNum} no está habilitada para cargar evidencias.` });
+                return res.status(403).json({ error: `La Semana ${semanaNum} no está habilitada para cargar evidencias.` });
         }
 
         let nombreArchivo = null;
@@ -186,10 +179,15 @@ const subirEvidencia = async (req, res) => {
             if (!req.file) {
                 return res.status(400).json({ error: 'No se subió ningún archivo' });
             }
-            // Para archivos
+            // Para archivos: el contenido va al almacén (Vercel Blob en producción) y en la base
+            // queda la ruta pública, que el servidor sirve después de comprobar el permiso
+            const extension = path.extname(req.file.originalname).toLowerCase();
+            const nombreEnAlmacen = `evidencia-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
+            await almacen.guardar({ buffer: req.file.buffer, nombre: nombreEnAlmacen, tipo: req.file.mimetype });
+            guardadoEnAlmacen = nombreEnAlmacen;
+
             nombreArchivo = req.file.originalname;
-            // Guardamos ruta relativa accesible desde el frontend
-            rutaArchivo = `/uploads/evidencias/${req.file.filename}`;
+            rutaArchivo = `/uploads/evidencias/${nombreEnAlmacen}`;
             tipoArchivo = req.file.mimetype;
             tamanioKb = Math.round(req.file.size / 1024);
         }
@@ -204,7 +202,12 @@ const subirEvidencia = async (req, res) => {
 
         res.json({ success: true, id_evidencias: result.rows[0].id_evidencias, mensaje: 'Evidencia subida correctamente' });
     } catch (error) {
-        descartarArchivo(req);
+        // Si el archivo ya se había guardado pero falló la base, no se deja huérfano
+        if (guardadoEnAlmacen) await almacen.eliminar(guardadoEnAlmacen);
+        if (error instanceof almacen.AlmacenNoConfigurado) {
+            console.error('Error al subir evidencia: falta configurar el almacenamiento de archivos (BLOB_READ_WRITE_TOKEN).');
+            return res.status(503).json({ error: 'El almacenamiento de archivos aún no está configurado en el servidor. Mientras tanto puedes subir la evidencia como enlace.' });
+        }
         console.error('Error al subir evidencia:', error);
         res.status(500).json({ error: 'Error interno del servidor al guardar la evidencia' });
     }
@@ -231,12 +234,9 @@ const eliminarEvidencia = async (req, res) => {
 
         const { ruta_archivo, tipo_archivo } = result.rows[0];
 
-        // Si es un archivo físico, intentar eliminarlo del disco
+        // Si es un archivo (no un enlace), también se borra del almacén
         if (tipo_archivo !== 'enlace' && ruta_archivo) {
-            const filePath = path.join(__dirname, '..', 'uploads', 'evidencias', path.basename(ruta_archivo));
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
+            await almacen.eliminar(path.basename(ruta_archivo));
         }
 
         await pool.query('DELETE FROM evidencias WHERE id_evidencias = $1', [id_evidencia]);
