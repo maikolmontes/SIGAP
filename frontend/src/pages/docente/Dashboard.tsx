@@ -49,6 +49,8 @@ interface Metricas {
   avancePromedioSemana8: number;
   funcionesSustantivas: number;
   evidenciasPendientes: number;
+  /** Evidencias que el docente subió en el período activo */
+  evidenciasSubidas?: number;
   totalHorasEjecucion: number;
   avanceGeneral: number;
   evidenciasPorPeriodo?: PeriodoMetrica[];
@@ -324,9 +326,10 @@ export default function DashboardDocente() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
           {
+            // Horas de la agenda (las mismas de "Distribución de horas"), frente a las del contrato
             label: 'Horas registradas',
-            value: `${metricas.totalHorasEjecucion}h`,
-            sub: docente.totalHorasContrato > 0 ? `de ${docente.totalHorasContrato}h` : `de ${metricas.totalHoras}h asignadas`,
+            value: `${metricas.totalHoras}h`,
+            sub: docente.totalHorasContrato > 0 ? `de ${docente.totalHorasContrato}h contratadas` : 'asignadas en tu agenda',
             icon: Clock,
             color: 'blue',
             bg: 'bg-blue-50',
@@ -355,14 +358,15 @@ export default function DashboardDocente() {
             border: 'border-purple-100'
           },
           {
+            // Solo las evidencias que el docente subió en el período activo
             label: 'Evidencias',
-            value: metricas.evidenciasPendientes,
-            sub: metricas.evidenciasPendientes === 0 ? '✓ Al día' : 'pendientes',
-            icon: AlertTriangle,
-            color: metricas.evidenciasPendientes > 0 ? 'red' : 'emerald',
-            bg: metricas.evidenciasPendientes > 0 ? 'bg-red-50' : 'bg-emerald-50',
-            iconColor: metricas.evidenciasPendientes > 0 ? 'text-red-600' : 'text-emerald-600',
-            border: metricas.evidenciasPendientes > 0 ? 'border-red-100' : 'border-emerald-100'
+            value: metricas.evidenciasSubidas ?? 0,
+            sub: (metricas.evidenciasSubidas ?? 0) === 0 ? 'aún no subes evidencias' : (metricas.evidenciasSubidas === 1 ? 'subida en este período' : 'subidas en este período'),
+            icon: FileCheck,
+            color: (metricas.evidenciasSubidas ?? 0) > 0 ? 'emerald' : 'slate',
+            bg: (metricas.evidenciasSubidas ?? 0) > 0 ? 'bg-emerald-50' : 'bg-slate-50',
+            iconColor: (metricas.evidenciasSubidas ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500',
+            border: (metricas.evidenciasSubidas ?? 0) > 0 ? 'border-emerald-100' : 'border-slate-200'
           },
         ].map(m => (
           <div key={m.label} className={`bg-white border ${m.border} rounded-2xl p-5 shadow-sm hover:shadow-md transition-all relative overflow-hidden ${(m as any).pulse ? 'ring-2 ring-emerald-400 ring-opacity-50' : ''}`}>

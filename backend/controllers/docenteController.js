@@ -198,6 +198,10 @@ const getDashboard = async (req, res) => {
             evidenciasPendientes = parseInt(activePeriodPendingRow.pendientes, 10) || 0;
         }
 
+        // Evidencias que el docente SUBIÓ en el período activo (no los indicadores que aún no tienen)
+        const subidasPeriodoActivo = evidenciasSubidasPorPeriodoQuery.rows.find(row => row.id_periodo === idPeriodoActivo);
+        const evidenciasSubidas = subidasPeriodoActivo ? parseInt(subidasPeriodoActivo.subidas, 10) || 0 : 0;
+
         const totalHorasEjecucion = parseFloat(horasEjecucionQuery.rows[0]?.total_ejecucion) || 0;
 
         // Avance general = Σ ejecución / Σ meta, como el "% de logro" del formato
@@ -258,6 +262,7 @@ const getDashboard = async (req, res) => {
                 avancePromedioSemana8: avancePromedio,
                 funcionesSustantivas: distribucionHoras.length,
                 evidenciasPendientes: evidenciasPendientes,
+                evidenciasSubidas,
                 totalHorasEjecucion,
                 avanceGeneral,
                 evidenciasPorPeriodo,
