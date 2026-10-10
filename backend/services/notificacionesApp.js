@@ -14,7 +14,7 @@
 //  - La tabla se crea sola si no existe (database/notificaciones_app.sql).
 // ================================================================
 const pool = require('../db/connection');
-const { etiquetaPeriodo } = require('../utils/periodo');
+const { etiquetaPeriodo, etiquetaCorte } = require('../utils/periodo');
 
 const MAX_TITULO = 200;
 const MAX_MENSAJE = 600;
@@ -194,6 +194,60 @@ const avisarAsignacionesCargadas = async (idsUsuarios, idPeriodo = null, db = po
     }, db);
 };
 
+/**
+ * Datos de una observación del director: de quién es la actividad, cómo se llama, en qué período y
+ * quién la escribió. Los usan la campana y el correo, para que digan lo mismo.
+ * Devuelve null si la actividad no existe o si el docente es quien la escribe.
+ */
+const datosObservacion = async ({ idActividad, semana, idDirector }, db = pool) => {
+    const actividad = (await db.query(
+        `SELECT ua.id_usuario AS id_docente,
+                COALESCE(NULLIF(TRIM(ea.nombre_espacio), ''), NULLIF(TRIM(aa.rol_seleccionado), ''), af.funcion_sustantiva) AS actividad,
+                p.anio, p.semestre
+         FROM asignacion_actividades aa
+         JOIN asignacion_funciones af ON af.id_funciones = aa.id_funciones
+         JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+         LEFT JOIN espacio_academico ea ON ea.id_espacio_aca = aa.id_espacio_aca
+         LEFT JOIN periodo p ON p.id_periodo = af.id_periodo
+         WHERE aa.id_asignacionact = $1
+         LIMIT 1`,
+        [idActividad]
+    )).rows[0];
+    if (!actividad || Number(actividad.id_docente) === Number(idDirector)) return null;
+
+    const director = idDirector
+        ? (await db.query("SELECT TRIM(nombres || ' ' || apellidos) AS nombre FROM usuarios WHERE id_usuario = $1", [idDirector])).rows[0]
+        : null;
+    return {
+        idDocente: actividad.id_docente,
+        actividad: actividad.actividad,
+        periodo: actividad.anio ? nombrePeriodo({ anio: actividad.anio, semestre: actividad.semestre }) : null,
+        corte: etiquetaCorte(semana, actividad.semestre),
+        director: director?.nombre || 'La dirección de programa',
+        enlace: `/docente/avance-semana-${Number(semana) === 16 ? 16 : 8}`,
+    };
+};
+
+/**
+ * El director dejó una observación en una actividad del docente (semana 8 o 16): se avisa al docente
+ * en la campana, con el enlace al reporte de ese corte. Devuelve true si se creó el aviso.
+ *  - El aviso va al DUEÑO de la actividad (no al director que la escribe).
+ *  - "clave" por actividad y corte: si el docente aún no ha leído un aviso igual, no se crea otro
+ *    (el director puede dejar varias observaciones seguidas sin llenarle la campana).
+ */
+const avisarObservacionDirector = async ({ idActividad, semana, idDirector, texto }, db = pool) => {
+    const datos = await datosObservacion({ idActividad, semana, idDirector }, db);
+    if (!datos) return false;
+    return crear({
+        idUsuario: datos.idDocente,
+        tipo: 'observacion_director',
+        titulo: `Nueva observación del director en tu avance de ${datos.corte}`,
+        mensaje: `${datos.director} comentó «${datos.actividad}»: ${recortar(texto, 300)}`,
+        enlace: datos.enlace,
+        clave: `observacion_director:${idActividad}:${Number(semana)}`,
+    }, db);
+};
+
 // Dispara y olvida, como el correo: no frena la respuesta ni propaga errores
 const enSegundoPlano = (etiqueta, fn) => {
     setImmediate(() => {
@@ -208,5 +262,5 @@ const background = {
 
 module.exports = {
     crear, crearParaVarios, listar, contarNoLeidas, marcarLeida, marcarTodasLeidas, eliminar, eliminarTodas,
-    avisarAperturaPeriodo, avisarAsignacionesCargadas, background, nombrePeriodo,
+    avisarAperturaPeriodo, avisarAsignacionesCargadas, avisarObservacionDirector, datosObservacion, background, nombrePeriodo,
 };
