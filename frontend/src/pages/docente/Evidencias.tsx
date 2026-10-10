@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
 import api, { getArchivoUrl } from '../../services/api';
+import { confirmar } from '../../components/common/dialogo';
 import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
 import { useAuth } from '../../context/AuthContext';
 import { FileText, FileImage, FileArchive, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, AlertCircle, Calendar, Target, Eye, FileSpreadsheet } from 'lucide-react';
@@ -116,7 +117,7 @@ const Evidencias: React.FC = () => {
     };
 
     const handleDelete = async (id_evidencia: number) => {
-        if (!window.confirm("¿Estás seguro de eliminar esta evidencia? Esta acción no se puede deshacer.")) {
+        if (!(await confirmar({ tipo: 'peligro', titulo: '¿Eliminar evidencia?', mensaje: 'Esta acción no se puede deshacer.', textoAceptar: 'Eliminar' }))) {
             return;
         }
 

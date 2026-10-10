@@ -377,6 +377,43 @@ const notificarAgendaDevuelta = async (idUsuario, idDirector, observaciones) => 
 };
 
 // ================================================================
+// 3b. Observación del director en el avance (semana 8 / 16)  ➔  Docente
+// ----------------------------------------------------------------
+// Campana + correo. Mientras el docente no lea el aviso anterior de la
+// misma actividad y corte no se crea otro (ni se envía otro correo): si el
+// director deja varias observaciones seguidas, el docente recibe un solo aviso.
+// ================================================================
+const notificarObservacionDirector = async ({ idActividad, semana, idDirector, texto }) => {
+    const datos = await notificacionesApp.datosObservacion({ idActividad, semana, idDirector });
+    if (!datos) return { ok: false, motivo: 'sin_destinatario' };
+
+    const creada = await notificacionesApp.avisarObservacionDirector({ idActividad, semana, idDirector, texto });
+    if (!creada) return { ok: false, motivo: 'ya_avisado' };
+
+    const docente = await getUsuario(datos.idDocente);
+    if (!docente || !docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
+
+    const { subject, html } = plantillas.plantillaObservacionDirector({
+        docente: docente.nombre_completo,
+        director: datos.director,
+        periodo: datos.periodo,
+        corte: datos.corte,
+        actividad: datos.actividad,
+        observacion: texto,
+        enlace: plantillas.url(datos.enlace)
+    });
+
+    return enviarYRegistrar({
+        tipo: 'observacion_director',
+        clave: `observacion_director:${datos.idDocente}:${idActividad}:${Number(semana)}:${Date.now()}`,
+        to: docente.correo,
+        subject,
+        html,
+        remitente: await getRemitente(idDirector, ETIQUETA_DIRECTOR)
+    });
+};
+
+// ================================================================
 // 4. Bienvenida de nuevo usuario
 // ================================================================
 const notificarBienvenida = async ({ idUsuario = null, correo, nombre, roles, programa, idRemitente = null }) => {
@@ -629,6 +666,9 @@ const enSegundoPlanoAPI = {
     agendaDevuelta: (idUsuario, idDirector, observaciones) =>
         enSegundoPlano('agendaDevuelta', () => notificarAgendaDevuelta(idUsuario, idDirector, observaciones)),
 
+    observacionDirector: (datos) =>
+        enSegundoPlano('observacionDirector', () => notificarObservacionDirector(datos)),
+
     bienvenida: (datos) =>
         enSegundoPlano('bienvenida', () => notificarBienvenida(datos)),
 
@@ -644,6 +684,7 @@ module.exports = {
     notificarAgendaEnviada,
     notificarAgendaAprobada,
     notificarAgendaDevuelta,
+    notificarObservacionDirector,
     notificarBienvenida,
     notificarAperturaPeriodo,
     notificarAsignacionesCargadas,

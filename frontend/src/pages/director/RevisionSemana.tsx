@@ -4,6 +4,7 @@ import Layout from '../../components/common/Layout';
 import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
 import type { EvidenciaVisor } from '../../components/evidencias/VisorEvidenciaModal';
 import api from '../../services/api';
+import { confirmar } from '../../components/common/dialogo';
 import {
     ArrowLeft, Eye, ChevronDown, ChevronRight, Clock, Send, Trash2, Check, Undo2,
     GraduationCap, BookOpen, FlaskConical, Users, Briefcase, Layers,
@@ -112,7 +113,7 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
     };
 
     const borrarObservacion = async (idObs: number) => {
-        if (!window.confirm('¿Eliminar esta observación?')) return;
+        if (!(await confirmar({ tipo: 'peligro', titulo: '¿Eliminar observación?', mensaje: 'Esta acción no se puede deshacer.', textoAceptar: 'Eliminar' }))) return;
         setBorrando(idObs);
         try {
             await api.delete(`/observaciones/item/${idObs}`);

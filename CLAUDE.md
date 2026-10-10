@@ -154,5 +154,6 @@ Bitácora: tabla notificaciones_log (database/notificaciones_log.sql) — el bac
 Diagnóstico: cd backend && node test_email.js correo@cesmag.edu.co
 
 Eventos automáticos: agenda completa → director; agenda aprobada/devuelta → docente; usuario creado → bienvenida.
+Observación del director (semana 8/16) → campana y correo del docente (tipo observacion_director; notificacionesService.notificarObservacionDirector + notificacionesApp.avisarObservacionDirector): un solo aviso por actividad y corte mientras el docente no lo lea (tampoco se envía otro correo), con enlace a /docente/avance-semana-8|16.
 Eventos masivos (desactivados por defecto, se activan con EMAIL_AVISO_PERIODO / EMAIL_AVISO_ASIGNACIONES): apertura de período e importación de asignaciones.
 Los correos nunca deben romper una transacción: siempre se disparan con notificaciones.background.* después del COMMIT.

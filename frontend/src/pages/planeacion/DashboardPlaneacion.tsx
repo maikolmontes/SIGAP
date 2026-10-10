@@ -10,6 +10,7 @@ import { exportarDocentesExcel } from '../../utils/exportExcelDocentes'
 import PanelAgendasTiempoReal from '../../components/planeacion/PanelAgendasTiempoReal'
 import { usePermisosPagina } from '../../hooks/usePermisos'
 import * as XLSX from 'xlsx'
+import { avisar } from '../../components/common/dialogo'
 import { 
     Library, 
     GraduationCap, 
@@ -210,9 +211,9 @@ export default function DashboardPlaneacion() {
             setModalEditarOpen(false)
             await cargarDocentes()
             if (res.data?.advertencia) {
-                alert(`Usuario actualizado correctamente.\n${res.data.advertencia}`)
+                void avisar({ tipo: 'advertencia', titulo: 'Usuario actualizado', mensaje: `Usuario actualizado correctamente.\n${res.data.advertencia}` })
             } else {
-                alert('Usuario actualizado correctamente')
+                void avisar({ tipo: 'exito', mensaje: 'Usuario actualizado correctamente' })
             }
         } catch (err: any) {
             console.error('Error al editar usuario:', err)
@@ -236,11 +237,11 @@ export default function DashboardPlaneacion() {
             setModalEliminarOpen(false)
             setDocenteAEliminar(null)
             await cargarDocentes()
-            alert('Usuario eliminado correctamente')
+            void avisar({ tipo: 'exito', mensaje: 'Usuario eliminado correctamente' })
         } catch (err: any) {
             console.error('Error al eliminar usuario:', err)
             const errMsg = err.response?.data?.error || 'Ocurrió un error al eliminar el usuario.'
-            alert(errMsg)
+            void avisar({ tipo: 'error', mensaje: errMsg })
         } finally {
             setEliminando(false)
         }
@@ -418,7 +419,7 @@ export default function DashboardPlaneacion() {
             setModalImportar(false)
             setArchivoImportar(null)
             await cargarDocentes()
-            alert(res.data.mensaje || 'Docentes importados correctamente')
+            void avisar({ tipo: 'exito', titulo: 'Importación terminada', mensaje: res.data.mensaje || 'Docentes importados correctamente' })
 
         } catch (err: any) {
             setError(err.response?.data?.error || 'Falló la importación del Excel.')
@@ -435,7 +436,7 @@ export default function DashboardPlaneacion() {
             )
         } catch (err) {
             console.error('Error al exportar Excel:', err)
-            alert('Ocurrió un error al generar el reporte Excel.')
+            void avisar({ tipo: 'error', mensaje: 'Ocurrió un error al generar el reporte Excel.' })
         }
     }
 

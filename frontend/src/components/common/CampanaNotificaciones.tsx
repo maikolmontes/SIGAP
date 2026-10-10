@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-    AlertCircle, Bell, BookOpen, CalendarDays, CheckCheck, CheckCircle2, ClipboardCheck, Clock, Loader2, Sparkles, Trash2, X,
+    AlertCircle, Bell, BookOpen, CalendarDays, CheckCheck, CheckCircle2, ClipboardCheck, Clock, Loader2, MessageSquare, Sparkles, Trash2, X,
 } from 'lucide-react'
 import type { ComponentType } from 'react'
 import {
@@ -19,6 +19,7 @@ const ESTILO_POR_TIPO: Record<string, { icono: ComponentType<{ className?: strin
     apertura_periodo: { icono: CalendarDays, color: 'bg-blue-50 text-blue-600' },
     asignaciones_cargadas: { icono: BookOpen, color: 'bg-teal-50 text-teal-600' },
     recordatorio_plazo: { icono: Clock, color: 'bg-amber-50 text-amber-600' },
+    observacion_director: { icono: MessageSquare, color: 'bg-sky-50 text-sky-600' },
 }
 const ESTILO_POR_DEFECTO = { icono: Bell, color: 'bg-gray-100 text-gray-600' }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
-import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, Save, CheckCircle2, AlertTriangle, Clock, Lock, CalendarX } from 'lucide-react';
+import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, Save, CheckCircle2, AlertTriangle, Clock, Lock, CalendarX, ArrowRight } from 'lucide-react';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { getPeriodoActivo } from '../../services/periodosService';
@@ -31,6 +31,15 @@ interface FuncionBloque {
     actividades: Actividad[];
 }
 
+// Orden en que se presentan las funciones: Docencia Directa, luego Docencia Indirecta y después
+// las demás en el orden en que llegan de la base (sort estable: no mueve las que empatan).
+const PRIORIDAD_FUNCION: Record<string, number> = { 'Docencia Directa': 0, 'Docencia Indirecta': 1 };
+const ordenarFunciones = <T extends { funcionSustantiva: string }>(lista: T[]): T[] =>
+    [...lista].sort((a, b) => (PRIORIDAD_FUNCION[a.funcionSustantiva] ?? 2) - (PRIORIDAD_FUNCION[b.funcionSustantiva] ?? 2));
+
+// Si el docente marca "No volver a mostrar", se guarda en este navegador
+const CLAVE_AVISO_INICIO = 'sigap_aviso_agenda_visto';
+
 export default function AgendaDocente() {
     const { user } = useAuth();
     
@@ -41,8 +50,14 @@ export default function AgendaDocente() {
     
     const [cargandoEspacios, setCargandoEspacios] = useState(false);
     const [guardando, setGuardando] = useState(false);
-    const [mensaje, setMensaje] = useState<{ tipo: 'exito' | 'error', texto: string } | null>(null);
+    // Errores al aceptar una función (campos incompletos o fallo al guardar): se muestran en un modal
+    const [mensaje, setMensaje] = useState<{ titulo: string; detalles: string[] } | null>(null);
     const [activeFunctionIndex, setActiveFunctionIndex] = useState(0);
+    // Aviso al entrar: la agenda se completa función por función y cada una se confirma con "Aceptar"
+    const [avisoInicio, setAvisoInicio] = useState(false);
+    const [noMostrarAviso, setNoMostrarAviso] = useState(false);
+    // Aviso al aceptar una función: cuál se aceptó y cuál sigue (null si ya no quedan por aceptar)
+    const [confirmacion, setConfirmacion] = useState<{ nombre: string; siguiente: number | null } | null>(null);
 
     const [semanaActiva, setSemanaActiva] = useState(false);
     const [periodoAbierto, setPeriodoAbierto] = useState(true);
@@ -183,7 +198,7 @@ export default function AgendaDocente() {
                             }]
                         };
                     });
-                    setFunciones(mappedFunciones);
+                    setFunciones(ordenarFunciones(mappedFunciones));
                     setActiveFunctionIndex(0); // Seleccionar la primera por defecto
                 } else {
                     setFunciones([]);
@@ -284,11 +299,10 @@ export default function AgendaDocente() {
         });
 
         if (erroresValidacion.length > 0) {
-            setMensaje({ 
-                tipo: 'error', 
-                texto: `No se puede aceptar "${funcion.funcionSustantiva}". Campos incompletos:\n• ${erroresValidacion.join('\n• ')}` 
+            setMensaje({
+                titulo: `No se puede aceptar "${funcion.funcionSustantiva}"`,
+                detalles: erroresValidacion
             });
-            window.scrollTo({ top: 0, behavior: 'smooth' });
             return;
         }
 
@@ -337,15 +351,78 @@ export default function AgendaDocente() {
             nuevas[fIndex].estadoAgenda = 'Aceptado';
             setFunciones(nuevas);
             
-            setMensaje({ tipo: 'exito', texto: `La función "${funcion.funcionSustantiva}" ha sido aceptada y guardada en la base de datos correctamente.` });
+            setConfirmacion({ nombre: funcion.funcionSustantiva, siguiente: siguienteSinAceptar(fIndex, nuevas) });
         } catch (error: any) {
             console.error('Error al guardar función:', error);
-            setMensaje({ tipo: 'error', texto: `Error al guardar: ${error.response?.data?.error || error.message}` });
+            setMensaje({ titulo: 'No se pudo guardar la función', detalles: [error.response?.data?.error || error.message] });
         } finally {
             setGuardando(false);
-            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
     };
+
+    // La siguiente función sin aceptar, empezando por la que sigue a `desde` y dando la vuelta
+    const siguienteSinAceptar = (desde: number, lista: FuncionBloque[]): number | null =>
+        lista.map((_, k) => (desde + 1 + k) % lista.length)
+            .find(k => k !== desde && lista[k].estadoAgenda !== 'Aceptado') ?? null;
+
+    // Abre una función y deja la pantalla al inicio de ella (las tarjetas de funciones);
+    // window.scrollTo no mueve el contenedor con scroll del Layout, por eso scrollIntoView
+    const irAFuncion = (indice: number) => {
+        setActiveFunctionIndex(indice);
+        setTimeout(() => document.getElementById('funciones-agenda')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    };
+
+    const cerrarAvisoInicio = () => {
+        if (noMostrarAviso) {
+            try { localStorage.setItem(CLAVE_AVISO_INICIO, '1'); } catch { /* sin almacenamiento: se mostrará de nuevo */ }
+        }
+        setAvisoInicio(false);
+    };
+
+    const irASiguienteFuncion = () => {
+        if (confirmacion?.siguiente != null) irAFuncion(confirmacion.siguiente);
+        setConfirmacion(null);
+    };
+
+    // "Quedarme aquí": cierra el aviso y lleva al resumen de la agenda, al final de la página
+    const verResumenAgenda = () => {
+        setConfirmacion(null);
+        setTimeout(() => document.getElementById('resumen-agenda')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    };
+
+    // Desglose fijo de Docencia Directa (el mismo para todas las asignaturas): del catálogo, o el de respaldo
+    const desgloseDirecta = (): { descripcion: string; meta: number | string; indicadores: string[] }[] => {
+        type DescCatalogo = { resultado_esperado: string; meta?: number | null; indicadores?: { nombre_indicador: string }[] };
+        const actividades: { descripciones?: DescCatalogo[] }[] = getActividadesDelCatalogo('Docencia Directa');
+        const delCatalogo = actividades.flatMap(a => a.descripciones || []);
+        if (delCatalogo.length > 0) {
+            return delCatalogo.map(d => ({
+                descripcion: d.resultado_esperado,
+                meta: d.meta ?? '—',
+                indicadores: (d.indicadores || []).map(i => i.nombre_indicador).filter(Boolean),
+            }));
+        }
+        return [
+            { descripcion: 'Microcurrículo y ficha temática actualizados', meta: 2, indicadores: ['Microcurrículo y ficha aprobados y cargados en el sistema institucional'] },
+            { descripcion: 'Desarrollo de espacio académico', meta: 16, indicadores: ['Registros de seguimiento semana a semana en el sistema académico institucional'] },
+            { descripcion: 'Registro de calificaciones', meta: 3, indicadores: ['Registros de calificaciones en el sistema académico institucional'] },
+            { descripcion: 'Entrega física de notas finales firmadas por el docente', meta: 1, indicadores: ['Evidencia de entrega de notas finales'] },
+        ];
+    };
+
+    // Siguiente función por aceptar a partir de la que se está viendo (botón del resumen)
+    const siguientePendiente = siguienteSinAceptar(activeFunctionIndex, funciones);
+
+    // Se muestra una vez cargada la agenda, si todavía se puede editar y quedan funciones por aceptar
+    const hayPorAceptar = funciones.some(f => f.estadoAgenda !== 'Aceptado');
+    useEffect(() => {
+        if (cargandoEspacios || !periodoAbierto || !semanaActiva || !hayPorAceptar || funciones.length === 0) return;
+        let oculto = false;
+        try { oculto = localStorage.getItem(CLAVE_AVISO_INICIO) === '1'; } catch { /* sin almacenamiento */ }
+        if (!oculto) setAvisoInicio(true);
+        // Solo al terminar de cargar: aceptar funciones después no vuelve a abrirlo
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [cargandoEspacios, periodoAbierto, semanaActiva, funciones.length]);
 
     return (
         <Layout rol="docente" path="Agenda / Crear Agenda">
@@ -400,10 +477,119 @@ export default function AgendaDocente() {
                 </div>
             )}
 
+            {avisoInicio && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="titulo-aviso-inicio"
+                    onClick={cerrarAvisoInicio}
+                >
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 mx-auto mb-5">
+                            <ClipboardList className="w-9 h-9 text-blue-600" />
+                        </div>
+                        <h2 id="titulo-aviso-inicio" className="text-xl font-bold text-[#1a2744] mb-2 text-center">Antes de empezar</h2>
+                        <p className="text-sm text-gray-600 mb-4 text-center">
+                            Tu agenda se completa <strong>función por función</strong>. Para que quede registrada debes:
+                        </p>
+                        <ol className="text-sm text-gray-700 space-y-2 mb-5 bg-blue-50 border border-blue-100 rounded-xl p-4 list-decimal list-inside">
+                            <li>Completar todas las actividades, descripciones, metas e indicadores de cada función.</li>
+                            <li>Presionar <strong>Aceptar</strong> al terminar cada una: sin ese paso la función no se guarda.</li>
+                            <li>Repetirlo hasta que <strong>todas las funciones</strong> aparezcan como aceptadas.</li>
+                        </ol>
+                        <label className="flex items-center gap-2 text-xs text-gray-500 mb-5 cursor-pointer select-none">
+                            <input type="checkbox" checked={noMostrarAviso} onChange={(e) => setNoMostrarAviso(e.target.checked)} className="rounded border-gray-300" />
+                            No volver a mostrar este aviso
+                        </label>
+                        <button
+                            autoFocus
+                            onClick={cerrarAvisoInicio}
+                            className="w-full px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
+                        >
+                            Entendido, comenzar
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {confirmacion && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="titulo-funcion-aceptada"
+                    onClick={() => setConfirmacion(null)}
+                >
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mx-auto mb-5">
+                            <CheckCircle2 className="w-9 h-9 text-green-600" />
+                        </div>
+                        <h2 id="titulo-funcion-aceptada" className="text-xl font-bold text-[#1a2744] mb-2">
+                            {confirmacion.siguiente === null ? '¡Todas las funciones aceptadas!' : 'Función aceptada'}
+                        </h2>
+                        <p className="text-sm text-gray-600 mb-6">
+                            Tu función <strong>"{confirmacion.nombre}"</strong> quedó guardada correctamente.
+                            {confirmacion.siguiente !== null
+                                ? <> ¿Quieres continuar con <strong>"{funciones[confirmacion.siguiente]?.funcionSustantiva}"</strong>?</>
+                                : ' Ya completaste tu agenda.'}
+                        </p>
+                        {confirmacion.siguiente !== null ? (
+                            <div className="flex flex-col-reverse sm:flex-row gap-3">
+                                <button
+                                    onClick={verResumenAgenda}
+                                    className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition-colors"
+                                >
+                                    Quedarme aquí
+                                </button>
+                                <button
+                                    autoFocus
+                                    onClick={irASiguienteFuncion}
+                                    className="flex-1 px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
+                                >
+                                    Sí, continuar
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                autoFocus
+                                onClick={verResumenAgenda}
+                                className="w-full px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
+                            >
+                                Entendido
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {mensaje && (
-                <div className={`p-4 mb-6 rounded-xl flex items-start gap-3 border ${mensaje.tipo === 'exito' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
-                    {mensaje.tipo === 'exito' ? <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" /> : <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />}
-                    <p className="font-medium text-sm whitespace-pre-line">{mensaje.texto}</p>
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                    role="alertdialog"
+                    aria-modal="true"
+                    aria-labelledby="titulo-error-funcion"
+                    onClick={() => setMensaje(null)}
+                >
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mx-auto mb-5">
+                            <AlertTriangle className="w-9 h-9 text-red-600" />
+                        </div>
+                        <h2 id="titulo-error-funcion" className="text-xl font-bold text-[#1a2744] mb-3 text-center">{mensaje.titulo}</h2>
+                        {mensaje.detalles.length > 1 && <p className="text-sm text-gray-600 mb-2 text-center">Faltan estos campos:</p>}
+                        <ul className="text-sm text-gray-700 space-y-1.5 mb-6 max-h-60 overflow-y-auto bg-red-50 border border-red-100 rounded-xl p-4">
+                            {mensaje.detalles.map((d, i) => (
+                                <li key={i} className="flex gap-2"><span className="text-red-500">•</span><span>{d}</span></li>
+                            ))}
+                        </ul>
+                        <button
+                            autoFocus
+                            onClick={() => setMensaje(null)}
+                            className="w-full px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
+                        >
+                            Entendido
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -411,7 +597,7 @@ export default function AgendaDocente() {
             {periodoAbierto ? (
                 cargandoEspacios ? (
                     <div className="flex justify-center p-12 text-gray-500">
-                        Cargando la agenda asignada desde la base de datos...
+                        Cargando tu agenda...
                     </div>
                 ) : funciones.length === 0 ? (
                     <div className="flex justify-center p-12 text-gray-500 border-2 border-dashed border-gray-300 rounded-xl">
@@ -420,7 +606,7 @@ export default function AgendaDocente() {
                 ) : (
                     <div className="space-y-6">
                     {/* Selector de Tarjetas (Tabs) */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-2">
+                    <div id="funciones-agenda" className="scroll-mt-20 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-2">
                         {funciones.map((f, i) => {
                             const aceptada = f.estadoAgenda === 'Aceptado';
                             return (
@@ -508,7 +694,8 @@ export default function AgendaDocente() {
                                         {esIndirecta && <span className="ml-2 text-[10px] bg-cyan-100 text-cyan-800 px-2 py-0.5 rounded">Campos de texto libre</span>}
                                     </h3>
 
-                                    <div className="space-y-8">
+                                    {/* Scroll propio cuando hay muchas actividades (p. ej. Docencia Directa con una por asignatura) */}
+                                    <div className="space-y-8 max-h-[75vh] overflow-y-auto -mx-2 px-2 pb-1">
                                         {funcion.actividades.map((actividad, aIndex) => {
                                             const catsActs = getActividadesDelCatalogo(funcion.funcionSustantiva);
                                             const catsDescs = getDescripcionesDeActividad(funcion.funcionSustantiva, actividad.actividadLibre);
@@ -521,7 +708,7 @@ export default function AgendaDocente() {
                                                     <div className="lg:col-span-12 xl:col-span-5 space-y-4">
                                                         <div>
                                                             <label className="block text-xs font-bold text-gray-700 mb-1.5 flex justify-between">
-                                                                <span>{esDocenciaDirecta ? 'Espacio Académico (Asignatura)' : 'Actividad según Base de Datos'}</span>
+                                                                <span>{esDocenciaDirecta ? 'Espacio Académico (Asignatura)' : 'Actividad según la función'}</span>
                                                                 {!actividad.actividadLibre && !esDeshabilitado && !esIndirecta && !esDocenciaDirecta && <span className="text-red-500 font-normal">Falta Seleccionar</span>}
                                                             </label>
                                                             {esDocenciaDirecta ? (
@@ -833,16 +1020,27 @@ export default function AgendaDocente() {
 
             {/* Panel de Resumen - Estado en la Base de Datos */}
             {funciones.length > 0 && (
-                <div className="mt-10 bg-[#0f1b2d] rounded-xl border border-blue-900/50 overflow-hidden">
+                <div id="resumen-agenda" className="mt-10 scroll-mt-20 bg-[#0f1b2d] rounded-xl border border-blue-900/50 overflow-hidden">
                     <div className="px-6 py-4 bg-[#1a2744] border-b border-blue-800/40">
                         <div className="flex items-center justify-between mb-2">
                             <h2 className="text-white font-bold text-sm flex items-center gap-2">
                                 <ClipboardList className="w-4 h-4 text-blue-400" />
-                                Resumen de Agenda Guardada en BD
+                                Resumen de tu agenda
                             </h2>
-                            <span className="text-blue-300 text-xs">
-                                {funciones.filter(f => f.estadoAgenda === 'Aceptado').length}/{funciones.length} funciones aceptadas
-                            </span>
+                            <div className="flex items-center gap-3">
+                                <span className="text-blue-300 text-xs">
+                                    {funciones.filter(f => f.estadoAgenda === 'Aceptado').length}/{funciones.length} funciones aceptadas
+                                </span>
+                                {siguientePendiente !== null && (
+                                    <button
+                                        onClick={() => irAFuncion(siguientePendiente)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#00a896] hover:bg-[#009383] text-white text-xs font-bold transition-colors cursor-pointer"
+                                    >
+                                        Pasar a la siguiente función
+                                        <ArrowRight className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
+                            </div>
                         </div>
                         <div className="flex items-center gap-6 text-xs">
                             <span className="text-blue-200">
@@ -892,18 +1090,38 @@ export default function AgendaDocente() {
                                             <td className="py-3 pr-3 text-blue-200 text-center font-semibold">
                                                 {act.horasActividad || '—'}
                                             </td>
+                                            {f.funcionSustantiva === 'Docencia Directa' ? (
+                                                ai === 0 && (
+                                                    // Una sola celda para Descripción, Indicador y Meta: evita repetir lo mismo en cada asignatura
+                                                    <td colSpan={3} rowSpan={f.actividades.length} className="py-3 align-top border-l border-blue-900/40 pl-3">
+                                                        <p className="text-[10px] uppercase tracking-wider text-blue-400 font-bold mb-1.5">Igual para cada asignatura</p>
+                                                        <div className="space-y-1.5">
+                                                            {desgloseDirecta().map((d, k) => (
+                                                                <div key={k} className="grid grid-cols-[1fr_1fr_auto] gap-x-4 text-xs text-blue-200 pb-1.5 border-b border-blue-900/30 last:border-b-0">
+                                                                    <span>{d.descripcion}</span>
+                                                                    <span className="text-blue-300/80">{d.indicadores.join(', ') || '—'}</span>
+                                                                    <span className="font-semibold text-blue-100 text-right min-w-[2rem]">{d.meta}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </td>
+                                                )
+                                            ) : (
+                                                <>
                                             <td className="py-3 pr-3 text-blue-200 text-xs max-w-[200px] truncate" title={act.resultadoEsperado}>
-                                                {act.resultadoEsperado || <span className="text-gray-500 italic">—</span>}
-                                            </td>
-                                            <td className="py-3 pr-3 text-blue-200 text-xs max-w-[200px] truncate" title={act.indicadores.map(i => i.nombre_indicador).join(', ')}>
-                                                {act.indicadores.filter(i => i.nombre_indicador).length > 0 
-                                                    ? act.indicadores.filter(i => i.nombre_indicador).map(i => i.nombre_indicador).join(', ')
-                                                    : <span className="text-gray-500 italic">—</span>
-                                                }
-                                            </td>
-                                            <td className="py-3 text-blue-200 text-center">
-                                                {act.meta || <span className="text-gray-500">—</span>}
-                                            </td>
+                                                    {act.resultadoEsperado || <span className="text-gray-500 italic">—</span>}
+                                                </td>
+                                                <td className="py-3 pr-3 text-blue-200 text-xs max-w-[200px] truncate" title={act.indicadores.map(i => i.nombre_indicador).join(', ')}>
+                                                    {act.indicadores.filter(i => i.nombre_indicador).length > 0 
+                                                        ? act.indicadores.filter(i => i.nombre_indicador).map(i => i.nombre_indicador).join(', ')
+                                                        : <span className="text-gray-500 italic">—</span>
+                                                    }
+                                                </td>
+                                                <td className="py-3 text-blue-200 text-center">
+                                                    {act.meta || <span className="text-gray-500">—</span>}
+                                                </td>
+                                                </>
+                                            )}
                                         </tr>
                                     ))
                                 ))}

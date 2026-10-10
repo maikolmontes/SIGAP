@@ -233,6 +233,34 @@ const plantillaAgendaDevuelta = ({ docente, director, periodo, observaciones, fe
 };
 
 // ================================================================
+// 3b. Observación del director en el avance  (Director -> Docente)
+// ================================================================
+const plantillaObservacionDirector = ({ docente, director, periodo, corte, actividad, observacion, enlace }) => {
+    const destino = enlace || url('/docente/avance-semana-8');
+    return {
+        subject: `Nueva observación del director en su avance — ${corte}`,
+        html: layout({
+            titulo: 'Nueva observación en su avance',
+            preheader: `${director} dejó una observación en su avance de ${corte}.`,
+            cuerpo: `
+        ${saludo(docente)}
+        <p style="margin:0 0 14px;">
+          La dirección del programa dejó una observación en una de las actividades de su
+          reporte de avance. Le recomendamos revisarla y, si corresponde, ajustar su avance o sus evidencias.
+        </p>
+        ${tablaDatos([
+            ['Período', periodo],
+            ['Corte', corte],
+            ['Actividad', actividad],
+            ['Escrita por', director]
+        ])}
+        ${recuadro('Observación del director', nl2br(observacion || 'Sin texto.'))}
+        ${boton('Ver mi avance', destino, COLORES.verde)}`
+        })
+    };
+};
+
+// ================================================================
 // 4. Bienvenida de nuevo usuario
 // ================================================================
 const plantillaBienvenida = ({ usuario, roles, programa, correo, enlace }) => {
@@ -378,6 +406,7 @@ module.exports = {
     plantillaAgendaEnviada,
     plantillaAgendaAprobada,
     plantillaAgendaDevuelta,
+    plantillaObservacionDirector,
     plantillaBienvenida,
     plantillaPeriodoAperturado,
     plantillaRecordatorioPlazo,

@@ -135,3 +135,69 @@ test('vaciar la campana borra solo las del usuario; "solo leídas" conserva las 
     assert.equal(db.filas.filter((f) => f.id_usuario === 5).length, 0);
     assert.equal(db.filas.filter((f) => f.id_usuario === 6).length, 1, 'las de otro usuario siguen ahí');
 });
+
+// ---------------- Observaciones del director ----------------
+
+// Añade a la base falsa las dos consultas del aviso: dueño de la actividad y nombre del director
+const conActividades = (db, actividades, usuarios = { 9: 'Ana Directora' }) => ({
+    filas: db.filas,
+    async query(sql, p = []) {
+        if (/FROM asignacion_actividades aa/.test(sql)) return { rows: actividades.filter((a) => a.id === p[0]).slice(0, 1) };
+        if (/FROM usuarios WHERE id_usuario/.test(sql)) return { rows: usuarios[p[0]] ? [{ nombre: usuarios[p[0]] }] : [] };
+        return db.query(sql, p);
+    },
+});
+const ACTIVIDAD = { id: 100, id_docente: 5, actividad: 'Gestión Curricular', semestre: 1 };
+
+test('observación del director: el aviso llega al docente dueño de la actividad, con el corte y el enlace al reporte', async () => {
+    const db = conActividades(baseFalsa(), [ACTIVIDAD]);
+    const creada = await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 9, texto: 'Falta adjuntar el acta.' }, db);
+    assert.equal(creada, true);
+    assert.equal(db.filas.length, 1);
+    const n = db.filas[0];
+    assert.equal(n.id_usuario, 5, 'va al docente, no al director');
+    assert.equal(n.tipo, 'observacion_director');
+    assert.match(n.titulo, /Semana 8/);
+    assert.match(n.mensaje, /Ana Directora/);
+    assert.match(n.mensaje, /Gestión Curricular/);
+    assert.match(n.mensaje, /Falta adjuntar el acta\./);
+    assert.equal(n.enlace, '/docente/avance-semana-8');
+});
+
+test('observación del director: en el corte 16 el enlace va al reporte de la semana 16', async () => {
+    const db = conActividades(baseFalsa(), [ACTIVIDAD]);
+    await app.avisarObservacionDirector({ idActividad: 100, semana: 16, idDirector: 9, texto: 'Revisar.' }, db);
+    assert.equal(db.filas[0].enlace, '/docente/avance-semana-16');
+});
+
+test('observación del director: en un intersemestral el corte se llama "Semana X"', async () => {
+    const db = conActividades(baseFalsa(), [{ ...ACTIVIDAD, semestre: 3 }]);
+    await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 9, texto: 'Revisar.' }, db);
+    assert.match(db.filas[0].titulo, /Semana X/);
+    assert.doesNotMatch(db.filas[0].titulo, /Semana 8/);
+});
+
+test('observación del director: varias seguidas en la misma actividad y corte no llenan la campana', async () => {
+    const db = conActividades(baseFalsa(), [ACTIVIDAD]);
+    assert.equal(await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 9, texto: 'Primera.' }, db), true);
+    assert.equal(await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 9, texto: 'Segunda.' }, db), false);
+    assert.equal(db.filas.length, 1);
+    // Otro corte sí es otro aviso
+    assert.equal(await app.avisarObservacionDirector({ idActividad: 100, semana: 16, idDirector: 9, texto: 'Otra.' }, db), true);
+    // Y cuando el docente ya leyó el primero, una nueva observación vuelve a avisar
+    db.filas[0].leida = true;
+    assert.equal(await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 9, texto: 'Tercera.' }, db), true);
+});
+
+test('observación del director: sin dueño de la actividad, o si el docente es quien escribe, no se avisa', async () => {
+    const db = conActividades(baseFalsa(), [ACTIVIDAD]);
+    assert.equal(await app.avisarObservacionDirector({ idActividad: 999, semana: 8, idDirector: 9, texto: 'x' }, db), false);
+    assert.equal(await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 5, texto: 'x' }, db), false);
+    assert.equal(db.filas.length, 0);
+});
+
+test('observación del director: un texto largo se recorta en el aviso', async () => {
+    const db = conActividades(baseFalsa(), [ACTIVIDAD]);
+    await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 9, texto: 'a'.repeat(900) }, db);
+    assert.ok(db.filas[0].mensaje.length <= 600);
+});
