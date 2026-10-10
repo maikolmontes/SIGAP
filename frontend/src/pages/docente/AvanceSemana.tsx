@@ -116,6 +116,32 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     }
   };
 
+  // Después de subir una evidencia solo se actualiza la lista de evidencias de cada indicador.
+  // NO se recarga todo: eso reemplazaría con lo que hay en el servidor la ejecución que el docente
+  // ya escribió pero todavía no guardó (y mostraría la pantalla de carga).
+  const refrescarEvidencias = async () => {
+    try {
+      const userId = (user as unknown as { id_usuario?: number } | null)?.id_usuario || user?.id;
+      if (!userId) return;
+      const agRes = await api.get(`/agenda/base/${userId}`);
+      const nuevas = new Map<number, unknown[]>();
+      for (const a of (agRes.data.actividades || []) as { id_indicador?: number; evidencias?: unknown[] }[]) {
+        if (a.id_indicador) nuevas.set(a.id_indicador, a.evidencias || []);
+      }
+      // Actualización funcional: parte de lo que hay en pantalla en este momento, no de una copia vieja
+      setData(prev => prev.map(f => ({
+        ...f,
+        actividades: f.actividades.map((a: { indicadores: { id_indicador: number }[] }) => ({
+          ...a,
+          indicadores: a.indicadores.map(i => (nuevas.has(i.id_indicador) ? { ...i, evidencias: nuevas.get(i.id_indicador) } : i))
+        }))
+      })));
+    } catch (error) {
+      // La evidencia ya quedó guardada; si no se pudo refrescar la lista, aparecerá al volver a entrar
+      console.error('No se pudo actualizar la lista de evidencias:', error);
+    }
+  };
+
   const guardarAvance = async () => {
     try {
         setGuardando(true);
@@ -588,10 +614,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
         idIndicador={modalEvidencia.idIndicador}
         nombreIndicador={modalEvidencia.nombreIndicador}
         semana={semana}
-        onUploadSuccess={() => {
-            // Success logic if any needed
-            cargarData();
-        }}
+        onUploadSuccess={refrescarEvidencias}
       />
       {evidenciaVisor && (
         <VisorEvidenciaModal evidencia={evidenciaVisor} onClose={() => setEvidenciaVisor(null)} />
