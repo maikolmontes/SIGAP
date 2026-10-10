@@ -1,11 +1,13 @@
 // ================================================================
 // SIGAP — Dónde se guardan los archivos de las evidencias
 // ----------------------------------------------------------------
-//  · Con BLOB_READ_WRITE_TOKEN (producción en Vercel): Vercel Blob, en un almacén
+//  · Con un almacén de Vercel Blob conectado (producción): Vercel Blob, en un almacén
 //    PRIVADO. Nadie llega al archivo por su URL: se lee desde el servidor, después
-//    de comprobar el token y el permiso (servirArchivo).
-//  · Sin token y fuera de Vercel (desarrollo local): carpeta backend/uploads/evidencias.
-//  · Sin token dentro de Vercel: se avisa con claridad. El disco de una función de
+//    de comprobar el token y el permiso (servirArchivo). Basta con BLOB_STORE_ID
+//    (la librería se autentica sola con OIDC dentro de Vercel) o con
+//    BLOB_READ_WRITE_TOKEN.
+//  · Sin almacén y fuera de Vercel (desarrollo local): carpeta backend/uploads/evidencias.
+//  · Sin almacén dentro de Vercel: se avisa con claridad. El disco de una función de
 //    Vercel es de solo lectura (y se borra), así que guardar ahí no sirve.
 //
 // En la base solo se guarda la ruta pública /uploads/evidencias/<nombre>, igual en los
@@ -27,7 +29,7 @@ class AlmacenNoConfigurado extends Error {
     }
 }
 
-const usaBlob = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+const usaBlob = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 const enVercel = () => Boolean(process.env.VERCEL);
 const clave = (nombre) => `evidencias/${path.basename(nombre)}`;
 const rutaEnDisco = (nombre) => path.join(carpeta, path.basename(nombre));
@@ -41,12 +43,18 @@ const guardar = async ({ buffer, nombre, tipo }) => {
     if (donde === 'no_configurado') throw new AlmacenNoConfigurado();
 
     if (donde === 'blob') {
-        await blob.put(clave(nombre), buffer, {
-            access: 'private',
-            contentType: tipo || 'application/octet-stream',
-            addRandomSuffix: false,
-            allowOverwrite: false,
-        });
+        try {
+            await blob.put(clave(nombre), buffer, {
+                access: 'private',
+                contentType: tipo || 'application/octet-stream',
+                addRandomSuffix: false,
+                allowOverwrite: false,
+            });
+        } catch (error) {
+            // Sin credenciales utilizables el problema es de configuración, no del archivo
+            if (/No blob credentials|store.*not found|access denied/i.test(error?.message || '')) throw new AlmacenNoConfigurado();
+            throw error;
+        }
         return;
     }
     await fs.promises.mkdir(carpeta, { recursive: true });
