@@ -13,10 +13,11 @@ const leer = async (stream) => {
 };
 
 // Entorno controlado: cada prueba decide si hay token de Blob y si "está en Vercel"
-const ENTORNO = ['BLOB_READ_WRITE_TOKEN', 'VERCEL'];
+const ENTORNO = ['BLOB_READ_WRITE_TOKEN', 'BLOB_STORE_ID', 'VERCEL'];
 const respaldo = Object.fromEntries(ENTORNO.map((k) => [k, process.env[k]]));
-const entorno = ({ token = false, vercel = false } = {}) => {
+const entorno = ({ token = false, storeId = false, vercel = false } = {}) => {
     if (token) process.env.BLOB_READ_WRITE_TOKEN = 'token-de-prueba'; else delete process.env.BLOB_READ_WRITE_TOKEN;
+    if (storeId) process.env.BLOB_STORE_ID = 'store_prueba'; else delete process.env.BLOB_STORE_ID;
     if (vercel) process.env.VERCEL = '1'; else delete process.env.VERCEL;
 };
 test.afterEach(() => {
@@ -55,7 +56,24 @@ test('el modo depende de si hay token de Blob y de si el servidor es Vercel', ()
     entorno({ token: true, vercel: true });
     assert.equal(almacen.modo(), 'blob');
     entorno({ token: false, vercel: true });
-    assert.equal(almacen.modo(), 'no_configurado', 'en Vercel sin token no se puede guardar');
+    assert.equal(almacen.modo(), 'no_configurado', 'en Vercel sin almacén no se puede guardar');
+});
+
+test('con solo BLOB_STORE_ID (autenticación OIDC de Vercel, sin token) también se usa Blob', async () => {
+    entorno({ storeId: true, vercel: true });
+    assert.equal(almacen.modo(), 'blob');
+    const b = blobFalso();
+    almacen._pruebas.fijarBlob(b);
+    await almacen.guardar({ buffer: Buffer.from('x'), nombre: 'e.pdf', tipo: 'application/pdf' });
+    assert.equal(b.llamadas.put.length, 1);
+});
+
+test('si Blob responde que no hay credenciales, se avisa como falta de configuración', async () => {
+    entorno({ storeId: true, vercel: true });
+    almacen._pruebas.fijarBlob({ put: async () => { throw new Error('No blob credentials found. Pass a token option'); } });
+    await assert.rejects(almacen.guardar({ buffer: Buffer.from('x'), nombre: 'e.pdf' }), almacen.AlmacenNoConfigurado);
+    almacen._pruebas.fijarBlob({ put: async () => { throw new Error('el disco explotó'); } });
+    await assert.rejects(almacen.guardar({ buffer: Buffer.from('x'), nombre: 'e.pdf' }), /el disco explotó/, 'otros errores no se disfrazan');
 });
 
 test('en Vercel sin token se avisa con un error claro y no se intenta escribir en el disco', async () => {
