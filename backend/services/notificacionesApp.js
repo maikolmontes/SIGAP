@@ -197,7 +197,8 @@ const avisarAsignacionesCargadas = async (idsUsuarios, idPeriodo = null, db = po
 /**
  * Datos de una observación del director: de quién es la actividad, cómo se llama, en qué período y
  * quién la escribió. Los usan la campana y el correo, para que digan lo mismo.
- * Devuelve null si la actividad no existe o si el docente es quien la escribe.
+ * Devuelve null si la actividad no existe. Si quien escribe es también el dueño de la actividad (un usuario
+ * con rol de director y de docente que revisa su propia agenda) igual se le avisa: lo verá como docente.
  */
 const datosObservacion = async ({ idActividad, semana, idDirector }, db = pool) => {
     const actividad = (await db.query(
@@ -213,7 +214,7 @@ const datosObservacion = async ({ idActividad, semana, idDirector }, db = pool) 
          LIMIT 1`,
         [idActividad]
     )).rows[0];
-    if (!actividad || Number(actividad.id_docente) === Number(idDirector)) return null;
+    if (!actividad) return null;
 
     const director = idDirector
         ? (await db.query("SELECT TRIM(nombres || ' ' || apellidos) AS nombre FROM usuarios WHERE id_usuario = $1", [idDirector])).rows[0]

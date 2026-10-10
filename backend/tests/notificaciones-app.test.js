@@ -189,11 +189,17 @@ test('observación del director: varias seguidas en la misma actividad y corte n
     assert.equal(await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 9, texto: 'Tercera.' }, db), true);
 });
 
-test('observación del director: sin dueño de la actividad, o si el docente es quien escribe, no se avisa', async () => {
+test('observación del director: si la actividad no existe, no se avisa', async () => {
     const db = conActividades(baseFalsa(), [ACTIVIDAD]);
     assert.equal(await app.avisarObservacionDirector({ idActividad: 999, semana: 8, idDirector: 9, texto: 'x' }, db), false);
-    assert.equal(await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 5, texto: 'x' }, db), false);
     assert.equal(db.filas.length, 0);
+});
+
+test('observación del director: un usuario que es director y docente también recibe el aviso en su propia actividad', async () => {
+    const db = conActividades(baseFalsa(), [ACTIVIDAD], { 5: 'Ana Directora y Docente' });
+    assert.equal(await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 5, texto: 'Revisar mi propio avance.' }, db), true);
+    assert.equal(db.filas.length, 1);
+    assert.equal(db.filas[0].id_usuario, 5);
 });
 
 test('observación del director: un texto largo se recorta en el aviso', async () => {

@@ -713,8 +713,8 @@ const guardarObservacion = async (req, res) => {
             `, [idActividad, parseInt(semana), texto.trim(), directorId]);
         }
 
-        // Aviso al docente en la campana y por correo (en segundo plano: no frena ni rompe el guardado)
-        notificaciones.background.observacionDirector({ idActividad, semana: parseInt(semana), idDirector: directorId, texto: texto.trim() });
+        // Aviso al docente en la campana y por correo (se espera un momento para que salga; nunca rompe el guardado)
+        await notificaciones.background.observacionDirectorAhora({ idActividad, semana: parseInt(semana), idDirector: directorId, texto: texto.trim() });
 
         res.json({
             mensaje: 'Observación guardada.',
@@ -769,7 +769,7 @@ const agregarObservacion = async (req, res) => {
             RETURNING *
         `, [idActividad, parseInt(semana), texto.trim(), req.user.id]);
 
-        notificaciones.background.observacionDirector({ idActividad, semana: parseInt(semana), idDirector: req.user.id, texto: texto.trim() });
+        await notificaciones.background.observacionDirectorAhora({ idActividad, semana: parseInt(semana), idDirector: req.user.id, texto: texto.trim() });
 
         res.status(201).json({ mensaje: 'Observación agregada.', observacion: result.rows[0] });
 

@@ -669,6 +669,22 @@ const enSegundoPlanoAPI = {
     observacionDirector: (datos) =>
         enSegundoPlano('observacionDirector', () => notificarObservacionDirector(datos)),
 
+    // Igual, pero el controlador la ESPERA (hasta "limiteMs") antes de responder. En un servidor sin estado
+    // como Vercel la tarea "en segundo plano" puede cortarse al enviar la respuesta; esperando, la campana y
+    // el correo salen. Nunca lanza: si algo falla o se demora, la observación ya quedó guardada.
+    observacionDirectorAhora: async (datos, limiteMs = 5000) => {
+        let temporizador;
+        const limite = new Promise((resolver) => { temporizador = setTimeout(resolver, limiteMs); });
+        try {
+            await Promise.race([
+                notificarObservacionDirector(datos).catch((error) => console.error('[notificaciones] observacionDirector falló:', error.message)),
+                limite,
+            ]);
+        } finally {
+            clearTimeout(temporizador);
+        }
+    },
+
     bienvenida: (datos) =>
         enSegundoPlano('bienvenida', () => notificarBienvenida(datos)),
 
