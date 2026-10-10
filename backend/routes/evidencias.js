@@ -2,28 +2,13 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const evidenciasController = require('../controllers/evidenciasController');
 const verifyToken = require('../middleware/verifyToken');
-const { UPLOADS_EVIDENCIAS, EXTENSIONES_PERMITIDAS } = require('../middleware/accesoEvidencias');
+const { EXTENSIONES_PERMITIDAS } = require('../middleware/accesoEvidencias');
 
-// Asegurarnos de que exista la carpeta de uploads/evidencias
-if (!fs.existsSync(UPLOADS_EVIDENCIAS)) {
-    fs.mkdirSync(UPLOADS_EVIDENCIAS, { recursive: true });
-}
-
-// Configuración de Multer
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, UPLOADS_EVIDENCIAS);
-    },
-    filename: function (req, file, cb) {
-        // Generar un nombre único para evitar colisiones
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, 'evidencia-' + uniqueSuffix + ext);
-    }
-});
+// El archivo llega en memoria y el controlador lo entrega al almacén (Vercel Blob en producción,
+// carpeta local en desarrollo): en Vercel el disco es de solo lectura, no se puede guardar ahí.
+const storage = multer.memoryStorage();
 
 // Límite de 10MB y lista blanca de extensiones
 const upload = multer({

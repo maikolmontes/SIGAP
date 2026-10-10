@@ -140,6 +140,9 @@ El alcance del Director sale de alcanceProgramas (403 si el programa no es suyo)
 Cada actividad aparece con su descripción (resultado esperado), indicadores y evidencias; en Docencia Directa las descripciones repetidas por clase se agrupan. La valoración del director (logros, dificultades…) se escribe en pantalla y va al documento; no se guarda
 Períodos intersemestrales: periodo.semestre 1=I, 2=II, 3=Intersemestral I, 4=Intersemestral II. El nombre sale SIEMPRE de backend/utils/periodo.js o frontend/src/utils/periodo.ts (no usar semestre === 1 ? 'I' : 'II'). En un intersemestral los cortes (internos 8 y 16) se muestran "Semana X" hasta definir las semanas
 
+Archivos de evidencias (backend/services/almacenEvidencias.js)
+En Vercel el disco es de solo lectura: los archivos NO se guardan en backend/uploads. Con BLOB_READ_WRITE_TOKEN van a Vercel Blob en un almacén PRIVADO (sin URL pública): se leen desde el servidor en GET /uploads/evidencias/:archivo, después de comprobar token y permiso (servirArchivo). Sin token y fuera de Vercel (desarrollo) se usa la carpeta local backend/uploads/evidencias (ignorada por git). Sin token dentro de Vercel el servidor responde 503 con un mensaje claro y los enlaces siguen funcionando. En la base solo se guarda la ruta /uploads/evidencias/<nombre>; multer recibe el archivo en memoria (tope 10 MB)
+
 Notificaciones por correo (Gmail / Nodemailer)
 
 Servicio central: backend/services/emailService.js (transporte SMTP, sendEmail, sendEmailAsync, verificarConexion)
