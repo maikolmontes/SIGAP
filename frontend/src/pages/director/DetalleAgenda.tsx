@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api, { getArchivoUrl } from '../../services/api';
+import { confirmar } from '../../components/common/dialogo';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import useSemestreActivo from '../../hooks/useSemestreActivo'
 import { rotularCortes } from '../../utils/periodo'
@@ -199,7 +200,7 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
     };
 
     const handleAprobar = async () => {
-        if (!confirm('¿Estás seguro de aprobar esta agenda? El docente será notificado.')) return;
+        if (!(await confirmar({ tipo: 'pregunta', titulo: '¿Aprobar agenda?', mensaje: 'El docente será notificado.', textoAceptar: 'Aprobar' }))) return;
         setActionLoading(true);
         try {
             await api.put(`/director/agendas/${id}/aprobar`);

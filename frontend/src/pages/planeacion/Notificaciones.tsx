@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
+import { confirmar } from '../../components/common/dialogo';
 import { useAuth } from '../../context/AuthContext';
 import {
   Mail,
@@ -80,10 +81,13 @@ export default function Notificaciones() {
   };
 
   const enviarRecordatorios = async () => {
-    const confirmar = window.confirm(
-      'Se enviará un recordatorio por correo a todos los docentes con la agenda del período activo aún pendiente o devuelta. ¿Desea continuar?'
-    );
-    if (!confirmar) return;
+    const acepta = await confirmar({
+      tipo: 'pregunta',
+      titulo: '¿Enviar recordatorios?',
+      mensaje: 'Se enviará un recordatorio por correo a todos los docentes con la agenda del período activo aún pendiente o devuelta. ¿Desea continuar?',
+      textoAceptar: 'Enviar',
+    });
+    if (!acepta) return;
 
     try {
       setEnviandoRecordatorios(true);

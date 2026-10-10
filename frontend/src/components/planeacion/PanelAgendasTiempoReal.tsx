@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '../../services/api';
+import { confirmar, avisar } from '../common/dialogo';
 import {
   Users, CheckCircle, Clock, TrendingUp, AlertCircle,
   Upload, UploadCloud, X, ClipboardList, Calendar, Lock,
@@ -443,7 +444,7 @@ export default function PanelAgendasTiempoReal({
       .filter((d: any) => ids.includes(d.id_usuario))
       .map((d: any) => d.nombre)
       .join(', ');
-    if (!window.confirm(`¿Eliminar las agendas de ${ids.length} docente(s)?\n\n${nombres}\n\nEsta acción no se puede deshacer.`)) return;
+    if (!(await confirmar({ tipo: 'peligro', titulo: '¿Eliminar agendas?', mensaje: `Se eliminarán las agendas de ${ids.length} docente(s):\n\n${nombres}\n\nEsta acción no se puede deshacer.`, textoAceptar: 'Eliminar' }))) return;
     setEliminandoSeleccion(true);
     try {
       await api.delete('/director/eliminar-agendas-docentes', { data: { ids } });
@@ -476,7 +477,7 @@ export default function PanelAgendasTiempoReal({
     if (fileUpdateRef.current) fileUpdateRef.current.value = '';
     if (!file) return;
     if (!programaSel) {
-      alert('Debes seleccionar una facultad y un programa antes de importar.');
+      void avisar({ tipo: 'advertencia', mensaje: 'Debes seleccionar una facultad y un programa antes de importar.' });
       return;
     }
     setUploading(true);
@@ -510,7 +511,7 @@ export default function PanelAgendasTiempoReal({
 
   const handleEliminarAgendas = async () => {
     if (!programaSel) {
-      alert('Debes seleccionar una facultad y un programa antes de eliminar agendas.');
+      void avisar({ tipo: 'advertencia', mensaje: 'Debes seleccionar una facultad y un programa antes de eliminar agendas.' });
       return;
     }
     // La confirmación se hace en un modal donde hay que escribir el nombre del programa

@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import { leerFilasUsuarios } from '../../utils/excelUsuarios';
 import { usePermisosPagina } from '../../hooks/usePermisos';
 import ModalEliminarUsuario from '../../components/planeacion/ModalEliminarUsuario';
+import { avisar } from '../../components/common/dialogo';
 
 import { 
   Users, 
@@ -846,7 +847,7 @@ export default function Docentes() {
       );
     } catch (err) {
       console.error('Error al exportar Excel:', err);
-      alert('Ocurrió un error al generar el reporte Excel.');
+      void avisar({ tipo: 'error', mensaje: 'Ocurrió un error al generar el reporte Excel.' });
     }
   };
 

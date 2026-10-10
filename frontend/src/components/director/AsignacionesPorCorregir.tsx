@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../../services/api';
+import { confirmar } from '../common/dialogo';
 import {
     Search, CheckCircle2, AlertTriangle, Pencil, Save, XCircle,
     Clock, ClipboardList, RefreshCw, Info, Lock
@@ -148,10 +149,12 @@ function TarjetaAsignacion({
 
     const aprobar = async () => {
         if (!asignacion.coincide) return;
-        if (!window.confirm(
-            `¿Aprobar las asignaciones de ${asignacion.nombre_docente}?\n\n` +
-            `A partir de ese momento el docente podrá ver y diligenciar su agenda.`
-        )) return;
+        if (!(await confirmar({
+            tipo: 'pregunta',
+            titulo: '¿Aprobar asignaciones?',
+            mensaje: `¿Aprobar las asignaciones de ${asignacion.nombre_docente}?\n\nA partir de ese momento el docente podrá ver y diligenciar su agenda.`,
+            textoAceptar: 'Aprobar',
+        }))) return;
 
         setAprobando(true);
         try {
