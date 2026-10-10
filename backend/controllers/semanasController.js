@@ -1,5 +1,6 @@
 const pool = require('../db/connection');
 const { etiquetaSemestre, etiquetaCorte } = require('../utils/periodo');
+const { estadoDeSemana } = require('../utils/semanaAbierta');
 
 const getAll = async (req, res) => {
     try {
@@ -25,7 +26,12 @@ const getAll = async (req, res) => {
              result = await pool.query('SELECT * FROM semana WHERE id_periodo = $1 ORDER BY numero_semana::int ASC', [id_periodo]);
         }
         
-        res.json(result.rows);
+        // Cada semana indica si está abierta HOY (habilitada y dentro de sus fechas) y, si no, por qué.
+        // Es la misma regla que aplica el servidor al guardar: las pantallas solo la muestran.
+        res.json(result.rows.map((fila) => {
+            const estado = estadoDeSemana(fila, { semestre });
+            return { ...fila, abierta: estado.abierta, motivo_cierre: estado.motivo, mensaje_cierre: estado.mensaje };
+        }));
     } catch (error) {
         console.error('Error al obtener semanas:', error);
         res.status(500).json({ error: 'Error interno.' });

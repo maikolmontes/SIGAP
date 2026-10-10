@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const periodosController = require('../controllers/periodosController');
+const verifyToken = require('../middleware/verifyToken');
+
+// Todas estas rutas exigen iniciar sesión
+router.use(verifyToken);
 
 router.get('/', periodosController.getAll);
 router.get('/activo', periodosController.getPeriodoActivo);
