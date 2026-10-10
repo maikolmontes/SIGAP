@@ -1,6 +1,7 @@
 const pool = require('../db/connection');
 const path = require('path');
 const { rolesEfectivos } = require('../utils/rolActivo');
+const { verificarSemana } = require('../utils/semanaAbierta');
 const {
     idUsuarioDe, puedeVerDocente, duenoDeIndicador, duenoDeEvidencia,
 } = require('../middleware/accesoEvidencias');
@@ -148,13 +149,10 @@ const subirEvidencia = async (req, res) => {
         if (!['8', '16'].includes(semanaNum)) {
                 return res.status(400).json({ error: 'La semana debe ser 8 o 16.' });
         }
-        const corte = await pool.query(`
-            SELECT s.habilitada FROM semana s
-            JOIN periodo p ON p.id_periodo = s.id_periodo AND p.activo = true
-            WHERE s.numero_semana = $1 LIMIT 1
-        `, [semanaNum]);
-        if (!corte.rows[0]?.habilitada) {
-                return res.status(403).json({ error: `La Semana ${semanaNum} no está habilitada para cargar evidencias.` });
+        // Abierta = habilitada por Planeación y dentro de sus fechas (pasada la de cierre solo se consulta)
+        const corte = await verificarSemana(semanaNum);
+        if (!corte.abierta) {
+                return res.status(403).json({ error: corte.mensaje || `La Semana ${semanaNum} no está abierta para cargar evidencias.` });
         }
 
         let nombreArchivo = null;
@@ -230,6 +228,26 @@ const eliminarEvidencia = async (req, res) => {
         const esAdmin = rolesEfectivos(req).some(r => r === 'planeacion' || r === 'admin');
         if (dueno !== idUsuarioDe(req) && !esAdmin) {
             return res.status(403).json({ error: 'No tienes permiso para eliminar esta evidencia.' });
+        }
+
+        // Una evidencia solo se borra mientras su semana está abierta (Planeación y Admin pueden siempre)
+        if (!esAdmin) {
+            const origen = (await pool.query(`
+                SELECT e.semana, af.id_periodo
+                FROM evidencias e
+                JOIN indicadores i ON i.id_indicadores = e.id_indicadores
+                JOIN descripcion d ON d.id_descripcion = i.id_descripcion
+                JOIN asignacion_actividades aa ON aa.id_asignacionact = d.id_asignacionact
+                JOIN asignacion_funciones af ON af.id_funciones = aa.id_funciones
+                WHERE e.id_evidencias = $1
+                LIMIT 1
+            `, [id_evidencia])).rows[0];
+            if (origen && origen.semana) {
+                const corte = await verificarSemana(origen.semana, origen.id_periodo);
+                if (!corte.abierta) {
+                    return res.status(403).json({ error: corte.mensaje || 'La semana de esta evidencia ya no está abierta.' });
+                }
+            }
         }
 
         const { ruta_archivo, tipo_archivo } = result.rows[0];

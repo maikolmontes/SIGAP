@@ -1,10 +1,19 @@
 const pool = require('../db/connection');
 const notificaciones = require('../services/notificacionesService');
+const { rolesEfectivos } = require('../utils/rolActivo');
+const { verificarSemana } = require('../utils/semanaAbierta');
+const { idUsuarioDe, puedeVerDocente } = require('../middleware/accesoEvidencias');
+
+const esPlaneacionOAdmin = (req) => rolesEfectivos(req).some((r) => r === 'planeacion' || r === 'admin');
 
 const getAgenda = async (req, res) => {
     const { id_usuario } = req.params;
 
     try {
+        if (!(await puedeVerDocente(req, id_usuario)) && !esPlaneacionOAdmin(req)) {
+            return res.status(403).json({ error: 'No tienes permiso para ver esta agenda.' });
+        }
+
         const docente = await pool.query(`
             SELECT
                 u.nombres || ' ' || u.apellidos AS nombre_completo,
@@ -164,6 +173,10 @@ const getAgendaBase = async (req, res) => {
     const { id_usuario } = req.params;
 
     try {
+        if (!(await puedeVerDocente(req, id_usuario)) && !esPlaneacionOAdmin(req)) {
+            return res.status(403).json({ error: 'No tienes permiso para ver esta agenda.' });
+        }
+
         const funciones = await pool.query(`
             SELECT
                 af.id_funciones,
@@ -265,6 +278,31 @@ const guardarFuncionDocente = async (req, res) => {
 
     if (!id_funciones || !actividades || !Array.isArray(actividades)) {
         return res.status(400).json({ error: 'Se requiere id_funciones y un arreglo de actividades.' });
+    }
+
+    // La agenda solo se edita mientras la Semana 0 de su período está abierta (habilitada y dentro de sus fechas)
+    if (!esPlaneacionOAdmin(req)) {
+        const periodoFuncion = (await pool.query('SELECT id_periodo FROM asignacion_funciones WHERE id_funciones = $1', [id_funciones])).rows[0];
+        const semanaCero = await verificarSemana('0', periodoFuncion?.id_periodo ?? null);
+        if (!semanaCero.abierta) {
+            return res.status(403).json({ error: semanaCero.mensaje || 'La Semana 0 no está abierta: la agenda ya no se puede modificar.' });
+        }
+    }
+
+    // Solo se guarda lo propio: la función debe ser del usuario y cada actividad, de esa función
+    if (!esPlaneacionOAdmin(req)) {
+        const dueno = await pool.query('SELECT 1 FROM usuario_asignacion WHERE id_funciones = $1 AND id_usuario = $2 LIMIT 1', [id_funciones, idUsuarioDe(req)]);
+        if (dueno.rows.length === 0) {
+            return res.status(403).json({ error: 'Esta función no pertenece a tu agenda.' });
+        }
+        const idsActividad = actividades.map((a) => a && a.id_asignacionact).filter((id) => id !== undefined && id !== null && id !== '');
+        if (idsActividad.length > 0) {
+            const propias = await pool.query('SELECT id_asignacionact FROM asignacion_actividades WHERE id_funciones = $1', [id_funciones]);
+            const permitidas = new Set(propias.rows.map((r) => String(r.id_asignacionact)));
+            if (idsActividad.some((id) => !permitidas.has(String(id)))) {
+                return res.status(403).json({ error: 'Alguna actividad no pertenece a esta función.' });
+            }
+        }
     }
 
     const client = await pool.connect();
@@ -446,6 +484,40 @@ const guardarAvanceDocente = async (req, res) => {
         return res.status(400).json({ error: 'Se requiere un arreglo de indicadores con su ejecución.' });
     }
 
+    // "semana" dice qué corte se está guardando (8 o 16). Ese corte debe estar abierto y SOLO se escribe su
+    // columna: la otra se conserva como está en la base. Sin "semana" (clientes viejos) basta con que alguno esté abierto.
+    const corteGuardado = ['8', '16'].includes(String(req.body.semana)) ? String(req.body.semana) : null;
+    if (!esPlaneacionOAdmin(req)) {
+        if (corteGuardado) {
+            const corte = await verificarSemana(corteGuardado);
+            if (!corte.abierta) return res.status(403).json({ error: corte.mensaje || `La Semana ${corteGuardado} no está abierta.` });
+        } else {
+            const [c8, c16] = [await verificarSemana('8'), await verificarSemana('16')];
+            if (!c8.abierta && !c16.abierta) return res.status(403).json({ error: c8.mensaje || c16.mensaje || 'Ningún corte está abierto.' });
+        }
+    }
+
+    // Solo se guarda lo propio: cada indicador debe pertenecer a una función asignada al usuario
+    if (!esPlaneacionOAdmin(req)) {
+        const ids = [...new Set(indicadores.map((i) => Number(i && i.id_indicador)))];
+        if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+            return res.status(400).json({ error: 'Cada indicador debe traer un id_indicador válido.' });
+        }
+        if (ids.length > 0) {
+            const propios = await pool.query(`
+                SELECT DISTINCT i.id_indicadores
+                FROM indicadores i
+                JOIN descripcion d ON d.id_descripcion = i.id_descripcion
+                JOIN asignacion_actividades aa ON aa.id_asignacionact = d.id_asignacionact
+                JOIN usuario_asignacion ua ON ua.id_funciones = aa.id_funciones
+                WHERE ua.id_usuario = $1 AND i.id_indicadores = ANY($2::int[])
+            `, [idUsuarioDe(req), ids]);
+            if (propios.rows.length !== ids.length) {
+                return res.status(403).json({ error: 'Algún indicador no pertenece a tu agenda.' });
+            }
+        }
+    }
+
     const client = await pool.connect();
     const advertencias = [];
 
@@ -463,13 +535,20 @@ const guardarAvanceDocente = async (req, res) => {
             if (isNaN(ejec8) || ejec8 < 0) ejec8 = 0;
             if (isNaN(ejec16) || ejec16 < 0) ejec16 = 0;
 
-            // Obtener la meta desde la BD
+            // Obtener la meta desde la BD (y lo ya guardado, por si este guardado es de un solo corte)
             const resultMeta = await client.query(`
-                SELECT d.meta 
+                SELECT d.meta, i.ejecucion_8 AS guardado_8, i.ejecucion_16 AS guardado_16
                 FROM indicadores i
                 JOIN descripcion d ON d.id_descripcion = i.id_descripcion
                 WHERE i.id_indicadores = $1
             `, [ind.id_indicador]);
+
+            // Un guardado de la Semana 8 no toca la columna de la 16, y al revés
+            if (resultMeta.rows.length > 0 && corteGuardado) {
+                const num = (v) => { const n = parseFloat(v); return Number.isNaN(n) || n < 0 ? 0 : n; };
+                if (corteGuardado === '8') ejec16 = num(resultMeta.rows[0].guardado_16);
+                else ejec8 = num(resultMeta.rows[0].guardado_8);
+            }
 
             if (resultMeta.rows.length > 0) {
                 const meta = parseFloat(resultMeta.rows[0].meta) || 0;
