@@ -7,10 +7,8 @@ import {
   TrendingUp,
   Building2,
   AlertTriangle,
-  Calendar,
   BookOpen,
   FileCheck,
-  ChevronRight,
   RefreshCw,
   CheckCircle2,
   Hourglass,
@@ -53,6 +51,11 @@ interface Metricas {
   evidenciasSubidas?: number;
   totalHorasEjecucion: number;
   avanceGeneral: number;
+  /** Suma de las metas de los indicadores y lo cumplido de ellas (cada función hasta su meta) */
+  metaTotal?: number;
+  ejecucionCumplida?: number;
+  indicadoresTotal?: number;
+  indicadoresConAvance?: number;
   evidenciasPorPeriodo?: PeriodoMetrica[];
   evidenciasSubidasPorPeriodo?: PeriodoMetrica[];
 }
@@ -70,18 +73,11 @@ interface AvanceItem {
   meta: number;
 }
 
-interface EstadoAgenda {
-  semana8: string;
-  semana16: string;
-  funcionesAsignadas: boolean;
-}
-
 interface DashboardData {
   docente: DocenteData;
   metricas: Metricas;
   distribucionHoras: DistribucionHoras[];
   avanceSemana8: AvanceItem[];
-  estadoAgenda: EstadoAgenda;
 }
 
 const COLORS = ['#6366f1', '#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444'];
@@ -255,14 +251,7 @@ export default function DashboardDocente() {
 
   if (!data) return null;
 
-  const { docente, metricas, distribucionHoras, avanceSemana8, estadoAgenda } = data;
-
-  const getEstadoColor = (estado: string) => {
-    if (estado === 'Revisado' || estado === 'Aprobado') return 'bg-emerald-500';
-    if (estado === 'Pendiente') return 'bg-gray-400';
-    if (estado === 'Rechazado') return 'bg-red-500';
-    return 'bg-gray-400';
-  };
+  const { docente, metricas, distribucionHoras, avanceSemana8 } = data;
 
   const totalMeta = avanceSemana8.reduce((s, i) => s + (i.meta || 0), 0);
   const totalEjec8 = avanceSemana8.reduce((s, i) => s + (i.ejec8 || 0), 0);
@@ -326,11 +315,11 @@ export default function DashboardDocente() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
           {
-            // Horas de la agenda (las mismas de "Distribución de horas"), frente a las del contrato
-            label: 'Horas registradas',
-            value: `${metricas.totalHoras}h`,
-            sub: docente.totalHorasContrato > 0 ? `de ${docente.totalHorasContrato}h contratadas` : 'asignadas en tu agenda',
-            icon: Clock,
+            // Las horas ya están en "Distribución de horas": aquí va lo que ese gráfico no dice
+            label: 'Indicadores con avance',
+            value: metricas.indicadoresConAvance ?? 0,
+            sub: (metricas.indicadoresTotal ?? 0) === 0 ? 'aún sin indicadores en tu agenda' : `de ${metricas.indicadoresTotal} indicadores`,
+            icon: Target,
             color: 'blue',
             bg: 'bg-blue-50',
             iconColor: 'text-blue-600',
@@ -339,7 +328,12 @@ export default function DashboardDocente() {
           {
             label: 'Avance general',
             value: `${metricas.avanceGeneral}%`,
-            sub: metricas.avanceGeneral >= 100 ? '✓ Completado' : 'del total',
+            // 100 % solo cuando todas las metas están cumplidas
+            sub: (metricas.metaTotal ?? 0) === 0
+              ? 'sin metas registradas'
+              : metricas.avanceGeneral >= 100
+                ? '✓ Todo completado'
+                : `${metricas.ejecucionCumplida ?? 0} de ${metricas.metaTotal} metas cumplidas`,
             icon: TrendingUp,
             color: 'emerald',
             bg: 'bg-emerald-50',
@@ -348,9 +342,9 @@ export default function DashboardDocente() {
             pulse: pulseAvance
           },
           {
-            label: 'Funciones',
+            label: 'Funciones asignadas',
             value: metricas.funcionesSustantivas,
-            sub: 'sustantivas',
+            sub: '',
             icon: Building2,
             color: 'purple',
             bg: 'bg-purple-50',
@@ -579,40 +573,6 @@ export default function DashboardDocente() {
           </div>
         </div>
       )}
-
-      {/* Estado de Agenda */}
-      <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-        <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 w-full sm:w-auto mb-1 sm:mb-0">
-              <Calendar className="w-5 h-5 text-gray-400" />
-              <span className="text-sm font-bold text-gray-700">Estado de la agenda</span>
-            </div>
-            {[
-              { label: rotularCortes('Corte 1 (Sem 8)', semestreActivo), estado: estadoAgenda.semana8 },
-              { label: rotularCortes('Corte 2 (Sem 16)', semestreActivo), estado: estadoAgenda.semana16 },
-            ].map(e => (
-              <div key={e.label} className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
-                <span className={`w-2.5 h-2.5 rounded-full ${getEstadoColor(e.estado)}`} />
-                <span className="text-xs font-medium text-gray-600">{e.label}: {e.estado}</span>
-              </div>
-            ))}
-            <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
-              <span className={`w-2.5 h-2.5 rounded-full ${estadoAgenda.funcionesAsignadas ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-              <span className="text-xs font-medium text-gray-600">
-                Funciones {estadoAgenda.funcionesAsignadas ? 'distribuidas' : 'por distribuir'}
-              </span>
-            </div>
-          </div>
-          <button
-            disabled={!docente.periodoActivo}
-            className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors w-full xl:w-auto justify-end sm:justify-start xl:justify-end mt-2 xl:mt-0 pt-3 border-t xl:border-0 border-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Ver detalles completos
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
 
       {/* Historial */}
       {!docente.periodoActivo && historicalAgendas.length > 0 && (

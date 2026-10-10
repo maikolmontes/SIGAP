@@ -1,6 +1,7 @@
 const pool = require('../db/connection');
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 const { etiquetaSemestre } = require('../utils/periodo');
+const { calcularAvanceGeneral } = require('../utils/avanceDocente');
 
 const getDashboard = async (req, res) => {
     const idUsuario = req.user.id;
@@ -84,6 +85,21 @@ const getDashboard = async (req, res) => {
               AND COALESCE(i.activo, TRUE) = TRUE
             GROUP BY af.funcion_sustantiva
             ORDER BY af.funcion_sustantiva
+        `, [idUsuario, idPeriodoActivo]);
+
+        // 3b. Indicadores del docente en el período activo y cuántos ya tienen avance reportado
+        const indicadoresQuery = await pool.query(`
+            SELECT
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE COALESCE(i.ejecucion_8, 0) + COALESCE(i.ejecucion_16, 0) > 0)::int AS con_avance
+            FROM INDICADORES i
+            JOIN DESCRIPCION d ON d.id_descripcion = i.id_descripcion
+            JOIN ASIGNACION_ACTIVIDADES aa ON aa.id_asignacionact = d.id_asignacionact
+            JOIN USUARIO_ASIGNACION ua ON ua.id_funciones = aa.id_funciones
+            JOIN ASIGNACION_FUNCIONES af ON af.id_funciones = ua.id_funciones
+            WHERE ua.id_usuario = $1 AND af.id_periodo = $2
+              AND COALESCE(i.activo, TRUE) = TRUE
+              AND COALESCE(d.activo, TRUE) = TRUE
         `, [idUsuario, idPeriodoActivo]);
 
         // 4b. Evidencias pendientes por período (total de pendientes)
@@ -204,13 +220,10 @@ const getDashboard = async (req, res) => {
 
         const totalHorasEjecucion = parseFloat(horasEjecucionQuery.rows[0]?.total_ejecucion) || 0;
 
-        // Avance general = Σ ejecución / Σ meta, como el "% de logro" del formato
-        // institucional. Promediar el % de cada función daba el mismo peso a una
-        // función de 1 h que a una de 20 h (49,4 % en el formato vs 43,3 %).
-        const sumaMetas = avanceSemana8.reduce((s, item) => s + (item.meta || 0), 0);
-        const sumaEjecucion = avanceSemana8.reduce(
-            (s, item) => s + Math.min((item.ejec8 || 0) + (item.ejec16 || 0), item.meta || 0), 0);
-        const avanceGeneral = sumaMetas > 0 ? Math.round((sumaEjecucion / sumaMetas) * 100) : 0;
+        // Avance general = Σ ejecución / Σ meta (llega a 100 solo cuando todo está completo)
+        const { metaTotal, ejecucionCumplida, avanceGeneral } = calcularAvanceGeneral(avanceSemana8);
+        const indicadoresTotal = indicadoresQuery.rows[0]?.total || 0;
+        const indicadoresConAvance = indicadoresQuery.rows[0]?.con_avance || 0;
 
         // Estado de la agenda basado en funciones aceptadas
         const funcionesAceptadas = estadoFuncionesQuery.rows.find(r => r.estado_agenda === 'Aceptado');
@@ -265,6 +278,10 @@ const getDashboard = async (req, res) => {
                 evidenciasSubidas,
                 totalHorasEjecucion,
                 avanceGeneral,
+                metaTotal,
+                ejecucionCumplida,
+                indicadoresTotal,
+                indicadoresConAvance,
                 evidenciasPorPeriodo,
                 evidenciasSubidasPorPeriodo
             },
