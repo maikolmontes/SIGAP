@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { desgloseCompletas } from '../../utils/agendas'
 import api from '../../services/api';
 import { confirmar, avisar } from '../common/dialogo';
 import {
@@ -48,6 +49,7 @@ function ImportResultPanel({ result, onClose, onConfirmar, confirmando }: {
   onConfirmar?: () => void;
   confirmando?: boolean;
 }) {
+  // El marco, la sombra y el desplazamiento los pone el modal que lo contiene
   const [showNoEncontrados, setShowNoEncontrados] = useState(true);
   const [showErrores, setShowErrores] = useState(false);
   const [showAlertas, setShowAlertas] = useState(true);
@@ -55,7 +57,7 @@ function ImportResultPanel({ result, onClose, onConfirmar, confirmando }: {
 
   if (!result.success) {
     return (
-      <div className="mb-6 p-5 rounded-2xl border border-red-200 bg-red-50 relative">
+      <div className="p-5 bg-red-50 relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
         <div className="flex items-center gap-3">
           <AlertCircle className="w-6 h-6 text-red-600 shrink-0" />
@@ -91,7 +93,7 @@ function ImportResultPanel({ result, onClose, onConfirmar, confirmando }: {
     : { fondo: 'bg-green-50 border-green-200', icono: <CheckCircle className="w-6 h-6 text-green-600 shrink-0 mt-0.5" />, titulo: 'text-green-900', texto: 'text-green-700' };
 
   return (
-    <div className="mb-6 rounded-2xl border overflow-hidden shadow-sm">
+    <div>
       {/* Cabecera */}
       <div className={`${cabecera.fondo} border-b px-5 py-4 flex items-start justify-between gap-3`}>
         <div className="flex items-start gap-3">
@@ -292,7 +294,7 @@ function ImportResultPanel({ result, onClose, onConfirmar, confirmando }: {
 
       {/* Confirmación de la vista previa */}
       {esVistaPrevia && onConfirmar && (
-        <div className="bg-gray-50 px-5 py-3 flex flex-wrap items-center justify-end gap-3 border-t border-gray-100">
+        <div className="sticky bottom-0 z-10 bg-gray-50 px-5 py-3 flex flex-wrap items-center justify-end gap-3 border-t border-gray-200">
           <button onClick={onClose} disabled={confirmando} className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-200 rounded-lg">
             Cancelar
           </button>
@@ -755,15 +757,33 @@ export default function PanelAgendasTiempoReal({
         </div>
       </div>
 
-      {/* RESULTADO IMPORTACIÓN */}
-      {uploadResult && (
-        <ImportResultPanel
-          result={uploadResult}
-          onClose={() => { setUploadResult(null); setListadoPendiente(null); }}
-          onConfirmar={listadoPendiente ? confirmarListado : undefined}
-          confirmando={uploading}
-        />
-      )}
+      {/* RESULTADO IMPORTACIÓN: vista previa, confirmación y resultado, en un modal */}
+      {uploadResult && (() => {
+        const esVistaPrevia = !!uploadResult.data?.simulacion;
+        const cerrarInforme = () => { setUploadResult(null); setListadoPendiente(null); };
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            // Una vista previa no se descarta por un clic afuera: hay que cancelar o confirmar
+            onClick={() => { if (!esVistaPrevia && !uploading) cerrarInforme(); }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Informe de la importación"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-gray-100"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ImportResultPanel
+                result={uploadResult}
+                onClose={cerrarInforme}
+                onConfirmar={listadoPendiente ? confirmarListado : undefined}
+                confirmando={uploading}
+              />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* CONFIRMACIÓN DE ELIMINACIÓN: hay que escribir el nombre del programa */}
       {modalEliminarAbierto && (() => {
@@ -832,7 +852,7 @@ export default function PanelAgendasTiempoReal({
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
             {[
               { label: 'Total Docentes', value: metricas.total, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: 'Agendas Completas', value: metricas.aceptadas, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
+              { label: 'Agendas Completas', value: metricas.aceptadas, sub: desgloseCompletas(metricas.aceptadas, metricas.aprobadas), icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
               { label: 'Agendas Pendientes', value: metricas.pendientes, icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-50' },
               { label: 'Total Horas Asign.', value: Math.round(metricas.total_horas), icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
             ].map((m) => (
@@ -842,6 +862,7 @@ export default function PanelAgendasTiempoReal({
                 </div>
                 <div className="text-2xl font-black text-gray-800">{m.value}</div>
                 <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-0.5">{m.label}</div>
+                {m.sub && <div className="text-[11px] text-gray-400 mt-1">{m.sub}</div>}
               </div>
             ))}
           </div>

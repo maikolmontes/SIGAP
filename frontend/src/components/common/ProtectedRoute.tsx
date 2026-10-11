@@ -41,6 +41,7 @@ const RUTA_PAGINA_MAP: Record<string, string> = {
     '/docente/avance-semana-16': 'Avance Semana 16',
     '/docente/agenda': 'Agenda Docente',
     '/docente/evidencias': 'Evidencias',
+    '/docente/reportes': 'Evidencias',
     '/director/dashboard': 'Dashboard Director',
     '/director/agendas': 'Agendas por Revisar',
     '/director/observaciones': 'Observaciones Docentes',

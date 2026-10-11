@@ -3,7 +3,7 @@ import api from '../../services/api';
 import { confirmar } from '../common/dialogo';
 import {
     Search, CheckCircle2, AlertTriangle, Pencil, Save, XCircle,
-    Clock, ClipboardList, RefreshCw, Info, Lock
+    Clock, ClipboardList, RefreshCw, Info, Lock, LayoutGrid, List, ChevronDown, Filter
 } from 'lucide-react';
 
 interface Actividad {
@@ -32,6 +32,8 @@ interface Asignacion {
     id_usuario: number;
     nombre_docente: string;
     correo: string;
+    tipo_documento?: string | null;
+    numero_documento?: string | null;
     nombre_programa: string;
     tipo_contrato: string;
     horas_contrato: number;
@@ -44,6 +46,13 @@ interface Asignacion {
 
 const iniciales = (nombre: string) =>
     `${nombre?.charAt(0) || ''}${nombre?.split(' ')[1]?.charAt(0) || ''}`;
+
+// Para buscar sin que importen tildes, mayúsculas, ni puntos y espacios de la identificación
+const normalizar = (texto: string | null | undefined) =>
+    (texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const soloAlfanumerico = (texto: string | null | undefined) => normalizar(texto).replace(/[^a-z0-9]/g, '');
+
+const CLAVE_VISTA = 'sigap_vista_asignaciones';
 
 // ─────────────────────────────────────────────────────────────
 // Tarjeta de un docente. En modo lectura muestra el resumen de
@@ -186,6 +195,9 @@ function TarjetaAsignacion({
                     <div className="min-w-0">
                         <p className="font-bold text-gray-900 text-sm leading-tight truncate">{asignacion.nombre_docente}</p>
                         <p className="text-xs text-gray-400 truncate">{asignacion.nombre_programa}</p>
+                        <p className="text-[11px] text-gray-400 truncate" title={asignacion.correo}>
+                            {asignacion.numero_documento ? `${asignacion.tipo_documento || 'Doc.'} ${asignacion.numero_documento} · ` : ''}{asignacion.correo}
+                        </p>
                         <div className="flex flex-wrap items-center gap-1 mt-1">
                             <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-semibold border border-blue-100">
                                 {asignacion.tipo_contrato}
@@ -445,7 +457,25 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
     const [puedeAprobar, setPuedeAprobar] = useState(false);
     const [loading, setLoading] = useState(true);
     const [busqueda, setBusqueda] = useState('');
-    const [soloInconsistentes, setSoloInconsistentes] = useState(false);
+    // Filtros en listas desplegables, dentro de un panel que se muestra u oculta (como en el panel del Director)
+    const [mostrarFiltros, setMostrarFiltros] = useState(false);
+    const [programaFiltro, setProgramaFiltro] = useState('');
+    const [contratoFiltro, setContratoFiltro] = useState('');
+    const [horasFiltro, setHorasFiltro] = useState<'' | 'correctas' | 'inconsistentes'>('');
+    const [estadoFiltro, setEstadoFiltro] = useState<'' | 'liberada' | 'pendiente'>('');
+    const hayFiltros = !!(programaFiltro || contratoFiltro || horasFiltro || estadoFiltro);
+    const limpiarFiltros = () => { setProgramaFiltro(''); setContratoFiltro(''); setHorasFiltro(''); setEstadoFiltro(''); setPaginaActual(1); };
+    // Tarjetas (por defecto) o lista compacta; se recuerda en este navegador
+    const [vista, setVista] = useState<'tarjetas' | 'lista'>(() => {
+        try { return localStorage.getItem(CLAVE_VISTA) === 'lista' ? 'lista' : 'tarjetas'; } catch { return 'tarjetas'; }
+    });
+    const cambiarVista = (v: 'tarjetas' | 'lista') => {
+        setVista(v);
+        try { localStorage.setItem(CLAVE_VISTA, v); } catch { /* sin almacenamiento */ }
+    };
+    // En la lista, filas abiertas (muestran la tarjeta completa para corregir o aprobar)
+    const [abiertas, setAbiertas] = useState<number[]>([]);
+    const alternarFila = (id: number) => setAbiertas(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     const [toast, setToast] = useState<{ tipo: 'exito' | 'error'; mensaje: string } | null>(null);
     const [paginaActual, setPaginaActual] = useState(1);
     const [regPorPag, setRegPorPag] = useState(10);
@@ -473,14 +503,36 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
         return () => clearTimeout(t);
     }, [toast]);
 
-    const filtradas = useMemo(() => asignaciones.filter(a => {
-        const coincideBusqueda =
-            a.nombre_docente.toLowerCase().includes(busqueda.toLowerCase()) ||
-            a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase()) ||
-            a.correo?.toLowerCase().includes(busqueda.toLowerCase());
-        if (soloInconsistentes) return coincideBusqueda && !a.coincide;
-        return coincideBusqueda;
-    }).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' })), [asignaciones, busqueda, soloInconsistentes]);
+    const programas = useMemo(
+        () => [...new Set(asignaciones.map(a => a.nombre_programa).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'es', { sensitivity: 'base' })),
+        [asignaciones]
+    );
+
+    const contratos = useMemo(
+        () => [...new Set(asignaciones.map(a => a.tipo_contrato).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'es', { sensitivity: 'base' })),
+        [asignaciones]
+    );
+
+    const filtradas = useMemo(() => {
+        const texto = normalizar(busqueda);
+        const documento = soloAlfanumerico(busqueda);
+        return asignaciones.filter(a => {
+            if (programaFiltro && a.nombre_programa !== programaFiltro) return false;
+            if (contratoFiltro && a.tipo_contrato !== contratoFiltro) return false;
+            if (horasFiltro === 'inconsistentes' && a.coincide) return false;
+            if (horasFiltro === 'correctas' && !a.coincide) return false;
+            if (estadoFiltro) {
+                // "Visible para el docente" = ninguna función sigue en "Por Aprobar"
+                const liberada = a.funciones.every(fn => fn.estado_agenda !== 'Por Aprobar');
+                if ((estadoFiltro === 'liberada') !== liberada) return false;
+            }
+            if (!texto) return true;
+            // Por nombre, identificación (sin puntos ni espacios) o correo
+            return normalizar(a.nombre_docente).includes(texto)
+                || normalizar(a.correo).includes(texto)
+                || (documento !== '' && soloAlfanumerico(a.numero_documento).includes(documento));
+        }).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' }));
+    }, [asignaciones, busqueda, programaFiltro, contratoFiltro, horasFiltro, estadoFiltro]);
 
     const totalPaginas = Math.max(1, Math.ceil(filtradas.length / regPorPag));
     const paginaSegura = Math.min(paginaActual, totalPaginas);
@@ -533,39 +585,125 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                 ))}
             </div>
 
-            {/* Búsqueda y filtros */}
-            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-5">
-                <div className="relative flex-1 max-w-md w-full">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input
-                        type="text"
-                        placeholder="Buscar docente o programa..."
-                        value={busqueda}
-                        onChange={(e) => setBusqueda(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-                    />
+            {/* Búsqueda, filtros desplegables y vista */}
+            <div className="mb-5">
+                <div className="flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between">
+                    <div className="relative flex-1 min-w-0 w-full lg:max-w-xl">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Buscar por nombre, identificación o correo..."
+                            value={busqueda}
+                            onChange={(e) => { setBusqueda(e.target.value); setPaginaActual(1); }}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                        />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setMostrarFiltros(v => !v)}
+                            aria-expanded={mostrarFiltros}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${
+                                hayFiltros ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                            }`}
+                        >
+                            <Filter className="w-3.5 h-3.5" />
+                            Filtros
+                            {hayFiltros && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />}
+                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${mostrarFiltros ? 'rotate-180' : ''}`} />
+                        </button>
+                        {/* Tarjetas o lista */}
+                        <div className="inline-flex rounded-xl border border-gray-200 bg-white p-0.5" role="group" aria-label="Tipo de vista">
+                            {([['tarjetas', 'Tarjetas', LayoutGrid], ['lista', 'Lista', List]] as const).map(([clave, nombre, Icono]) => (
+                                <button
+                                    key={clave}
+                                    type="button"
+                                    onClick={() => cambiarVista(clave)}
+                                    aria-pressed={vista === clave}
+                                    title={`Ver como ${nombre.toLowerCase()}`}
+                                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                        vista === clave ? 'bg-[#1a2744] text-white' : 'text-gray-500 hover:text-gray-800'
+                                    }`}
+                                >
+                                    <Icono className="w-3.5 h-3.5" />
+                                    {nombre}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            onClick={cargar}
+                            disabled={loading}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                            Actualizar
+                        </button>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => setSoloInconsistentes(v => !v)}
-                        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${
-                            soloInconsistentes
-                                ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                        }`}
-                    >
-                        <AlertTriangle className="w-3.5 h-3.5" />
-                        Solo con inconsistencias
-                    </button>
-                    <button
-                        onClick={cargar}
-                        disabled={loading}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-100 transition-colors disabled:opacity-50"
-                    >
-                        <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-                        Actualizar
-                    </button>
-                </div>
+
+                {mostrarFiltros && (
+                    <div className="mt-3 bg-white border border-gray-100 rounded-2xl shadow-sm p-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <label className="flex flex-col gap-1 min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Programa</span>
+                            <select
+                                id="filtro-programa"
+                                value={programaFiltro}
+                                onChange={(e) => { setProgramaFiltro(e.target.value); setPaginaActual(1); }}
+                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                            >
+                                <option value="">Todos los programas</option>
+                                {programas.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                        </label>
+                        <label className="flex flex-col gap-1 min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Contrato</span>
+                            <select
+                                id="filtro-contrato"
+                                value={contratoFiltro}
+                                onChange={(e) => { setContratoFiltro(e.target.value); setPaginaActual(1); }}
+                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                            >
+                                <option value="">Todos los contratos</option>
+                                {contratos.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </label>
+                        <label className="flex flex-col gap-1 min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Horas</span>
+                            <select
+                                id="filtro-horas"
+                                value={horasFiltro}
+                                onChange={(e) => { setHorasFiltro(e.target.value as '' | 'correctas' | 'inconsistentes'); setPaginaActual(1); }}
+                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                            >
+                                <option value="">Todas</option>
+                                <option value="correctas">Horas correctas</option>
+                                <option value="inconsistentes">Requieren corrección</option>
+                            </select>
+                        </label>
+                        <label className="flex flex-col gap-1 min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Estado</span>
+                            <select
+                                id="filtro-estado"
+                                value={estadoFiltro}
+                                onChange={(e) => { setEstadoFiltro(e.target.value as '' | 'liberada' | 'pendiente'); setPaginaActual(1); }}
+                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                            >
+                                <option value="">Todos</option>
+                                <option value="pendiente">Pendiente de aprobar</option>
+                                <option value="liberada">Visible para el docente</option>
+                            </select>
+                        </label>
+                        </div>
+                        {hayFiltros && (
+                            <div className="mt-3 flex justify-end">
+                                <button type="button" onClick={limpiarFiltros} className="px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors">
+                                    Limpiar filtros
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Toast */}
@@ -601,7 +739,7 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                     <p className="font-medium">
                         {asignaciones.length === 0
                             ? 'Aún no hay asignaciones cargadas'
-                            : soloInconsistentes
+                            : horasFiltro === 'inconsistentes'
                                 ? 'Ninguna asignación tiene inconsistencias'
                                 : 'No se encontraron docentes'}
                     </p>
@@ -613,17 +751,82 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                 </div>
             ) : (
                 <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                        {filtPagina.map(a => (
-                            <TarjetaAsignacion
-                                key={a.id_usuario}
-                                asignacion={a}
-                                puedeEditar={puedeEditar}
-                                puedeAprobar={puedeAprobar}
-                                onGuardado={manejarGuardado}
-                                onError={(m) => setToast({ tipo: 'error', mensaje: m })}
-                            />
-                        ))}
+                    {/* Los resultados se desplazan dentro de su propio recuadro: la búsqueda y la paginación siguen a la vista */}
+                    <div className="max-h-[65vh] overflow-y-auto pr-2 -mr-2">
+                        {vista === 'tarjetas' ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pb-1">
+                                {filtPagina.map(a => (
+                                    <TarjetaAsignacion
+                                        key={a.id_usuario}
+                                        asignacion={a}
+                                        puedeEditar={puedeEditar}
+                                        puedeAprobar={puedeAprobar}
+                                        onGuardado={manejarGuardado}
+                                        onError={(m) => setToast({ tipo: 'error', mensaje: m })}
+                                    />
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                                {/* Encabezado de la lista */}
+                                <div className="hidden md:grid grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_28px] gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-[10px] font-bold uppercase tracking-wider text-gray-400 sticky top-0 z-10">
+                                    <span>Docente</span><span>Identificación</span><span>Programa</span><span>Contrato</span><span>Horas</span><span>Estado</span><span />
+                                </div>
+                                <ul className="divide-y divide-gray-100">
+                                    {filtPagina.map(a => {
+                                        const abierta = abiertas.includes(a.id_usuario);
+                                        const liberada = a.funciones.every(f => f.estado_agenda !== 'Por Aprobar');
+                                        const dif = a.diferencia;
+                                        return (
+                                            <li key={a.id_usuario} className={abierta ? 'bg-blue-50/30' : ''}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => alternarFila(a.id_usuario)}
+                                                    aria-expanded={abierta}
+                                                    className="w-full text-left grid grid-cols-1 md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_28px] gap-x-3 gap-y-1 items-center px-4 py-3 hover:bg-gray-50 transition-colors"
+                                                >
+                                                    <span className="flex items-center gap-3 min-w-0">
+                                                        <span className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs shrink-0">{iniciales(a.nombre_docente)}</span>
+                                                        <span className="min-w-0">
+                                                            <span className="block font-bold text-gray-900 text-sm truncate">{a.nombre_docente}</span>
+                                                            <span className="block text-[11px] text-gray-400 truncate">{a.correo}</span>
+                                                        </span>
+                                                    </span>
+                                                    <span className="text-xs text-gray-600 truncate">{a.numero_documento ? `${a.tipo_documento || ''} ${a.numero_documento}`.trim() : '—'}</span>
+                                                    <span className="text-xs text-gray-600 truncate">{a.nombre_programa}</span>
+                                                    <span className="text-xs text-gray-600 truncate">{a.tipo_contrato}</span>
+                                                    <span className="flex items-center gap-1.5 text-xs">
+                                                        <span className={`font-black ${a.coincide ? 'text-green-600' : 'text-amber-600'}`}>
+                                                            {a.total_horas % 1 === 0 ? a.total_horas : a.total_horas.toFixed(1)}<span className="text-gray-400 font-bold">/{a.horas_contrato}h</span>
+                                                        </span>
+                                                        {!a.coincide && (
+                                                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5">
+                                                                {dif > 0 ? `+${Math.abs(dif).toFixed(dif % 1 === 0 ? 0 : 1)}h` : `-${Math.abs(dif).toFixed(dif % 1 === 0 ? 0 : 1)}h`}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border w-fit ${liberada ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                                                        {liberada ? 'Visible para el docente' : 'Pendiente de aprobar'}
+                                                    </span>
+                                                    <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${abierta ? 'rotate-180' : ''}`} />
+                                                </button>
+                                                {abierta && (
+                                                    <div className="px-4 pb-4">
+                                                        <TarjetaAsignacion
+                                                            asignacion={a}
+                                                            puedeEditar={puedeEditar}
+                                                            puedeAprobar={puedeAprobar}
+                                                            onGuardado={manejarGuardado}
+                                                            onError={(m) => setToast({ tipo: 'error', mensaje: m })}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </div>
+                        )}
                     </div>
 
                     {/* Paginación */}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { desgloseCompletas } from '../../utils/agendas'
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import {
@@ -129,7 +130,7 @@ export default function DashboardConsultor() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
             {[
               { label: 'Total Docentes', value: metricas.total, icon: Users, color: 'text-teal-600', bg: 'bg-teal-50' },
-              { label: 'Agendas Completas', value: metricas.aceptadas, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
+              { label: 'Agendas Completas', value: metricas.aceptadas, sub: desgloseCompletas(metricas.aceptadas, metricas.aprobadas), icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
               { label: 'Agendas Pendientes', value: metricas.pendientes, icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-50' },
               { label: 'Total Horas Asign.', value: Math.round(metricas.total_horas), icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
             ].map((m) => (
@@ -139,6 +140,7 @@ export default function DashboardConsultor() {
                 </div>
                 <div className="text-2xl font-black text-gray-800">{m.value}</div>
                 <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-0.5">{m.label}</div>
+                {m.sub && <div className="text-[11px] text-gray-400 mt-1">{m.sub}</div>}
               </div>
             ))}
           </div>

@@ -2,6 +2,7 @@ const pool = require('../db/connection');
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 const { etiquetaSemestre } = require('../utils/periodo');
 const { calcularAvanceGeneral } = require('../utils/avanceDocente');
+const { construirReporteDocente, ReporteDocenteError } = require('../services/reporteDocente');
 
 const getDashboard = async (req, res) => {
     const idUsuario = req.user.id;
@@ -385,4 +386,28 @@ const getAgendasPorPeriodo = async (req, res) => {
     }
 };
 
-module.exports = { getDashboard, getAgendasPorPeriodo };
+// ================================================================
+// GET /api/docente/reporte-evidencias?periodo=
+// Informe del propio docente (avance + evidencias) en un período; por omisión, el activo.
+// Devuelve el documento ya redactado: el frontend lo muestra y lo convierte en Word o PDF.
+// ================================================================
+const getReporteEvidencias = async (req, res) => {
+    try {
+        const idUsuario = Number(req.user?.id ?? req.user?.id_usuario);
+        if (!Number.isInteger(idUsuario) || idUsuario <= 0) return res.status(401).json({ error: 'Sesión inválida.' });
+
+        let idPeriodo = Number(req.query.periodo);
+        if (!Number.isInteger(idPeriodo) || idPeriodo <= 0) {
+            const activo = (await pool.query('SELECT id_periodo FROM periodo WHERE activo = TRUE LIMIT 1')).rows[0];
+            if (!activo) return res.status(404).json({ error: 'No hay un período activo.' });
+            idPeriodo = activo.id_periodo;
+        }
+        res.json(await construirReporteDocente(pool, { idUsuario, idPeriodo }));
+    } catch (error) {
+        if (error instanceof ReporteDocenteError) return res.status(error.estado).json({ error: error.message });
+        console.error('Error en getReporteEvidencias:', error);
+        res.status(500).json({ error: 'No se pudo generar el informe.' });
+    }
+};
+
+module.exports = { getDashboard, getAgendasPorPeriodo, getReporteEvidencias };

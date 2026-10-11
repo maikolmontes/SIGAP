@@ -15,6 +15,8 @@ const SubirEvidenciaModal: React.FC<SubirEvidenciaModalProps> = ({ isOpen, onClo
     const [tipoCarga, setTipoCarga] = useState<'archivo' | 'link'>('archivo');
     const [archivo, setArchivo] = useState<File | null>(null);
     const [linkTexto, setLinkTexto] = useState('');
+    // Qué contiene la evidencia (opcional); aparece en el informe de evidencias
+    const [descripcion, setDescripcion] = useState('');
     const [cargando, setCargando] = useState(false);
     const [mensaje, setMensaje] = useState<{ tipo: 'exito' | 'error', texto: string } | null>(null);
     const [dragActive, setDragActive] = useState(false);
@@ -28,6 +30,7 @@ const SubirEvidenciaModal: React.FC<SubirEvidenciaModalProps> = ({ isOpen, onClo
     const resetState = () => {
         setArchivo(null);
         setLinkTexto('');
+        setDescripcion('');
         setMensaje(null);
         setTipoCarga('archivo');
     };
@@ -106,6 +109,7 @@ const SubirEvidenciaModal: React.FC<SubirEvidenciaModalProps> = ({ isOpen, onClo
             formData.append('id_indicador', String(idIndicador));
             formData.append('tipo_evidencia', tipoCarga);
             formData.append('semana', semana);
+            if (descripcion.trim()) formData.append('descripcion', descripcion.trim());
 
             if (tipoCarga === 'archivo' && archivo) {
                 formData.append('archivo', archivo);
@@ -260,6 +264,24 @@ const SubirEvidenciaModal: React.FC<SubirEvidenciaModalProps> = ({ isOpen, onClo
                             </div>
                         </div>
                     )}
+                </div>
+
+                {/* Descripción breve de lo que contiene la evidencia */}
+                <div className="px-6 pb-5">
+                    <label htmlFor="evidencia-descripcion" className="block text-sm font-bold text-gray-700 mb-1.5">
+                        ¿Qué contiene? <span className="font-normal text-gray-400">(opcional)</span>
+                    </label>
+                    <textarea
+                        id="evidencia-descripcion"
+                        rows={2}
+                        maxLength={300}
+                        value={descripcion}
+                        onChange={(e) => setDescripcion(e.target.value)}
+                        disabled={cargando}
+                        placeholder="Ej. Acta firmada de la reunión de microcurrículo"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                    />
+                    <p className="text-[11px] text-gray-400 text-right mt-0.5">{descripcion.length}/300</p>
                 </div>
 
                 {/* Footer */}
