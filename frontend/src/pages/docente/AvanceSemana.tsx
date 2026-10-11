@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Layout from '../../components/common/Layout';
-import { FileText, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare, Trash2 } from 'lucide-react';
+import { FileText, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare, Trash2, CheckCircle2 } from 'lucide-react';
 import api from '../../services/api';
 import { confirmar, avisar } from '../../components/common/dialogo';
+import { resumenAvance, firmaDeAvance, fmtCantidad } from '../../utils/avanceSemana';
 import { useAuth } from '../../context/AuthContext';
 import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
 import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
@@ -27,6 +28,13 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   const [puedeEditar, setPuedeEditar] = useState(true);
   const [semanaInfo, setSemanaInfo] = useState<any>(null);
   const [guardando, setGuardando] = useState(false);
+  // Huella de lo último guardado (o cargado del servidor): si lo que hay en pantalla es distinto, hay cambios sin guardar
+  const [firmaGuardada, setFirmaGuardada] = useState<string | null>(null);
+  const [guardadoEn, setGuardadoEn] = useState<Date | null>(null);
+  // Modal de avance: al guardar dice si quedó completo o dónde falta (también se abre a pedido con "Ver dónde falta")
+  const [modalAvance, setModalAvance] = useState<{ guardado: boolean; aviso?: string } | null>(null);
+  // Indicador al que se llegó desde "dónde falta": su fila se resalta unos segundos
+  const [resaltado, setResaltado] = useState<number | null>(null);
   // Aviso al entrar al reporte: hay que registrar TODO el avance del corte antes de guardar
   const [avisoEntrada, setAvisoEntrada] = useState(false);
   const [noMostrarAviso, setNoMostrarAviso] = useState(false);
@@ -137,6 +145,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
          }));
          
          setData(struct);
+         setFirmaGuardada(firmaDeAvance(struct));
       }
     } catch (error) {
       console.error("Error cargando data de avance:", error);
@@ -194,6 +203,19 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     }
   };
 
+  // Al llegar desde "dónde falta": se lleva la fila a la vista y se deja resaltada hasta que se pulse en otra parte
+  useEffect(() => {
+    if (resaltado === null) return;
+    const ver = window.setTimeout(() => {
+      document.querySelector(`tr[data-indicador="${resaltado}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    const alPulsar = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest(`tr[data-indicador="${resaltado}"]`)) setResaltado(null);
+    };
+    document.addEventListener('mousedown', alPulsar);
+    return () => { window.clearTimeout(ver); document.removeEventListener('mousedown', alPulsar); };
+  }, [resaltado]);
+
   const guardarAvance = async () => {
     try {
         setGuardando(true);
@@ -205,14 +227,18 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
         const response = await api.post('/agenda/guardar-avance', { indicadores, semana });
 
-        if (response.data.advertencias?.length > 0) {
+        setGuardadoEn(new Date());
+        // Se recarga lo guardado para que el resultado salga de lo que realmente quedó en el servidor
+        await cargarData();
+        const advertido = response.data.advertencias?.length > 0;
+        if (semana === '16') {
+          // En el último corte se dice si todo quedó completo o dónde falta; el aviso del servidor va dentro del mismo modal
+          setModalAvance({ guardado: true, aviso: advertido ? response.data.mensaje : undefined });
+        } else if (advertido) {
           void avisar({ tipo: 'advertencia', titulo: 'Avance guardado con observaciones', mensaje: response.data.mensaje });
         } else {
           void avisar({ tipo: 'exito', titulo: 'Avance guardado', mensaje: `¡Avance de la ${nombreCorte} guardado correctamente!`, cerrarEn: 2000 });
         }
-        
-        // Refetch to ensure data is in sync
-        cargarData();
     } catch (error: any) {
         console.error("Error guardando avance:", error);
         const errorMsg = error.response?.data?.error || 'Ocurrió un error al intentar guardar el avance.';
@@ -406,8 +432,24 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     setData(newData);
   };
 
+  // Avance frente a las metas y dónde falta, calculados con lo que hay en pantalla (guardado o no)
+  const resumen = useMemo(() => resumenAvance(data), [data]);
+  const sinGuardar = firmaGuardada !== null && firmaDeAvance(data) !== firmaGuardada;
+
   // Pasada la fecha de cierre el docente solo puede consultar su avance y sus evidencias
   const soloLectura = semanaInfo?.motivo_cierre === 'cerrada';
+
+  const etiquetaGuardado = () => {
+    if (soloLectura) return <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border bg-gray-100 text-gray-600 border-gray-200">Solo lectura</span>;
+    if (guardando) return <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200">Guardando…</span>;
+    if (sinGuardar) return <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />Cambios sin guardar</span>;
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border bg-green-50 text-green-700 border-green-200">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        Todo guardado{guardadoEn ? ` · ${guardadoEn.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}` : ''}
+      </span>
+    );
+  };
 
   if (loading) {
     return (
@@ -476,6 +518,73 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
         </div>
       )}
 
+      {modalAvance && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-avance"
+          onClick={() => setModalAvance(null)}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 pb-4 text-center shrink-0">
+              <div className={`flex items-center justify-center w-14 h-14 rounded-full mx-auto mb-4 ${resumen.completo ? 'bg-green-100' : 'bg-amber-100'}`}>
+                {resumen.completo ? <CheckCircle2 className="w-8 h-8 text-green-600" /> : <AlertCircle className="w-8 h-8 text-amber-600" />}
+              </div>
+              <h2 id="titulo-avance" className="text-xl font-bold text-[#1a2744]">
+                {modalAvance.guardado
+                  ? (resumen.completo ? '¡Avance guardado y completo!' : 'Avance guardado')
+                  : 'Dónde te falta'}
+              </h2>
+              {resumen.completo ? (
+                <p className="text-sm text-gray-600 mt-1">
+                  {modalAvance.guardado ? `Tu avance de la ${nombreCorte} quedó guardado. ` : ''}Todo tu avance está completado: <strong>todas tus metas están cumplidas</strong> (100 %).
+                </p>
+              ) : (
+                <p className="text-sm text-gray-600 mt-1">
+                  {modalAvance.guardado ? `Tu avance de la ${nombreCorte} quedó guardado. ` : ''}
+                  Llevas el <strong>{resumen.porcentaje}%</strong> de tus metas ({fmtCantidad(resumen.cumplido)} de {fmtCantidad(resumen.metaTotal)}) y te {resumen.faltantes.length === 1 ? 'falta' : 'faltan'} <strong>{resumen.faltantes.length}</strong> {resumen.faltantes.length === 1 ? 'indicador' : 'indicadores'} para llegar al 100 %.
+                </p>
+              )}
+              {modalAvance.aviso && (
+                <p className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{modalAvance.aviso}</p>
+              )}
+            </div>
+            {!resumen.completo && (
+              <ul className="px-6 pb-2 space-y-1.5 overflow-y-auto">
+                {resumen.faltantes.map((fl, k) => (
+                  <li key={k}>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedFunctionIndex(fl.funcion); setSelectedActivityIndex(fl.actividad); setModalAvance(null); setResaltado(fl.idIndicador); }}
+                      className="w-full text-left bg-amber-50/60 border border-amber-100 hover:border-amber-300 rounded-lg px-3 py-2 flex items-center justify-between gap-3 transition-colors"
+                      title="Ir a este indicador"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-xs text-gray-400 truncate">{fl.rutaFuncion} › {fl.rutaActividad}</span>
+                        <span className="block text-sm font-medium text-gray-800">{fl.indicador}</span>
+                      </span>
+                      <span className="shrink-0 text-xs font-bold text-amber-700 bg-amber-100 rounded-full px-2.5 py-1">
+                        falta {fmtCantidad(fl.falta)} de {fmtCantidad(fl.meta)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="p-6 pt-4 shrink-0">
+              <button
+                autoFocus
+                onClick={() => setModalAvance(null)}
+                className="w-full px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {avisoEntrada && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -516,6 +625,45 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
       {data.length > 0 ? (
           <>
+            {/* ESTADO DEL GUARDADO Y AVANCE FRENTE A LAS METAS */}
+            <div className={`mb-6 rounded-xl border bg-white shadow-sm overflow-hidden ${resumen.completo ? 'border-green-200' : 'border-gray-200'}`}>
+                <div className="px-5 py-4 flex flex-col md:flex-row md:items-center gap-4 justify-between">
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                            <span className={`text-2xl font-black ${resumen.completo ? 'text-green-600' : 'text-blue-700'}`}>{resumen.porcentaje}%</span>
+                            <span className="text-sm font-semibold text-gray-600">de tus metas cumplidas</span>
+                            <span className="text-xs text-gray-400">({fmtCantidad(resumen.cumplido)} de {fmtCantidad(resumen.metaTotal)})</span>
+                        </div>
+                        <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden" role="progressbar" aria-valuenow={resumen.porcentaje} aria-valuemin={0} aria-valuemax={100} aria-label="Avance frente a las metas">
+                            <div className={`h-full rounded-full transition-all duration-500 ${resumen.completo ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${resumen.porcentaje}%` }} />
+                        </div>
+                    </div>
+                    <div className="shrink-0">{etiquetaGuardado()}</div>
+                </div>
+
+                {resumen.metaTotal === 0 ? (
+                    <p className="px-5 py-3 border-t border-gray-100 text-sm text-gray-500">Todavía no hay metas registradas en tu agenda para medir el avance.</p>
+                ) : resumen.completo ? (
+                    <p className="px-5 py-3 border-t border-green-100 bg-green-50 text-sm font-semibold text-green-800 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        ¡Todo tu avance está completado! Todas tus metas están cumplidas{sinGuardar ? ' — recuerda guardar los cambios' : ''}.
+                    </p>
+                ) : semana === '16' ? (
+                    <div className="px-5 py-2.5 border-t border-gray-100 flex items-center justify-between gap-3 text-xs text-gray-500">
+                        <span>
+                            {resumen.faltantes.length === 1 ? 'Falta 1 indicador' : `Faltan ${resumen.faltantes.length} indicadores`} para llegar al 100 %
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setModalAvance({ guardado: false })}
+                            className="shrink-0 font-bold text-blue-700 hover:text-blue-900 hover:underline"
+                        >
+                            Ver dónde falta
+                        </button>
+                    </div>
+                ) : null}
+            </div>
+
             {/* TABS DE FUNCIONES (Como en Agenda) */}
             <div className="flex flex-wrap gap-2 mb-6">
                 {data.map((f, idx) => (
@@ -663,7 +811,11 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                         const estado = getEstadoVisual(porcentaje);
 
                                         return (
-                                            <tr key={iIndex} className="hover:bg-gray-50/50 transition-colors">
+                                            <tr
+                                                key={iIndex}
+                                                data-indicador={ind.id_indicador}
+                                                className={`transition-colors ${resaltado === ind.id_indicador ? 'bg-sky-100 ring-2 ring-inset ring-sky-400' : 'hover:bg-gray-50/50'}`}
+                                            >
                                                 <td className="px-4 py-3 text-gray-800 font-medium">{ind.nombre_indicador}</td>
                                                 <td className="px-4 py-3 text-center font-bold text-gray-700 bg-gray-50/50">{meta}</td>
                                                 <td className="px-4 py-3">
@@ -844,7 +996,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                  </div>
 
                  {!soloLectura && (
-<div className="bg-gray-50 px-6 py-4 flex justify-end border-t border-gray-200">
+<div className="bg-gray-50 px-6 py-4 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 border-t border-gray-200">
+                    {etiquetaGuardado()}
                     <button 
                         onClick={guardarAvance}
                         disabled={guardando}

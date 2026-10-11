@@ -411,9 +411,16 @@ export default function Docentes() {
       .catch(() => { /* se conservan los roles base */ });
   }, []);
 
+  // Editar desde el dashboard: llega el id del usuario y se abre su formulario cuando ya cargaron usuarios y programas
+  const [editarPendienteId, setEditarPendienteId] = useState<number | null>(null);
+
   useEffect(() => {
     if (location.state?.openAddModal) {
       setShowAddModal(true);
+      window.history.replaceState({}, document.title);
+    }
+    if (location.state?.editarUsuarioId) {
+      setEditarPendienteId(Number(location.state.editarUsuarioId));
       window.history.replaceState({}, document.title);
     }
   }, [location]);
@@ -542,6 +549,14 @@ export default function Docentes() {
     setEditWarning(null);
     setShowEditModal(true);
   };
+
+  useEffect(() => {
+    if (editarPendienteId === null || usuarios.length === 0 || programas.length === 0) return;
+    const usuario = usuarios.find(u => u.id_usuario === editarPendienteId);
+    setEditarPendienteId(null);
+    if (usuario) handleOpenEditModal(usuario);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editarPendienteId, usuarios, programas]);
 
   const handleToggleActivo = async (id: number, nombreCompleto: string) => {
     try {

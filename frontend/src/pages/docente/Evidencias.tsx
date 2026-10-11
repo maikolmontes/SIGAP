@@ -17,6 +17,8 @@ interface Evidencia {
     fecha_carga: string;
     semana?: string;
     id_periodo?: number;
+    /** Lo que escribió el docente al subirla: qué contiene */
+    descripcion?: string | null;
 }
 
 interface Periodo {
@@ -450,6 +452,9 @@ const Evidencias: React.FC = () => {
                                                                         <p className="text-sm font-bold text-gray-800 truncate" title={ev.nombre_archivo}>
                                                                             {ev.nombre_archivo}
                                                                         </p>
+                                                                        {ev.descripcion && (
+                                                                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2" title={ev.descripcion}>{ev.descripcion}</p>
+                                                                        )}
                                                                         <div className="flex items-center justify-between mt-1.5">
                                                                             <div className="flex items-center gap-2">
                                                                                 {ev.tipo_archivo !== 'enlace' && ev.tamanio_archivo_kb > 0 && (

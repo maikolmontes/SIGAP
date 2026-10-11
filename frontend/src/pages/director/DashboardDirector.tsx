@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { desgloseCompletas } from '../../utils/agendas'
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
 import {
@@ -175,7 +176,7 @@ export default function DashboardDirector() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
             {[
               { label: 'Total Docentes', value: metricas.total, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: 'Agendas Completas', value: metricas.aceptadas, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
+              { label: 'Agendas Completas', value: metricas.aceptadas, sub: desgloseCompletas(metricas.aceptadas, metricas.aprobadas), icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
               { label: 'Agendas Pendientes', value: metricas.pendientes, icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-50' },
               { label: 'Total Horas Asign.', value: Math.round(metricas.total_horas), icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
             ].map((m) => (
@@ -185,6 +186,7 @@ export default function DashboardDirector() {
                 </div>
                 <div className="text-2xl font-black text-gray-800">{m.value}</div>
                 <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-0.5">{m.label}</div>
+                {m.sub && <div className="text-[11px] text-gray-400 mt-1">{m.sub}</div>}
               </div>
             ))}
           </div>
@@ -193,8 +195,9 @@ export default function DashboardDirector() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-7">
 
             {/* TABLA DOCENTES */}
-            <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100">
+            <div className="relative lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden lg:min-h-[560px]">
+             <div className="flex flex-col lg:absolute lg:inset-0">
+              <div className="px-6 py-4 border-b border-gray-100 shrink-0">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Estado de Docentes</h2>
@@ -249,7 +252,7 @@ export default function DashboardDirector() {
                 )}
               </div>
 
-              <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
+              <div className="overflow-x-auto overflow-y-auto max-h-[460px] lg:max-h-none lg:flex-1 lg:min-h-0">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-100">
                     <tr>
@@ -333,7 +336,7 @@ export default function DashboardDirector() {
 
               {/* Paginación */}
               {docentesFiltrados.length > 0 && (
-                <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="px-5 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     <span>Mostrar</span>
                     <select value={regPorPag} onChange={e => { setRegPorPag(Number(e.target.value)); setPaginaActual(1); }}
@@ -357,6 +360,7 @@ export default function DashboardDirector() {
                   </div>
                 </div>
               )}
+             </div>
             </div>
 
 

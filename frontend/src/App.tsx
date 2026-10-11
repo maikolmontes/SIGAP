@@ -26,6 +26,7 @@ const DashboardDocente = lazy(() => import('./pages/docente/Dashboard'))
 const AgendaDocente = lazy(() => import('./pages/docente/Agenda'))
 const AvanceSemana = lazy(() => import('./pages/docente/AvanceSemana'))
 const Evidencias = lazy(() => import('./pages/docente/Evidencias'))
+const ReporteEvidencias = lazy(() => import('./pages/docente/ReporteEvidencias'))
 const Perfil = lazy(() => import('./pages/common/Perfil'))
 const Configuracion = lazy(() => import('./pages/common/Configuracion'))
 const Analitica = lazy(() => import('./pages/common/Analitica'))
@@ -98,6 +99,7 @@ function App() {
           <Route path="/docente/avance-semana-8" element={<AvanceSemana semana="8" />} />
           <Route path="/docente/avance-semana-16" element={<AvanceSemana semana="16" />} />
           <Route path="/docente/evidencias" element={<Evidencias />} />
+          <Route path="/docente/reportes" element={<ReporteEvidencias />} />
         </Route>
 
         {/* Revisores de una función sustantiva (Investigación y los que se

@@ -16,7 +16,7 @@ const FILAS_EN_VISTA_PREVIA = 8
 const mensajeDeError = (e: unknown, porDefecto: string): string =>
     (e as { response?: { data?: { error?: string } } })?.response?.data?.error || porDefecto
 
-function BloqueVista({ bloque }: { bloque: Bloque }) {
+export function BloqueVista({ bloque }: { bloque: Bloque }) {
     if (bloque.tipo === 'parrafo') {
         return <p className="text-sm text-gray-700 leading-relaxed">{bloque.texto}</p>
     }

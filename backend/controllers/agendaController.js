@@ -4,6 +4,9 @@ const { rolesEfectivos } = require('../utils/rolActivo');
 const { verificarSemana } = require('../utils/semanaAbierta');
 const { idUsuarioDe, puedeVerDocente } = require('../middleware/accesoEvidencias');
 
+// Meta máxima que puede escribir un docente en una actividad de su agenda
+const META_MAXIMA = 20;
+
 const esPlaneacionOAdmin = (req) => rolesEfectivos(req).some((r) => r === 'planeacion' || r === 'admin');
 
 const getAgenda = async (req, res) => {
@@ -352,6 +355,11 @@ const guardarFuncionDocente = async (req, res) => {
                             return res.status(400).json({
                                 error: `La meta debe ser un número mayor o igual a cero. Se recibió "${descData.meta}".`
                             });
+                        }
+                        // La meta que escribe el docente llega como máximo a META_MAXIMA (las fijas del catálogo no pasan por aquí)
+                        if (!(act.descripciones && act.descripciones.length > 0) && metaNum > META_MAXIMA) {
+                            await client.query('ROLLBACK');
+                            return res.status(400).json({ error: `La meta no puede ser mayor a ${META_MAXIMA}. Se recibió "${descData.meta}".` });
                         }
                     }
 

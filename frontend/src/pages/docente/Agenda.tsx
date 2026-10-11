@@ -37,6 +37,9 @@ const PRIORIDAD_FUNCION: Record<string, number> = { 'Docencia Directa': 0, 'Doce
 const ordenarFunciones = <T extends { funcionSustantiva: string }>(lista: T[]): T[] =>
     [...lista].sort((a, b) => (PRIORIDAD_FUNCION[a.funcionSustantiva] ?? 2) - (PRIORIDAD_FUNCION[b.funcionSustantiva] ?? 2));
 
+// La meta que escribe el docente es un número de entregas, no un porcentaje: de 0 a 20
+const META_MAXIMA = 20;
+
 // Si el docente marca "No volver a mostrar", se guarda en este navegador
 const CLAVE_AVISO_INICIO = 'sigap_aviso_agenda_visto';
 
@@ -292,7 +295,8 @@ export default function AgendaDocente() {
             if (!esDirecta) {
                 if (!act.actividadLibre) erroresValidacion.push(`Actividad ${num}: Falta seleccionar la actividad del catálogo.`);
                 if (!act.resultadoEsperado) erroresValidacion.push(`Actividad ${num}: Falta seleccionar la descripción/resultado esperado.`);
-                if (!esIndirecta && !act.meta && act.meta !== 0) erroresValidacion.push(`Actividad ${num}: Falta ingresar la meta (%).`);
+                if (!esIndirecta && !act.meta && act.meta !== 0) erroresValidacion.push(`Actividad ${num}: Falta ingresar la meta.`);
+                if (!esIndirecta && Number(act.meta) > META_MAXIMA) erroresValidacion.push(`Actividad ${num}: La meta no puede ser mayor a ${META_MAXIMA}.`);
                 const tieneIndicador = act.indicadores.some(ind => ind.nombre_indicador && ind.nombre_indicador.trim() !== '');
                 if (!tieneIndicador) erroresValidacion.push(`Actividad ${num}: Falta al menos un indicador (entregable).`);
             }
@@ -891,19 +895,21 @@ export default function AgendaDocente() {
                                                             {!esDeshabilitado && (
                                                                 <div className="w-full sm:w-24">
                                                                     <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                                                                        Meta (%)
+                                                                        Meta
                                                                     </label>
                                                                     <input
                                                                         type="number"
                                                                         min={0}
+                                                                        max={META_MAXIMA}
+                                                                        title={`Máximo ${META_MAXIMA}`}
                                                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white disabled:opacity-60 disabled:bg-gray-100"
                                                                         value={actividad.meta}
                                                                         onChange={(e) => {
-                                                                            // La meta es el denominador del avance: nunca negativa
+                                                                            // La meta es el denominador del avance: nunca negativa ni mayor al máximo
                                                                             const v = parseInt(e.target.value);
-                                                                            cambiarActividad(fIndex, aIndex, 'meta', isNaN(v) ? '' : Math.max(0, v));
+                                                                            cambiarActividad(fIndex, aIndex, 'meta', isNaN(v) ? '' : Math.min(META_MAXIMA, Math.max(0, v)));
                                                                         }}
-                                                                        placeholder="100"
+                                                                        placeholder={`Máx. ${META_MAXIMA}`}
                                                                         disabled={!semanaActiva || !periodoAbierto}
                                                                     />
                                                                 </div>

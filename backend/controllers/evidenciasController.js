@@ -2,6 +2,7 @@ const pool = require('../db/connection');
 const path = require('path');
 const { rolesEfectivos } = require('../utils/rolActivo');
 const { verificarSemana } = require('../utils/semanaAbierta');
+const { asegurarDescripcionEvidencias, limpiarDescripcion } = require('../utils/esquemaEvidencias');
 const {
     idUsuarioDe, puedeVerDocente, duenoDeIndicador, duenoDeEvidencia,
 } = require('../middleware/accesoEvidencias');
@@ -59,6 +60,7 @@ const obtenerEvidenciasDocente = async (req, res) => {
                 e.tamanio_archivo_kb,
                 e.fecha_carga,
                 e.semana,
+                e.descripcion,
                 af.id_periodo
             FROM evidencias e
             JOIN indicadores i ON e.id_indicadores = i.id_indicadores
@@ -71,6 +73,7 @@ const obtenerEvidenciasDocente = async (req, res) => {
             ORDER BY af.funcion_sustantiva, aa.rol_seleccionado, e.fecha_carga DESC
         `;
 
+        await asegurarDescripcionEvidencias();
         const result = await pool.query(queryFixed, [id_usuario]);
 
         // Estructurar la data en forma de cascada: Función -> Actividad -> Indicador -> Evidencias
@@ -112,6 +115,7 @@ const obtenerEvidenciasDocente = async (req, res) => {
                 tamanio_archivo_kb: row.tamanio_archivo_kb,
                 fecha_carga: row.fecha_carga,
                 semana: row.semana,
+                descripcion: row.descripcion || null,
                 id_periodo: row.id_periodo
             });
         });
@@ -190,12 +194,14 @@ const subirEvidencia = async (req, res) => {
             tamanioKb = Math.round(req.file.size / 1024);
         }
 
+        await asegurarDescripcionEvidencias();
         const query = `
-            INSERT INTO evidencias (id_indicadores, nombre_archivo, ruta_archivo, tipo_archivo, tamanio_archivo_kb, semana)
-            VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_evidencias
+            INSERT INTO evidencias (id_indicadores, nombre_archivo, ruta_archivo, tipo_archivo, tamanio_archivo_kb, semana, descripcion)
+            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id_evidencias
         `;
 
-        const values = [id_indicador, nombreArchivo, rutaArchivo, tipoArchivo, tamanioKb, semanaNum];
+        // Descripción breve (opcional) de lo que contiene la evidencia
+        const values = [id_indicador, nombreArchivo, rutaArchivo, tipoArchivo, tamanioKb, semanaNum, limpiarDescripcion(req.body.descripcion)];
         const result = await pool.query(query, values);
 
         res.json({ success: true, id_evidencias: result.rows[0].id_evidencias, mensaje: 'Evidencia subida correctamente' });

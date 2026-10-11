@@ -25,6 +25,8 @@ export interface BalanceGestion {
     periodo: { id: number; etiqueta: string; semestre: number; fechaInicio: string | null; fechaFin: string | null; activo: boolean }
     directores: string[]
     documento: DocumentoBalance
+    /** Si viene, es el comienzo del nombre del archivo descargado (informes que no son el balance de gestión) */
+    archivoBase?: string
 }
 
 // Texto que el director escribe y se agrega al final del documento (no se guarda en el servidor)

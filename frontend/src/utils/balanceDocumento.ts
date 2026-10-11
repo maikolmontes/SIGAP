@@ -31,6 +31,7 @@ export const fmtFechaLarga = (valor: string | null | undefined): string => {
 
 export const nombreArchivo = (b: BalanceGestion, extension: 'pdf' | 'docx'): string => {
     const limpio = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+    if (b.archivoBase) return `${limpio(b.archivoBase)}_${limpio(b.periodo.etiqueta)}.${extension}`
     return `Balance_de_gestion_${limpio(b.programa.nombre)}_${limpio(b.periodo.etiqueta)}.${extension}`
 }
 

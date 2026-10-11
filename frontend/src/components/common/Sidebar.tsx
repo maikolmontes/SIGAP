@@ -76,6 +76,8 @@ const menuDocente: MenuItem[] = [
     { label: 'Reporte Semana 8', path: '/docente/avance-semana-8', icon: Clock },
     { label: 'Reporte Semana 16', path: '/docente/avance-semana-16', icon: Clock },
     { label: 'Evidencias', path: '/docente/evidencias', icon: FileText },
+    { label: 'Reportes', isHeader: true },
+    { label: 'Informe de evidencias', path: '/docente/reportes', icon: FileSpreadsheet },
 ]
 
 const menuConsultor: MenuItem[] = [
@@ -127,6 +129,7 @@ const PATH_TO_PAGINA: Record<string, string> = {
     '/docente/avance-semana-8': 'Avance Semana 8',
     '/docente/avance-semana-16': 'Avance Semana 16',
     '/docente/evidencias': 'Evidencias e Indicadores',
+    '/docente/reportes': 'Evidencias e Indicadores',
 
     // Consultor
     '/consultor/agendas': 'Seguimiento y Auditoría',

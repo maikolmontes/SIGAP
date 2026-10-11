@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/common/Layout'
 // @ts-ignore
-import { getUsuarios, createUsuario, toggleActivo, createBulkUsuarios, updateUsuario, deleteUsuario, getRolesAsignables } from '../../services/usuariosService'
+import { toggleActivo, createBulkUsuarios, deleteUsuario } from '../../services/usuariosService'
 import { getPeriodos, getDocentesPeriodo } from '../../services/periodosService'
 import { getProgramas } from '../../services/programasService'
 import { getFacultades } from '../../services/facultadesService'
@@ -63,8 +63,6 @@ interface Docente {
 export default function DashboardPlaneacion() {
     const [docentes, setDocentes] = useState<Docente[]>([])
     const [programas, setProgramas] = useState<any[]>([])
-    // Roles asignables traídos de la BD; si falla la consulta se usan los base.
-    const [rolesDisponibles, setRolesDisponibles] = useState<string[]>(['Docente', 'Director', 'Consultor', 'Planeación'])
     const [facultades, setFacultades] = useState<any[]>([])
     // Permisos dinámicos del rol activo sobre el panel de agendas
     const permisosAgendas = usePermisosPagina('Dashboard Planeación')
@@ -88,140 +86,14 @@ export default function DashboardPlaneacion() {
     const [tabActiva, setTabActiva] = useState<'usuarios' | 'agendas'>('usuarios')
 
     // Modales de Edición y Eliminación
-    const [modalEditarOpen, setModalEditarOpen] = useState(false)
-    const [docenteAEditar, setDocenteAEditar] = useState<Docente | null>(null)
     const [modalEliminarOpen, setModalEliminarOpen] = useState(false)
     const [docenteAEliminar, setDocenteAEliminar] = useState<Docente | null>(null)
 
-    // Formulario de Edición
-    const [editNombres, setEditNombres] = useState('')
-    const [editApellidos, setEditApellidos] = useState('')
-    const [editTipoDocumento, setEditTipoDocumento] = useState('CC')
-    const [editNumeroDocumento, setEditNumeroDocumento] = useState('')
-    const [editCorreo, setEditCorreo] = useState('')
-    const [editIdPrograma, setEditIdPrograma] = useState(1)
-    const [editRolesSeleccionados, setEditRolesSeleccionados] = useState<string[]>(['Docente'])
-    const [editError, setEditError] = useState<string | null>(null)
-    const [editWarning, setEditWarning] = useState<string | null>(null)
-    const [guardando, setGuardando] = useState(false)
     const [eliminando, setEliminando] = useState(false)
 
-    const normalizarRol = (r: string) => {
-        const low = (r || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-        if (low.includes('planea') || low.includes('admin')) return 'planeacion';
-        if (low.includes('direct')) return 'director';
-        if (low.includes('consult')) return 'consultor';
-        // Un rol nuevo (Investigación y los que sigan) conserva su nombre. Antes
-        // caía en 'docente' y al guardar se convertía en Docente en silencio.
-        return low || 'docente';
-    };
-
-    const rolEstaSeleccionado = (lista: string[], rolName: string) => {
-        const normTarget = normalizarRol(rolName);
-        return lista.some(r => normalizarRol(r) === normTarget);
-    };
-
-    const esSoloConsultorOPlaneacion = (list: string[]) => {
-        if (!list || list.length === 0) return false;
-        return list.every(r => {
-            const norm = normalizarRol(r);
-            return norm === 'consultor' || norm === 'planeacion';
-        });
-    }
-
-    const toggleEditRol = (rolName: string) => {
-        const normTarget = normalizarRol(rolName);
-        setEditRolesSeleccionados(prev => {
-            const yaExiste = prev.some(r => normalizarRol(r) === normTarget);
-            if (yaExiste) {
-                if (prev.length <= 1) return prev;
-                return prev.filter(r => normalizarRol(r) !== normTarget);
-            } else {
-                return [...prev, rolName];
-            }
-        });
-    }
-
-    const mapProgramaToId = (progName?: string) => {
-        if (!progName || programas.length === 0) return programas[0]?.id_programa || 1;
-        const low = progName.toLowerCase().trim();
-        const exact = programas.find((p: any) => p.nombre_programa.toLowerCase().trim() === low);
-        if (exact) return exact.id_programa;
-        const partial = programas.find((p: any) => p.nombre_programa.toLowerCase().includes(low) || low.includes(p.nombre_programa.toLowerCase()));
-        if (partial) return partial.id_programa;
-        return programas[0]?.id_programa || 1;
-    }
-
+    // Editar usa el mismo formulario completo que "Crear docente" (página de Docentes): rol, contrato, programas…
     const handleOpenEditModal = (d: Docente) => {
-        setDocenteAEditar(d)
-        setEditNombres(d.nombres)
-        setEditApellidos(d.apellidos)
-        setEditTipoDocumento(d.tipo_documento || 'CC')
-        setEditNumeroDocumento(d.numero_documento || '')
-        setEditCorreo(d.correo)
-        setEditIdPrograma(mapProgramaToId(d.programa))
-        const parsedRoles = (d.roles || 'Docente').split(',').map(r => r.trim()).filter(Boolean)
-        const mappedRoles = parsedRoles.map(r => {
-            const norm = normalizarRol(r);
-            if (norm === 'planeacion') return 'Planeación';
-            if (norm === 'director') return 'Director';
-            if (norm === 'consultor') return 'Consultor';
-            if (norm === 'docente') return 'Docente';
-            // Roles nuevos (Investigación y los que sigan) conservan su nombre;
-            // antes se mostraban como "Docente" al abrir la edición.
-            return r.trim();
-        });
-        const uniqueMapped = Array.from(new Set(mappedRoles));
-        setEditRolesSeleccionados(uniqueMapped.length > 0 ? uniqueMapped : ['Docente'])
-        setEditError(null)
-        setEditWarning(null)
-        setModalEditarOpen(true)
-    }
-
-    const handleEditSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setEditError(null)
-        setEditWarning(null)
-
-        if (!docenteAEditar) return
-
-        if (!editNombres.trim() || !editApellidos.trim() || !editCorreo.trim() || !editNumeroDocumento.trim()) {
-            setEditError('Por favor diligencie todos los campos obligatorios.')
-            return
-        }
-
-        if (editRolesSeleccionados.length === 0) {
-            setEditError('Debe seleccionar al menos un rol.')
-            return
-        }
-
-        const soloConsultaOPl = esSoloConsultorOPlaneacion(editRolesSeleccionados)
-
-        try {
-            setGuardando(true)
-            const res = await updateUsuario(docenteAEditar.id_usuario, {
-                nombres: editNombres.trim(),
-                apellidos: editApellidos.trim(),
-                tipo_documento: editTipoDocumento,
-                numero_documento: editNumeroDocumento.trim(),
-                correo: editCorreo.trim().toLowerCase(),
-                id_programa: soloConsultaOPl ? null : editIdPrograma,
-                roles: editRolesSeleccionados
-            })
-            setModalEditarOpen(false)
-            await cargarDocentes()
-            if (res.data?.advertencia) {
-                void avisar({ tipo: 'advertencia', titulo: 'Usuario actualizado', mensaje: `Usuario actualizado correctamente.\n${res.data.advertencia}` })
-            } else {
-                void avisar({ tipo: 'exito', mensaje: 'Usuario actualizado correctamente' })
-            }
-        } catch (err: any) {
-            console.error('Error al editar usuario:', err)
-            const errMsg = err.response?.data?.error || 'No se pudo actualizar el usuario. Verifique los datos o si la identificación/correo ya existe.'
-            setEditError(errMsg)
-        } finally {
-            setGuardando(false)
-        }
+        navigate('/planeacion/docentes', { state: { editarUsuarioId: d.id_usuario } })
     }
 
     const handleOpenDeleteModal = (d: Docente) => {
@@ -275,13 +147,6 @@ export default function DashboardPlaneacion() {
 
     useEffect(() => {
         cargarDocentes()
-        // El catálogo de roles sale de la BD: un rol nuevo aparece sin tocar código.
-        getRolesAsignables()
-            .then((res: any) => {
-                const nombres = (res.data || []).map((r: any) => r.nombre_rol).filter(Boolean)
-                if (nombres.length > 0) setRolesDisponibles(nombres)
-            })
-            .catch(() => { /* se conservan los roles base */ })
         const interval = setInterval(() => {
             cargarDocentes()
         }, 30000)
@@ -979,211 +844,6 @@ export default function DashboardPlaneacion() {
                                 {importando ? 'Importando...' : 'Comenzar Importación'}
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ══════════ MODAL EDITAR USUARIO ══════════ */}
-            {modalEditarOpen && docenteAEditar && (
-                <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex justify-center items-center p-4 animate-fadeIn">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden border border-gray-100 flex flex-col animate-scaleUp">
-                        
-                        {/* Encabezado */}
-                        <div className="bg-[#1a2744] text-white px-6 py-4 flex justify-between items-center">
-                            <h3 className="font-bold text-lg flex items-center gap-2">
-                                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                Editar Docente / Usuario
-                            </h3>
-                            <button 
-                                type="button"
-                                onClick={() => setModalEditarOpen(false)} 
-                                className="p-1.5 bg-white/10 hover:bg-white/15 rounded-lg transition-colors text-white"
-                            >
-                                ✕
-                            </button>
-                        </div>
-
-                        {/* Formulario */}
-                        <form onSubmit={handleEditSubmit} className="p-6 flex flex-col gap-4">
-                            {editError && (
-                                <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
-                                    <svg className="w-4 h-4 shrink-0 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                    <div>{editError}</div>
-                                </div>
-                            )}
-                            {editWarning && (
-                                <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 p-3 rounded-lg flex gap-2 items-start text-xs font-semibold">
-                                    <svg className="w-4 h-4 shrink-0 text-yellow-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                    <div>{editWarning}</div>
-                                </div>
-                            )}
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Nombres *</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                                        placeholder="Ej. Juan Carlos"
-                                        value={editNombres}
-                                        onChange={(e) => setEditNombres(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Apellidos *</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                                        placeholder="Ej. Perez Gomez"
-                                        value={editApellidos}
-                                        onChange={(e) => setEditApellidos(e.target.value)}
-                                    />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Correo Institucional *</label>
-                                <input
-                                    type="email"
-                                    required
-                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                                    placeholder="ejemplo@cesmag.edu.co"
-                                    value={editCorreo}
-                                    onChange={(e) => setEditCorreo(e.target.value)}
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-3">
-                                <div>
-                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Tipo Doc.</label>
-                                    <select
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                                        value={editTipoDocumento}
-                                        onChange={(e) => setEditTipoDocumento(e.target.value)}
-                                    >
-                                        <option value="CC">C.C.</option>
-                                        <option value="CE">C.E.</option>
-                                        <option value="PA">Pasaporte</option>
-                                    </select>
-                                </div>
-                                <div className="col-span-2">
-                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Número Documento *</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                                        placeholder="Número de identificación"
-                                        value={editNumeroDocumento}
-                                        onChange={(e) => setEditNumeroDocumento(e.target.value)}
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Multiselección de Roles (Checklist) */}
-                            <div>
-                                <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                                    Roles de Acceso (Selecciona uno o varios) *
-                                </label>
-                                <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                    {rolesDisponibles.map((rItem) => {
-                                        const isChecked = rolEstaSeleccionado(editRolesSeleccionados, rItem);
-                                        return (
-                                            <label
-                                                key={rItem}
-                                                className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs font-semibold cursor-pointer transition-all ${
-                                                    isChecked
-                                                        ? 'bg-blue-50 border-blue-400 text-blue-800'
-                                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isChecked}
-                                                    onChange={() => toggleEditRol(rItem)}
-                                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
-                                                />
-                                                <span>{rItem}</span>
-                                            </label>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-
-                            {/* Facultad y Programa Académico Dinámicos */}
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">Facultad</label>
-                                    <input
-                                        type="text"
-                                        disabled
-                                        value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? 'No aplica' : 'Facultad de Ingeniería'}
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-400 font-semibold cursor-not-allowed"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-[11px] font-bold uppercase text-gray-400 tracking-wider block mb-1">
-                                        Programa Académico {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : '*'}
-                                    </label>
-                                    <select
-                                        disabled={esSoloConsultorOPlaneacion(editRolesSeleccionados)}
-                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white text-gray-700 font-semibold disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                                        value={esSoloConsultorOPlaneacion(editRolesSeleccionados) ? '' : editIdPrograma}
-                                        onChange={(e) => setEditIdPrograma(Number(e.target.value))}
-                                    >
-                                        {esSoloConsultorOPlaneacion(editRolesSeleccionados) ? (
-                                            <option value="">Deshabilitado (Sin asignación académica)</option>
-                                        ) : (
-                                            <>
-                                                {programas.length > 0 ? (
-                                                    programas.map((prog) => (
-                                                        <option key={prog.id_programa} value={prog.id_programa}>
-                                                            {prog.nombre_programa}
-                                                        </option>
-                                                    ))
-                                                ) : (
-                                                    <>
-                                                        <option value={1}>Ingeniería de Sistemas</option>
-                                                        <option value={2}>Ingeniería Electrónica</option>
-                                                        <option value={3}>Ingeniería Industrial</option>
-                                                        <option value={6}>Ingeniería Financiera</option>
-                                                    </>
-                                                )}
-                                            </>
-                                        )}
-                                    </select>
-                                </div>
-                            </div>
-
-                            {/* Botones */}
-                            <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 mt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setModalEditarOpen(false)}
-                                    className="bg-gray-100 hover:bg-gray-150 text-gray-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={guardando}
-                                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-md transition-colors"
-                                >
-                                    {guardando ? (
-                                        <>
-                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                            Guardando...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                            Guardar Cambios
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                        </form>
                     </div>
                 </div>
             )}
