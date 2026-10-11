@@ -5,7 +5,7 @@ import type { CredentialResponse } from '@react-oauth/google';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import LogoSigap from '../../components/common/LogoSigap';
-import { etiquetaPublicaDeRol, ROLES_PUBLICOS_POR_DEFECTO } from '../../utils/roles';
+import { etiquetaPublicaDeRol, ROLES_PUBLICOS_POR_DEFECTO, soloRolesPrincipales } from '../../utils/roles';
 import {
   ShieldCheck, AlertCircle, Clock,
   GraduationCap, Users, X, Lock, FileText
@@ -44,9 +44,10 @@ export default function Login() {
             docentes: res.data.docentesActivos ?? 23,
             programas: res.data.programasActivos ?? 6,
           });
-          // Todos los perfiles que existen en el sistema; si no llegan, quedan los de por defecto
+          // Solo los cuatro perfiles principales; si no llegan del servidor, quedan los de por defecto
           if (Array.isArray(res.data.roles) && res.data.roles.length > 0) {
-            setRoles(res.data.roles.map(etiquetaPublicaDeRol));
+            const principales = soloRolesPrincipales(res.data.roles.map(etiquetaPublicaDeRol));
+            if (principales.length > 0) setRoles(principales);
           }
         }
       })
