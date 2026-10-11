@@ -51,4 +51,8 @@ export const etiquetaPublicaDeRol = (nombreRol: string): string =>
     ETIQUETAS_PUBLICAS[normalizarRol(nombreRol)] ?? nombreRol
 
 /** Roles que se muestran mientras llegan los reales del servidor (o si este no responde). */
-export const ROLES_PUBLICOS_POR_DEFECTO = ['Planeación', 'Docentes', 'Directores', 'Consultores', 'Investigación']
+export const ROLES_PUBLICOS_POR_DEFECTO = ['Planeación', 'Docentes', 'Directores', 'Consultores']
+
+/** En la pantalla de inicio solo se anuncian los cuatro perfiles principales; los demás roles del sistema no se listan. */
+export const soloRolesPrincipales = (etiquetas: string[]): string[] =>
+    ROLES_PUBLICOS_POR_DEFECTO.filter((r) => etiquetas.includes(r))

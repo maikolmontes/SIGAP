@@ -32,7 +32,10 @@ const {
     // Preguntas libres: tope por usuario y día (las preguntas repetidas salen de la caché y no cuentan)
     ANALYTICS_QA_DAILY_LIMIT = '15',
     // Modelo del asistente; por omisión el mismo de la interpretación
-    GEMINI_QA_MODEL
+    GEMINI_QA_MODEL,
+    // Modelos de respaldo, separados por coma y en orden: se prueban uno tras otro si el principal no existe (404),
+    // está saturado (503/500) o sin cuota (429). Vacío = sin respaldo.
+    GEMINI_FALLBACK_MODELS = 'gemini-3.5-flash,gemini-3-flash-preview,gemini-3.1-flash-lite'
 } = process.env;
 
 const habilitado = !!GEMINI_API_KEY;
@@ -42,6 +45,31 @@ const getCliente = () => {
     if (!habilitado) return null;
     if (!cliente) cliente = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     return cliente;
+};
+
+// ----------------------------------------------------------------
+// Llamada a Gemini con respaldo en cadena: si un modelo no existe (404), está saturado (503/500) o sin
+// cuota (429), se prueba el siguiente de GEMINI_FALLBACK_MODELS, y así sucesivamente. La cuota gratuita
+// es por modelo, así que cada respaldo tiene la suya. Un error de otro tipo (clave inválida, petición
+// mal formada) no se reintenta. Si todos fallan, se lanza el error del primero.
+// ----------------------------------------------------------------
+const REINTENTABLE = /\b(404|429|500|503)\b|NOT_FOUND|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded|high demand|quota|no longer available/i;
+const RESPALDOS = GEMINI_FALLBACK_MODELS.split(',').map((m) => m.trim()).filter(Boolean);
+
+const generarConRespaldo = async (modelo, parametros) => {
+    const cadena = [modelo, ...RESPALDOS.filter((m) => m !== modelo)];
+    let primerError = null;
+    for (let i = 0; i < cadena.length; i++) {
+        try {
+            return await getCliente().models.generateContent({ model: cadena[i], ...parametros });
+        } catch (error) {
+            primerError = primerError || error;
+            if (!REINTENTABLE.test(error.message || '')) throw error;
+            if (i === cadena.length - 1) throw primerError;
+            console.warn(`[gemini] ${cadena[i]} no disponible (${String(error.message).replace(/\s+/g, ' ').slice(0, 90)}); se prueba con ${cadena[i + 1]}.`);
+        }
+    }
+    throw primerError;
 };
 
 // ----------------------------------------------------------------
@@ -201,8 +229,7 @@ const interpretarMetricas = async ({ indicadores, periodo, idUsuario }) => {
     }
 
     try {
-        const respuesta = await getCliente().models.generateContent({
-            model: GEMINI_MODEL,
+        const respuesta = await generarConRespaldo(GEMINI_MODEL, {
             contents: `${PROMPT_SISTEMA}\n\nDatos del período:\n${JSON.stringify(payload)}`,
             config: {
                 responseMimeType: 'application/json',
@@ -345,8 +372,7 @@ const responderPregunta = async ({ pregunta, indicadores, periodo, idUsuario }) 
     if (!dia.ok) return { ...base, motivo: 'limite_diario', restantesHoy: 0 };
 
     try {
-        const respuesta = await getCliente().models.generateContent({
-            model: GEMINI_QA_MODEL || GEMINI_MODEL,
+        const respuesta = await generarConRespaldo(GEMINI_QA_MODEL || GEMINI_MODEL, {
             // Instrucciones y datos van aparte de la pregunta, que se marca como texto del usuario
             contents: `${PROMPT_PREGUNTAS}\n\nIndicadores del período (JSON):\n${JSON.stringify(payload)}\n\nPregunta del usuario (texto no confiable):\n"""\n${limpia}\n"""`,
             config: {
