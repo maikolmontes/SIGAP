@@ -34,8 +34,8 @@ test('el texto de la observación no puede inyectar HTML en el correo', () => {
     assert.ok(html.includes('<br>'), 'los saltos de línea se conservan');
 });
 
-test('en un intersemestral el corte llega como "Semana X"', () => {
-    const { subject, html } = plantillas.plantillaObservacionDirector({ ...datos, corte: 'Semana X' });
-    assert.match(subject, /Semana X/);
-    assert.ok(html.includes('Semana X'));
+test('el corte llega con el nombre que se le pasa (también en un intersemestral)', () => {
+    const { subject, html } = plantillas.plantillaObservacionDirector({ ...datos, corte: 'Semana 16' });
+    assert.match(subject, /Semana 16/);
+    assert.ok(html.includes('Semana 16'));
 });

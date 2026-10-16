@@ -11,7 +11,7 @@
 //   "indicador"  del Excel → indicador
 //
 // Fuentes:
-//   Investigación, Vicerrectoría (Bienestar) y Aseguramiento de Calidad → tabla de la
+//   Investigación, Vicerrectoría para la Evangelización de las Culturas (Bienestar) y Aseguramiento de Calidad → tabla de la
 //   pestaña INDICADORES (una fila por rol: rol | actividad | indicadores…).
 //   Académico-Administrativo → pestaña ACADEMICO_ADMIN (lista de roles de la columna A y,
 //   debajo, la definición de cada rol).
@@ -277,7 +277,7 @@ const leerCatalogoExcel = (filasDe) => {
     const indicadores = filasDe('INDICADORES');
     const crudo = {
         'Investigación': tablaPlana(indicadores, 2, 31).filter((r) => r.descripciones.length > 0),
-        'Vicerrectoría': tablaPlana(indicadores, 35, 38),
+        'Vicerrectoría para la Evangelización de las Culturas': tablaPlana(indicadores, 35, 38),
         'Aseguramiento de Calidad': tablaPlana(indicadores, 41, 45),
         'Académico-Administrativo': academicoAdministrativo(filasDe('ACADEMICO_ADMIN')).filter((r) => r.descripciones.length > 0),
     };

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Layout from '../../components/common/Layout';
-import { FileText, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare, Trash2, CheckCircle2 } from 'lucide-react';
+import { FileText, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare, Trash2, CheckCircle2, Clock } from 'lucide-react';
 import api from '../../services/api';
 import { confirmar, avisar } from '../../components/common/dialogo';
 import { resumenAvance, firmaDeAvance, fmtCantidad } from '../../utils/avanceSemana';
@@ -439,6 +439,18 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   // Pasada la fecha de cierre el docente solo puede consultar su avance y sus evidencias
   const soloLectura = semanaInfo?.motivo_cierre === 'cerrada';
 
+  // Cuándo cierra el corte: la fecha y cuánto falta. El último día cuenta completo (0 = cierra hoy).
+  const cierre = (() => {
+    const fecha: string | null = semanaInfo?.cierra_el ?? null;
+    const dias: number | null = typeof semanaInfo?.dias_para_cierre === 'number' ? semanaInfo.dias_para_cierre : null;
+    if (!fecha || dias === null || dias < 0) return null;
+    const [a, m, d] = fecha.split('-').map(Number);
+    const larga = new Date(a, m - 1, d).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const queda = dias === 0 ? 'Cierra hoy' : dias === 1 ? 'Cierra mañana' : `Faltan ${dias} días`;
+    const urgencia = dias <= 1 ? 'urgente' : dias <= 3 ? 'pronto' : 'normal';
+    return { larga, queda, urgencia };
+  })();
+
   const etiquetaGuardado = () => {
     if (soloLectura) return <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border bg-gray-100 text-gray-600 border-gray-200">Solo lectura</span>;
     if (guardando) return <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200">Guardando…</span>;
@@ -499,14 +511,37 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
   return (
     <Layout rol="docente" path={`Registro de Actividades / Reporte ${nombreCorte}`}>
-      <div className="bg-[#1a2744] rounded-xl px-6 py-6 mb-8 shadow-sm">
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <ClipboardList className="w-6 h-6 text-blue-400" />
-          Reporte de Avance Académico - {nombreCorte}
-        </h1>
-        <p className="text-blue-100 text-sm mt-1">
-          Gestiona el cumplimiento de tus actividades según el periodo académico activo.
-        </p>
+      <div className="bg-[#1a2744] rounded-xl px-6 py-6 mb-8 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <ClipboardList className="w-6 h-6 text-blue-400" />
+            Reporte de Avance Académico - {nombreCorte}
+          </h1>
+          <p className="text-blue-100 text-sm mt-1">
+            Gestiona el cumplimiento de tus actividades según el periodo académico activo.
+          </p>
+        </div>
+
+        {/* Cuándo cierra la semana y cuánto falta (el último día cuenta completo) */}
+        {!soloLectura && cierre && (
+          <div className="shrink-0 rounded-xl border border-white/15 bg-white/10 px-4 py-3 md:text-right" role="status">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-blue-200 md:justify-end">
+              <Clock className="w-3.5 h-3.5" />
+              Cierre de la {nombreCorte}
+            </div>
+            <div className="text-white font-semibold text-sm mt-1">{cierre.larga}</div>
+            <span
+              className={`inline-block mt-2 text-xs font-bold px-2.5 py-1 rounded-full ${
+                cierre.urgencia === 'urgente' ? 'bg-red-500/30 text-red-100'
+                  : cierre.urgencia === 'pronto' ? 'bg-amber-400/25 text-amber-100'
+                  : 'bg-white/15 text-blue-100'
+              }`}
+            >
+              {cierre.queda}
+            </span>
+            <p className="text-[11px] text-blue-200/80 mt-1.5">Puedes registrar hasta el final de ese día.</p>
+          </div>
+        )}
       </div>
 
       {soloLectura && (

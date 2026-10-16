@@ -1,5 +1,5 @@
 // ================================================================
-// SIGAP — Informe de evidencias del docente (los datos y el texto)
+// SIGAP — Historial de agendas del docente (los datos y el texto)
 // ----------------------------------------------------------------
 // Reúne, para UN docente y UN período, lo que registró en su agenda, en el mismo orden en que lo diligenció:
 // función → actividad → descripción (resultado esperado) → indicador → evidencias, cada evidencia con la breve
@@ -118,7 +118,7 @@ const redactarReporte = (datos) => {
         bloques: [
             {
                 tipo: 'parrafo',
-                texto: `Este informe reúne el avance y las evidencias que ${datos.docente} registró en SIGAP durante el período ${periodo.etiqueta}. `
+                texto: `Este historial reúne el avance y las evidencias que ${datos.docente} registró en SIGAP durante el período ${periodo.etiqueta}. `
                     + `Comprende ${plural(funciones.length, 'función sustantiva', 'funciones sustantivas')}, ${plural(indicadores.length, 'indicador', 'indicadores')} `
                     + `y ${plural(totalEvidencias, 'evidencia', 'evidencias')}; ${plural(conEvidencia, 'indicador tiene', 'indicadores tienen')} al menos una evidencia.`,
             },
@@ -181,7 +181,7 @@ const redactarReporte = (datos) => {
     });
 
     return {
-        titulo: 'Informe de evidencias del docente',
+        titulo: 'Historial de agendas del docente',
         subtitulo: `Docente: ${datos.docente}`,
         portada: { programa: datos.programa, facultad: datos.facultad || '', periodo: periodo.etiqueta, directores: [], generadoEn: datos.generadoEn },
         secciones,
@@ -239,7 +239,7 @@ const construirReporteDocente = async (db, { idUsuario, idPeriodo }) => {
         periodo: infoPeriodo,
         directores: [],
         // Nombre del archivo descargado (el frontend lo usa en lugar del de "Balance de gestión")
-        archivoBase: `Informe_de_evidencias_${docente.nombre}`,
+        archivoBase: `Historial_de_agendas_${docente.nombre}`,
         documento: redactarReporte({ docente: docente.nombre, programa, facultad: docente.nombre_facultad, periodo: infoPeriodo, filas, generadoEn }),
     };
 };

@@ -30,11 +30,11 @@ test('un semestre desconocido no se disfraza de otro', () => {
     assert.equal(etiquetaSemestre(7), '7');
 });
 
-test('los cortes: semana 8 y 16 en un semestre; "Semana X" mientras no se definan en un intersemestral', () => {
+test('los cortes se llaman Semana 8 y Semana 16, también en un intersemestral', () => {
     assert.equal(esIntersemestral(2), false);
     assert.equal(esIntersemestral(3), true);
     assert.equal(etiquetaCorte(8, 1), 'Semana 8');
     assert.equal(etiquetaCorte(16, 2), 'Semana 16');
-    assert.equal(etiquetaCorte(8, 3), 'Semana X');
-    assert.equal(etiquetaCorte(16, 4), 'Semana X (final)');
+    assert.equal(etiquetaCorte(8, 3), 'Semana 8');
+    assert.equal(etiquetaCorte(16, 4), 'Semana 16');
 });

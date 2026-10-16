@@ -66,7 +66,7 @@ export default function AgendaDocente() {
     const [periodoAbierto, setPeriodoAbierto] = useState(true);
     const [tiempoRestanteTexto, setTiempoRestanteTexto] = useState('');
 
-    // "Otro/Cuál" (Académico-Administrativo) y "Otro, ¿Cuál?" (Vicerrectoría): la
+    // "Otro/Cuál" (Académico-Administrativo) y "Otro, ¿Cuál?" (Vicerrectoría para la Evangelización de las Culturas): la
     // actividad no está en el catálogo, así que el docente escribe la descripción y
     // los indicadores en lugar de elegirlos de una lista.
     const esActividadOtro = (rol: string) => /^otro/i.test((rol || '').trim());

@@ -1,6 +1,6 @@
 /**
  * Agrega la actividad "Otro/Cuál" a la función Investigación del catálogo
- * maestro, como ya la tienen Académico-Administrativo y Vicerrectoría.
+ * maestro, como ya la tienen Académico-Administrativo y Vicerrectoría para la Evangelización de las Culturas.
  *
  * Con ella el docente puede registrar una actividad de investigación que no
  * está en la lista (escribe la descripción y el indicador), y el importador

@@ -57,10 +57,10 @@ test('IND-11: cuenta las funciones por estado de revisión y completa con pendie
     assert.equal(m.resumenNumerico.porcentajeCorte2, 20);
 });
 
-test('IND-11: en un intersemestral los cortes se llaman Semana X', async () => {
+test('IND-11: en un intersemestral los cortes también se llaman Semana 8 y Semana 16', async () => {
     const db = { query: async (sql) => (/COUNT\(DISTINCT af\.id_funciones\)/.test(sql) ? { rows: [{ n: 0 }] } : { rows: [] }) };
     const m = await indicadorRevisionCortes(db, contexto({ periodo: { semestre: 3 } }));
-    assert.deepEqual(m.categorias, ['Semana X', 'Semana X (final)']);
+    assert.deepEqual(m.categorias, ['Semana 8', 'Semana 16']);
     assert.equal(m.resumenNumerico.porcentajeCorte1, 0, 'sin funciones no hay división por cero');
 });
 

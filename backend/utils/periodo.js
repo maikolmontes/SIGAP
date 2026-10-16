@@ -4,10 +4,8 @@
 // periodo.semestre es un número:
 //   1 = I (primer semestre)            2 = II (segundo semestre)
 //   3 = Intersemestral I               4 = Intersemestral II
-// Los intersemestrales trabajan igual que un semestre, pero no se sabe aún en
-// qué semanas caen los dos cortes de avance (la 8 y la 16 de un semestre
-// normal). Internamente siguen siendo "corte 8" y "corte 16" (así se guardan
-// las revisiones y evidencias); solo cambia cómo se muestran: "Semana X".
+// Los intersemestrales trabajan igual que un semestre: sus dos cortes de avance
+// también son la Semana 8 y la Semana 16 (así se guardan y se muestran).
 // ================================================================
 
 const SEMESTRES = {
@@ -27,10 +25,8 @@ const etiquetaSemestre = (semestre) => (SEMESTRES[Number(semestre)] ? SEMESTRES[
 /** "2026-I", "2026-Intersemestral II"… (null si no hay período). */
 const etiquetaPeriodo = (periodo) => (periodo ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}` : null);
 
-/** Cómo se llama un corte en pantalla: "Semana 8" / "Semana 16", o "Semana X" en los intersemestrales. */
-const etiquetaCorte = (corte, semestre) => {
-    if (!esIntersemestral(semestre)) return `Semana ${corte}`;
-    return Number(corte) === 16 ? 'Semana X (final)' : 'Semana X';
-};
+/** Cómo se llama un corte en pantalla: "Semana 8" / "Semana 16", también en los intersemestrales. El semestre se recibe por compatibilidad. */
+// eslint-disable-next-line no-unused-vars
+const etiquetaCorte = (corte, semestre) => `Semana ${corte}`;
 
 module.exports = { SEMESTRES, semestreValido, esIntersemestral, etiquetaSemestre, etiquetaPeriodo, etiquetaCorte };

@@ -170,11 +170,11 @@ test('observación del director: en el corte 16 el enlace va al reporte de la se
     assert.equal(db.filas[0].enlace, '/docente/avance-semana-16');
 });
 
-test('observación del director: en un intersemestral el corte se llama "Semana X"', async () => {
+test('observación del director: en un intersemestral el corte también se llama "Semana 8"', async () => {
     const db = conActividades(baseFalsa(), [{ ...ACTIVIDAD, semestre: 3 }]);
     await app.avisarObservacionDirector({ idActividad: 100, semana: 8, idDirector: 9, texto: 'Revisar.' }, db);
-    assert.match(db.filas[0].titulo, /Semana X/);
-    assert.doesNotMatch(db.filas[0].titulo, /Semana 8/);
+    assert.match(db.filas[0].titulo, /Semana 8/);
+    assert.doesNotMatch(db.filas[0].titulo, /Semana X/);
 });
 
 test('observación del director: varias seguidas en la misma actividad y corte no llenan la campana', async () => {

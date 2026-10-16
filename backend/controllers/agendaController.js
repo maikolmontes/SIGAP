@@ -623,7 +623,13 @@ const guardarAvanceDocente = async (req, res) => {
         }
 
         await client.query('COMMIT');
-        
+
+        // Aviso a la dirección (campana y correo) de que hay un avance para revisar: una vez por docente y corte,
+        // y solo si el corte guardado trae algo registrado.
+        if (corteGuardado && indicadores.some((i) => parseFloat(i && i[`ejecucion_${corteGuardado}`]) > 0)) {
+            await notificaciones.background.avanceGuardadoAhora({ idDocente: idUsuarioDe(req), semana: Number(corteGuardado) });
+        }
+
         const respuesta = { mensaje: 'Avance guardado correctamente.' };
         if (advertencias.length > 0) {
             respuesta.advertencias = advertencias;

@@ -33,6 +33,18 @@ const fechaLarga = (aaaammdd) => {
 };
 
 /**
+ * Días enteros que faltan para la fecha de cierre ("AAAA-MM-DD"): 0 = cierra hoy, negativo = ya cerró.
+ * null si no hay fecha de cierre. Como el último día cuenta completo, un corte que "cierra hoy" sigue abierto hoy.
+ */
+const diasHasta = (fechaFin, hoy = hoyEnColombia()) => {
+    const fin = fechaTexto(fechaFin);
+    const dia = fechaTexto(hoy);
+    if (!fin || !dia) return null;
+    const aMs = (t) => { const [a, m, d] = t.split('-').map(Number); return Date.UTC(a, m - 1, d); };
+    return Math.round((aMs(fin) - aMs(dia)) / 86400000);
+};
+
+/**
  * Estado de una fila de la tabla semana.
  * motivo: null (abierta) | 'deshabilitada' | 'no_inicia' | 'cerrada' | 'sin_semana'
  */
@@ -67,4 +79,4 @@ const verificarSemana = async (numero, idPeriodo = null, db = pool) => {
     return estadoDeSemana(fila, { semestre: fila?.semestre });
 };
 
-module.exports = { estadoDeSemana, verificarSemana, hoyEnColombia, fechaTexto };
+module.exports = { estadoDeSemana, verificarSemana, hoyEnColombia, fechaTexto, diasHasta };

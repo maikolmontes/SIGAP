@@ -66,6 +66,26 @@ const enviarRecordatorios = async (req, res) => {
     }
 };
 
+// POST /api/notificaciones/cortes-por-cerrar   Body: { dias? (3 por omisión), correo? (true por omisión) }
+// Avisa a los docentes que aún no registran avance en un corte (semana 8 o 16) que cierra pronto.
+const enviarCortesPorCerrar = async (req, res) => {
+    try {
+        const dias = req.body && req.body.dias !== undefined ? parseInt(req.body.dias, 10) : 3;
+        const correo = !(req.body && req.body.correo === false);
+        const resultado = await notificaciones.notificarCortesPorCerrar({ dias, correo, idRemitente: req.user?.id });
+
+        res.json({
+            mensaje: resultado.ok
+                ? `Se avisó a ${resultado.total} docente(s) con avance pendiente en ${resultado.cortes} corte(s) por cerrar.`
+                : 'No hay cortes por cerrar en ese plazo.',
+            ...resultado
+        });
+    } catch (error) {
+        console.error('Error en enviarCortesPorCerrar:', error);
+        res.status(500).json({ error: 'Error al avisar de los cortes por cerrar.', detalles: error.message });
+    }
+};
+
 // POST /api/notificaciones/periodo/:id  — reenvío manual del aviso de apertura
 const enviarAvisoPeriodo = async (req, res) => {
     try {
@@ -84,4 +104,4 @@ const enviarAvisoPeriodo = async (req, res) => {
     }
 };
 
-module.exports = { getEstado, enviarPrueba, enviarRecordatorios, enviarAvisoPeriodo };
+module.exports = { getEstado, enviarPrueba, enviarRecordatorios, enviarCortesPorCerrar, enviarAvisoPeriodo };

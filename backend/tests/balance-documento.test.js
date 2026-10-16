@@ -97,9 +97,9 @@ test('los docentes se agrupan por estado y se señalan los problemas', () => {
     assert.ok(titulos.includes('Con menos horas asignadas que contratadas (1)'), 'Dos (30/40)');
 });
 
-test('en un intersemestral los cortes se nombran como llegan ("Semana X")', () => {
-    const doc = construirDocumento(base({ nombresCortes: { corte1: 'Semana X', corte2: 'Semana X (final)' } }));
-    assert.match(textoDe(doc, 'Resumen general'), /En Semana X se reportó una ejecución/);
+test('los cortes se nombran como llegan (por ejemplo, en un intersemestral)', () => {
+    const doc = construirDocumento(base({ nombresCortes: { corte1: 'Semana 8', corte2: 'Semana 16' } }));
+    assert.match(textoDe(doc, 'Resumen general'), /En Semana 8 se reportó una ejecución/);
 });
 
 test('sin docentes el documento es corto y lo dice', () => {

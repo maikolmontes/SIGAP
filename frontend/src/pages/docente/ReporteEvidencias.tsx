@@ -81,20 +81,20 @@ export default function ReporteEvidencias() {
     const selector = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400'
 
     return (
-        <Layout rol="docente" path="Registro de Actividades / Reportes">
+        <Layout rol="docente" path="Registro de Actividades / Historial de agendas">
             <div className="bg-[#1a2744] rounded-xl px-6 py-6 mb-6 shadow-sm">
                 <h1 className="text-2xl font-bold text-white flex items-center gap-2">
                     <ScrollText className="w-6 h-6 text-blue-400" />
-                    Reportes
+                    Historial de agendas
                 </h1>
                 <p className="text-blue-100 text-sm mt-1">
-                    Descarga un informe de tus evidencias: por cada función y actividad, la meta de cada indicador, lo que ejecutaste y las evidencias (archivos y enlaces) que subiste.
+                    Descarga el historial de tus agendas: por cada función y actividad, la descripción y la meta de cada indicador, lo que ejecutaste y las evidencias (archivos y enlaces) que subiste.
                 </p>
             </div>
 
             <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden" aria-labelledby="titulo-informe-evidencias">
                 <div className="px-6 py-4 border-b border-gray-100">
-                    <h2 id="titulo-informe-evidencias" className="text-base font-bold text-gray-900">Informe de evidencias</h2>
+                    <h2 id="titulo-informe-evidencias" className="text-base font-bold text-gray-900">Historial de agendas</h2>
                     <p className="text-xs text-gray-500 mt-0.5">Se arma con tus datos al momento de generarlo y se puede descargar en Word o en PDF.</p>
                 </div>
 
@@ -122,7 +122,7 @@ export default function ReporteEvidencias() {
                                         className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-lg bg-[#1a2744] hover:bg-[#24365f] text-white text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
                                         {generando ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScrollText className="w-4 h-4" />}
-                                        {generando ? 'Armando…' : informe ? 'Volver a generar' : 'Generar informe'}
+                                        {generando ? 'Armando…' : informe ? 'Volver a generar' : 'Generar historial'}
                                     </button>
                                 </div>
                             </div>
