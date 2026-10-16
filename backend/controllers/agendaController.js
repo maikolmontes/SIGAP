@@ -3,6 +3,7 @@ const notificaciones = require('../services/notificacionesService');
 const { rolesEfectivos } = require('../utils/rolActivo');
 const { verificarSemana } = require('../utils/semanaAbierta');
 const { asegurarCorregidoEn } = require('../utils/esquemaRevisionCorte');
+const { joinContratoPeriodo, horasContratoSql } = require('../utils/contratoPeriodo');
 const { indicadoresSinAvance } = require('../utils/avanceObligatorio');
 const { idUsuarioDe, puedeVerDocente } = require('../middleware/accesoEvidencias');
 
@@ -25,17 +26,17 @@ const getAgenda = async (req, res) => {
                 u.numero_documento,
                 u.correo,
                 tc.tipo             AS tipo_contrato,
-                tc.horas_contrato,
+                ${horasContratoSql()} AS horas_contrato,
                 pa.nombre_programa,
                 na.nombre_titulo    AS nivel_academico,
                 per.anio || '-' || CASE per.semestre WHEN 3 THEN 'Intersemestral I' WHEN 4 THEN 'Intersemestral II' ELSE per.semestre::text END AS periodo
             FROM usuarios u
-            JOIN tipo_contrato tc       ON u.id_contrato  = tc.id_contrato
             JOIN programa_academico pa  ON u.id_programa  = pa.id_programa
             JOIN usuario_nivel un       ON u.id_usuario   = un.id_usuario
             JOIN nivel_academico na     ON un.id_nivelaca = na.id_nivelaca
             JOIN programa_periodo pp    ON pa.id_programa = pp.id_programa
             JOIN periodo per            ON pp.id_periodo  = per.id_periodo
+            ${joinContratoPeriodo({ periodo: 'per.id_periodo' })}
             WHERE u.id_usuario = $1
             AND per.activo = TRUE
         `, [id_usuario]);
@@ -145,20 +146,21 @@ const getAgenda = async (req, res) => {
 
         const horas = await pool.query(`
             SELECT
-                tc.horas_contrato,
+                ${horasContratoSql()}                           AS horas_contrato,
                 SUM(af.horas_funcion)                         AS total_asignado,
-                tc.horas_contrato - SUM(af.horas_funcion)     AS diferencia,
+                ${horasContratoSql()} - SUM(af.horas_funcion) AS diferencia,
                 CASE
-                    WHEN SUM(af.horas_funcion) = tc.horas_contrato THEN 'Completo'
-                    WHEN SUM(af.horas_funcion) > tc.horas_contrato THEN 'Excede contrato'
+                    WHEN SUM(af.horas_funcion) = ${horasContratoSql()} THEN 'Completo'
+                    WHEN SUM(af.horas_funcion) > ${horasContratoSql()} THEN 'Excede contrato'
                     ELSE 'Faltan horas'
                 END AS estado_carga
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
+            JOIN periodo pact            ON pact.activo = TRUE AND pact.id_periodo = af.id_periodo
             JOIN usuarios u              ON ua.id_usuario   = u.id_usuario
-            JOIN tipo_contrato tc        ON u.id_contrato   = tc.id_contrato
+            ${joinContratoPeriodo({ periodo: 'pact.id_periodo' })}
             WHERE ua.id_usuario = $1
-            GROUP BY tc.horas_contrato
+            GROUP BY ${horasContratoSql()}
         `, [id_usuario]);
 
         res.json({

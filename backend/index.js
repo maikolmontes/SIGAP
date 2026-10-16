@@ -23,6 +23,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Contrato por período: columnas, rastro y trigger (idempotente; solo cuesta la primera petición)
+app.use('/api', require('./utils/contratoPeriodo').esperarEsquemaContrato);
+
 app.use('/api/usuarios', usuariosRouter);
 app.use('/api/agenda', agendaRouter);
 app.use('/api/funciones', funcionesRouter);

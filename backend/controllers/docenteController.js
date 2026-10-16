@@ -2,6 +2,7 @@ const pool = require('../db/connection');
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 const { etiquetaSemestre } = require('../utils/periodo');
 const { calcularAvanceGeneral } = require('../utils/avanceDocente');
+const { joinContratoPeriodo, horasContratoSql } = require('../utils/contratoPeriodo');
 const { construirReporteDocente, ReporteDocenteError } = require('../services/reporteDocente');
 
 const getDashboard = async (req, res) => {
@@ -15,9 +16,10 @@ const getDashboard = async (req, res) => {
                 u.apellidos,
                 pa.nombre_programa AS programa,
                 tc.tipo AS tipo_contrato,
-                COALESCE(tc.horas_contrato, 0) AS total_horas_contrato
+                COALESCE(${horasContratoSql()}, 0) AS total_horas_contrato
             FROM USUARIOS u
-            JOIN TIPO_CONTRATO tc ON tc.id_contrato = u.id_contrato
+            LEFT JOIN periodo pact ON pact.activo = TRUE
+            ${joinContratoPeriodo({ periodo: 'pact.id_periodo' })}
             JOIN PROGRAMA_ACADEMICO pa ON pa.id_programa = u.id_programa
             WHERE u.id_usuario = $1
             LIMIT 1

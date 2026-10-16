@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../../services/api';
 import { confirmar } from '../common/dialogo';
+import ContratoSelector from './ContratoSelector';
+import type { TipoContrato } from './ContratoSelector';
+import { etiquetaPeriodo } from '../../utils/periodo';
 import {
     Search, CheckCircle2, AlertTriangle, Pencil, Save, XCircle,
     Clock, ClipboardList, RefreshCw, Info, Lock, LayoutGrid, List, ChevronDown, Filter
@@ -36,7 +39,10 @@ interface Asignacion {
     numero_documento?: string | null;
     nombre_programa: string;
     tipo_contrato: string;
+    id_contrato: number;
     horas_contrato: number;
+    /** La agenda sigue sin liberar: el Director aún puede corregir el contrato del período */
+    contrato_editable: boolean;
     funciones: Funcion[];
     total_horas: number;
     diferencia: number;
@@ -63,6 +69,10 @@ function TarjetaAsignacion({
     asignacion,
     puedeEditar,
     puedeAprobar,
+    contratos,
+    puedeCambiarContrato,
+    horasMaximas,
+    periodoEtiqueta,
     onGuardado,
     onError,
 }: {
@@ -70,6 +80,10 @@ function TarjetaAsignacion({
     puedeEditar: boolean;
     /** Solo el Director libera la agenda al docente. */
     puedeAprobar: boolean;
+    contratos: TipoContrato[];
+    puedeCambiarContrato: boolean;
+    horasMaximas: number;
+    periodoEtiqueta: string;
     onGuardado: (mensaje: string) => void;
     onError: (mensaje: string) => void;
 }) {
@@ -199,9 +213,21 @@ function TarjetaAsignacion({
                             {asignacion.numero_documento ? `${asignacion.tipo_documento || 'Doc.'} ${asignacion.numero_documento} · ` : ''}{asignacion.correo}
                         </p>
                         <div className="flex flex-wrap items-center gap-1 mt-1">
-                            <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-semibold border border-blue-100">
-                                {asignacion.tipo_contrato}
-                            </span>
+                            <ContratoSelector
+                                idUsuario={asignacion.id_usuario}
+                                nombre={asignacion.nombre_docente}
+                                idContrato={asignacion.id_contrato}
+                                tipoContrato={asignacion.tipo_contrato}
+                                horasContrato={asignacion.horas_contrato}
+                                totalHoras={asignacion.total_horas}
+                                editable={asignacion.contrato_editable}
+                                puedeCambiar={puedeCambiarContrato}
+                                contratos={contratos}
+                                horasMaximas={horasMaximas}
+                                periodo={periodoEtiqueta}
+                                onCambiado={onGuardado}
+                                onError={onError}
+                            />
                             {/* Deja claro si el docente ya puede trabajar su agenda */}
                             <span className={`text-[10px] px-2 py-0.5 rounded font-semibold border ${
                                 yaLiberada
@@ -455,6 +481,10 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
     const [periodo, setPeriodo] = useState<any>(null);
     // Solo el Director libera la agenda; un revisor de función solo da su visto.
     const [puedeAprobar, setPuedeAprobar] = useState(false);
+    // Tipos de contrato que el Director puede elegir (el servidor decide quién puede cambiarlo)
+    const [tiposContrato, setTiposContrato] = useState<TipoContrato[]>([]);
+    const [puedeCambiarContrato, setPuedeCambiarContrato] = useState(false);
+    const [horasMaximas, setHorasMaximas] = useState(40);
     const [loading, setLoading] = useState(true);
     const [busqueda, setBusqueda] = useState('');
     // Filtros en listas desplegables, dentro de un panel que se muestra u oculta (como en el panel del Director)
@@ -486,6 +516,9 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
             const res = await api.get('/director/asignaciones');
             setAsignaciones(res.data.asignaciones || []);
             setPuedeAprobar(!!res.data.puede_aprobar);
+            setTiposContrato(res.data.contratos || []);
+            setPuedeCambiarContrato(!!res.data.puede_cambiar_contrato);
+            setHorasMaximas(Number(res.data.horas_maximas_catedra) || 40);
             setPeriodo(res.data.periodo || null);
         } catch (e) {
             console.error('Error cargando asignaciones:', e);
@@ -540,6 +573,8 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
 
     const totalInconsistentes = asignaciones.filter(a => !a.coincide).length;
     const totalCorrectas = asignaciones.length - totalInconsistentes;
+
+    const periodoEtiqueta = etiquetaPeriodo(periodo);
 
     const manejarGuardado = (mensaje: string) => {
         setToast({ tipo: 'exito', mensaje });
@@ -761,6 +796,10 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                                         asignacion={a}
                                         puedeEditar={puedeEditar}
                                         puedeAprobar={puedeAprobar}
+                                        contratos={tiposContrato}
+                                        puedeCambiarContrato={puedeCambiarContrato}
+                                        horasMaximas={horasMaximas}
+                                        periodoEtiqueta={periodoEtiqueta}
                                         onGuardado={manejarGuardado}
                                         onError={(m) => setToast({ tipo: 'error', mensaje: m })}
                                     />
@@ -769,7 +808,7 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                         ) : (
                             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
                                 {/* Encabezado de la lista */}
-                                <div className="hidden md:grid grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_28px] gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-[10px] font-bold uppercase tracking-wider text-gray-400 sticky top-0 z-10">
+                                <div className="hidden md:grid grid-cols-[minmax(0,2.2fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_28px] gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-[10px] font-bold uppercase tracking-wider text-gray-400 sticky top-0 z-10">
                                     <span>Docente</span><span>Identificación</span><span>Programa</span><span>Contrato</span><span>Horas</span><span>Estado</span><span />
                                 </div>
                                 <ul className="divide-y divide-gray-100">
@@ -779,11 +818,13 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                                         const dif = a.diferencia;
                                         return (
                                             <li key={a.id_usuario} className={abierta ? 'bg-blue-50/30' : ''}>
-                                                <button
-                                                    type="button"
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
                                                     onClick={() => alternarFila(a.id_usuario)}
+                                                    onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); alternarFila(a.id_usuario); } }}
                                                     aria-expanded={abierta}
-                                                    className="w-full text-left grid grid-cols-1 md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_28px] gap-x-3 gap-y-1 items-center px-4 py-3 hover:bg-gray-50 transition-colors"
+                                                    className="w-full text-left cursor-pointer grid grid-cols-1 md:grid-cols-[minmax(0,2.2fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_28px] gap-x-3 gap-y-1 items-center px-4 py-3 hover:bg-gray-50 transition-colors"
                                                 >
                                                     <span className="flex items-center gap-3 min-w-0">
                                                         <span className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs shrink-0">{iniciales(a.nombre_docente)}</span>
@@ -794,7 +835,21 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                                                     </span>
                                                     <span className="text-xs text-gray-600 truncate">{a.numero_documento ? `${a.tipo_documento || ''} ${a.numero_documento}`.trim() : '—'}</span>
                                                     <span className="text-xs text-gray-600 truncate">{a.nombre_programa}</span>
-                                                    <span className="text-xs text-gray-600 truncate">{a.tipo_contrato}</span>
+                                                    <ContratoSelector
+                                                        idUsuario={a.id_usuario}
+                                                        nombre={a.nombre_docente}
+                                                        idContrato={a.id_contrato}
+                                                        tipoContrato={a.tipo_contrato}
+                                                        horasContrato={a.horas_contrato}
+                                                        totalHoras={a.total_horas}
+                                                        editable={a.contrato_editable}
+                                                        puedeCambiar={puedeCambiarContrato}
+                                                        contratos={tiposContrato}
+                                                        horasMaximas={horasMaximas}
+                                                        periodo={periodoEtiqueta}
+                                                        onCambiado={manejarGuardado}
+                                                        onError={(m) => setToast({ tipo: 'error', mensaje: m })}
+                                                    />
                                                     <span className="flex items-center gap-1.5 text-xs">
                                                         <span className={`font-black ${a.coincide ? 'text-green-600' : 'text-amber-600'}`}>
                                                             {a.total_horas % 1 === 0 ? a.total_horas : a.total_horas.toFixed(1)}<span className="text-gray-400 font-bold">/{a.horas_contrato}h</span>
@@ -809,13 +864,17 @@ export default function AsignacionesPorCorregir({ puedeEditar = true }: { puedeE
                                                         {liberada ? 'Visible para el docente' : 'Pendiente de aprobar'}
                                                     </span>
                                                     <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${abierta ? 'rotate-180' : ''}`} />
-                                                </button>
+                                                </div>
                                                 {abierta && (
                                                     <div className="px-4 pb-4">
                                                         <TarjetaAsignacion
                                                             asignacion={a}
                                                             puedeEditar={puedeEditar}
                                                             puedeAprobar={puedeAprobar}
+                                                            contratos={tiposContrato}
+                                                            puedeCambiarContrato={puedeCambiarContrato}
+                                                            horasMaximas={horasMaximas}
+                                                            periodoEtiqueta={periodoEtiqueta}
                                                             onGuardado={manejarGuardado}
                                                             onError={(m) => setToast({ tipo: 'error', mensaje: m })}
                                                         />

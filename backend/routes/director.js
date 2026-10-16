@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const { importarAsignaciones, actualizarImportacion, getDashboardDirector, getDistribucionDocente, eliminarAgendas, eliminarAgendasDocentes } = require('../controllers/directorController');
 const { getAgendas, getAgendaDetalle, aprobarAgenda, devolverAgenda, getReportesResumen, getMisProgramas } = require('../controllers/directorRevisionController');
-const { getAsignaciones, corregirAsignaciones, aprobarAsignaciones, marcarVistoBueno } = require('../controllers/asignacionesController');
+const { getAsignaciones, corregirAsignaciones, aprobarAsignaciones, marcarVistoBueno, cambiarContrato } = require('../controllers/asignacionesController');
 const { darVistoBueno, aprobarCorte, devolverCorte } = require('../controllers/cortesController');
 const { getBalanceGestion } = require('../controllers/balanceGestionController');
 const verifyToken = require('../middleware/verifyToken');
@@ -28,6 +28,7 @@ router.delete('/eliminar-agendas-docentes', verifyToken, verifyRole('Planeacion'
 router.get('/asignaciones', verifyToken, puedeVerRevision, getAsignaciones);
 router.put('/asignaciones/:id_usuario', verifyToken, puedeRevisar, corregirAsignaciones);
 router.put('/asignaciones/:id_usuario/aprobar', verifyToken, puedeRevisar, aprobarAsignaciones);
+router.put('/asignaciones/:id_usuario/contrato', verifyToken, puedeRevisar, cambiarContrato);
 router.put('/asignaciones/:id_usuario/funcion/:id_funciones/visto', verifyToken, puedeRevisar, marcarVistoBueno);
 
 // Revisión de los cortes (semana 8 y 16), en dos etapas:

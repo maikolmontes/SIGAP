@@ -13,6 +13,7 @@
 const pool = require('../db/connection');
 const { alcanceProgramas, docenteEnAlcance, alcanceFunciones } = require('../utils/rolActivo');
 const notificaciones = require('../services/notificacionesService');
+const { joinContratoPeriodo, horasContratoSql, resolverHorasContrato, horasLibres, HORAS_MAXIMAS_CATEDRA } = require('../utils/contratoPeriodo');
 
 // ================================================================
 // GET /api/director/asignaciones
@@ -48,7 +49,8 @@ const getAsignaciones = async (req, res) => {
                 u.numero_documento,
                 pa.nombre_programa,
                 tc.tipo AS tipo_contrato,
-                tc.horas_contrato,
+                tc.id_contrato,
+                ${horasContratoSql()} AS horas_contrato,
                 af.id_funciones,
                 af.funcion_sustantiva,
                 af.horas_funcion,
@@ -58,7 +60,7 @@ const getAsignaciones = async (req, res) => {
             FROM usuarios u
             JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
             JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
-            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            ${joinContratoPeriodo({ periodo: '$1' })}
             JOIN programa_academico pa ON pa.id_programa = u.id_programa
             JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
@@ -140,6 +142,7 @@ const getAsignaciones = async (req, res) => {
                     numero_documento: row.numero_documento,
                     nombre_programa: row.nombre_programa,
                     tipo_contrato: row.tipo_contrato,
+                    id_contrato: row.id_contrato,
                     horas_contrato: parseFloat(row.horas_contrato) || 0,
                     funciones: [],
                     total_horas: 0
@@ -169,6 +172,8 @@ const getAsignaciones = async (req, res) => {
             const diferencia = d.total_horas - d.horas_contrato;
             return {
                 ...d,
+                // El contrato solo se corrige mientras la agenda siga sin liberar al docente
+                contrato_editable: d.funciones.every((f) => f.estado_agenda === 'Por Aprobar'),
                 diferencia,
                 coincide: diferencia === 0,
                 estado_carga: diferencia === 0
@@ -177,7 +182,17 @@ const getAsignaciones = async (req, res) => {
             };
         });
 
-        res.json({ asignaciones, periodo, puede_aprobar: puedeAprobar });
+        // Tipos de contrato que el Director puede elegir (Hora Cátedra: horas libres de 0 a 40)
+        const contratos = (await pool.query(
+            'SELECT id_contrato, tipo, horas_contrato FROM tipo_contrato WHERE activo = TRUE ORDER BY id_contrato'
+        )).rows.map((c) => ({
+            id_contrato: c.id_contrato,
+            tipo: c.tipo,
+            horas_contrato: parseFloat(c.horas_contrato) || 0,
+            horas_libres: horasLibres(c.tipo),
+        }));
+
+        res.json({ asignaciones, periodo, puede_aprobar: puedeAprobar, puede_cambiar_contrato: puedeAprobar, contratos, horas_maximas_catedra: HORAS_MAXIMAS_CATEDRA });
 
     } catch (error) {
         console.error('Error en getAsignaciones:', error);
@@ -269,13 +284,13 @@ const corregirAsignaciones = async (req, res) => {
         // así que el Director tiene que poder arreglarla. De lo contrario la
         // asignación queda marcada como "requiere corrección" y a la vez bloqueada.
         const balancePrevio = await client.query(`
-            SELECT COALESCE(SUM(af.horas_funcion), 0) AS total, tc.horas_contrato
+            SELECT COALESCE(SUM(af.horas_funcion), 0) AS total, ${horasContratoSql()} AS horas_contrato
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
             JOIN usuarios u ON u.id_usuario = ua.id_usuario
-            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            ${joinContratoPeriodo({ periodo: '$2' })}
             WHERE ua.id_usuario = $1
-            GROUP BY tc.horas_contrato
+            GROUP BY ${horasContratoSql()}
         `, [idUsuario, idPeriodo]);
         const totalActual = parseFloat(balancePrevio.rows[0]?.total) || 0;
         const horasContratoActual = parseFloat(balancePrevio.rows[0]?.horas_contrato) || 0;
@@ -332,13 +347,13 @@ const corregirAsignaciones = async (req, res) => {
         const balanceRes = await client.query(`
             SELECT
                 COALESCE(SUM(af.horas_funcion), 0) AS total_horas,
-                tc.horas_contrato
+                ${horasContratoSql()} AS horas_contrato
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
             JOIN usuarios u ON u.id_usuario = ua.id_usuario
-            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            ${joinContratoPeriodo({ periodo: '$2' })}
             WHERE ua.id_usuario = $1
-            GROUP BY tc.horas_contrato
+            GROUP BY ${horasContratoSql()}
         `, [idUsuario, idPeriodo]);
 
         const balance = balanceRes.rows[0] || {};
@@ -423,13 +438,13 @@ const aprobarAsignaciones = async (req, res) => {
         // Las horas deben cuadrar EXACTAS con el contrato antes de liberar la
         // agenda: aprobar una carga descuadrada la deja mal para todo el periodo.
         const balance = await client.query(`
-            SELECT COALESCE(SUM(af.horas_funcion), 0) AS total, tc.horas_contrato
+            SELECT COALESCE(SUM(af.horas_funcion), 0) AS total, ${horasContratoSql()} AS horas_contrato
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
             JOIN usuarios u ON u.id_usuario = ua.id_usuario
-            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            ${joinContratoPeriodo({ periodo: '$2' })}
             WHERE ua.id_usuario = $1
-            GROUP BY tc.horas_contrato
+            GROUP BY ${horasContratoSql()}
         `, [idUsuario, idPeriodo]);
 
         if (balance.rows.length === 0) {
@@ -568,4 +583,124 @@ const marcarVistoBueno = async (req, res) => {
     }
 };
 
-module.exports = { getAsignaciones, corregirAsignaciones, aprobarAsignaciones, marcarVistoBueno };
+// ================================================================
+// PUT /api/director/asignaciones/:id_usuario/contrato
+// El Director corrige el tipo de contrato de un docente EN EL PERÍODO ACTIVO (no cambia el de otros períodos
+// ni el perfil del docente). Solo mientras la agenda siga sin liberar, y solo el Director (rol comodín).
+// Body: { id_contrato, horas_contrato? }  — horas_contrato solo cuenta para Hora Cátedra (0 a 40).
+// ================================================================
+const cambiarContrato = async (req, res) => {
+    const idUsuario = parseInt(req.params.id_usuario, 10);
+    const idContrato = parseInt(req.body?.id_contrato, 10);
+
+    if (isNaN(idUsuario)) return res.status(400).json({ error: 'ID de docente inválido.' });
+    if (isNaN(idContrato)) return res.status(400).json({ error: 'Elige el tipo de contrato.' });
+    if (!(await docenteEnAlcance(req, idUsuario))) {
+        return res.status(403).json({ error: 'Este docente no pertenece a los programas que gestionas.' });
+    }
+    const alcance = await alcanceFunciones(req);
+    if (alcance.restringido && !alcance.esComodin) {
+        return res.status(403).json({ error: 'Solo el Director de programa puede cambiar el contrato de sus docentes.' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const periodoRes = await client.query('SELECT id_periodo FROM periodo WHERE activo = true LIMIT 1');
+        if (periodoRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'No hay un período académico activo.' });
+        }
+        const idPeriodo = periodoRes.rows[0].id_periodo;
+
+        const actual = (await client.query(`
+            SELECT dp.id_docenteperiodo, tc.id_contrato, tc.tipo, ${horasContratoSql('dp', 'tc')} AS horas_contrato
+            FROM docente_periodo dp
+            JOIN usuarios u ON u.id_usuario = dp.id_usuario
+            LEFT JOIN tipo_contrato tc ON tc.id_contrato = COALESCE(dp.id_contrato, u.id_contrato)
+            WHERE dp.id_usuario = $1 AND dp.id_periodo = $2
+            FOR UPDATE OF dp
+        `, [idUsuario, idPeriodo])).rows[0];
+        if (!actual) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Este docente no está vinculado al período activo.' });
+        }
+
+        const nuevoTipo = (await client.query(
+            'SELECT id_contrato, tipo, horas_contrato FROM tipo_contrato WHERE id_contrato = $1 AND activo = TRUE', [idContrato]
+        )).rows[0];
+        if (!nuevoTipo) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'El tipo de contrato elegido no existe.' });
+        }
+        const horas = resolverHorasContrato(nuevoTipo, req.body?.horas_contrato);
+        if (!horas.ok) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: horas.error });
+        }
+
+        // Una vez liberada la agenda, cambiarle el contrato descuadraría lo que el docente ya está diligenciando
+        const liberadas = await client.query(`
+            SELECT 1 FROM usuario_asignacion ua
+            JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
+            WHERE ua.id_usuario = $1 AND af.estado_agenda <> 'Por Aprobar'
+            LIMIT 1
+        `, [idUsuario, idPeriodo]);
+        if (liberadas.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'La agenda de este docente ya fue liberada: el contrato del período ya no se puede cambiar.' });
+        }
+
+        const sinCambio = Number(actual.id_contrato) === Number(nuevoTipo.id_contrato) && Math.abs((Number(actual.horas_contrato) || 0) - horas.horas) < 0.001;
+        if (!sinCambio) {
+            await client.query(
+                'UPDATE docente_periodo SET id_contrato = $1, horas_contrato = $2 WHERE id_docenteperiodo = $3',
+                [nuevoTipo.id_contrato, horas.horas, actual.id_docenteperiodo]
+            );
+            await client.query(`
+                INSERT INTO contrato_periodo_log (id_periodo, id_usuario, id_contrato_antes, horas_antes, id_contrato_nuevo, horas_nuevas, cambiado_por)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `, [idPeriodo, idUsuario, actual.id_contrato, actual.horas_contrato, nuevoTipo.id_contrato, horas.horas, req.user.id]);
+        }
+
+        const total = parseFloat((await client.query(`
+            SELECT COALESCE(SUM(af.horas_funcion), 0) AS total
+            FROM usuario_asignacion ua
+            JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
+            WHERE ua.id_usuario = $1
+        `, [idUsuario, idPeriodo])).rows[0].total) || 0;
+
+        await client.query('COMMIT');
+
+        // El aviso sale DESPUÉS del COMMIT y nunca rompe la respuesta
+        if (!sinCambio) {
+            await notificaciones.background.contratoCambiadoAhora({
+                idDocente: idUsuario,
+                idDirector: req.user.id,
+                anterior: { tipo: actual.tipo, horas: actual.horas_contrato },
+                nuevo: { tipo: nuevoTipo.tipo, horas: horas.horas },
+            });
+        }
+
+        const diferencia = total - horas.horas;
+        res.json({
+            mensaje: sinCambio ? 'El contrato ya estaba así.' : `Contrato actualizado a ${nuevoTipo.tipo}.`,
+            sin_cambio: sinCambio,
+            id_contrato: nuevoTipo.id_contrato,
+            tipo_contrato: nuevoTipo.tipo,
+            horas_contrato: horas.horas,
+            total_horas: total,
+            diferencia,
+            coincide: Math.abs(diferencia) <= 0.001,
+        });
+    } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('Error en cambiarContrato:', error);
+        res.status(500).json({ error: 'No se pudo cambiar el contrato.', detalles: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+module.exports = { getAsignaciones, corregirAsignaciones, aprobarAsignaciones, marcarVistoBueno, cambiarContrato };

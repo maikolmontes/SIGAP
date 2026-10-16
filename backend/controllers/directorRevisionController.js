@@ -8,6 +8,7 @@ const { alcanceProgramas, docenteEnAlcance, alcanceFunciones } = require('../uti
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 const { asegurarCorregidoEn } = require('../utils/esquemaRevisionCorte');
 const { sqlFuncionCompletaEnSemana8, sqlIndicadorExento } = require('../utils/avanceObligatorio');
+const { joinContratoPeriodo, horasContratoSql } = require('../utils/contratoPeriodo');
 
 const SIN_PERMISO_DOCENTE = { error: 'Este docente no pertenece a los programas que gestionas.' };
 const SIN_PERMISO_FUNCION = { error: 'Tu rol no revisa esta función sustantiva.' };
@@ -70,7 +71,7 @@ const getAgendas = async (req, res) => {
                 u.correo,
                 pa.nombre_programa,
                 tc.tipo AS tipo_contrato,
-                tc.horas_contrato,
+                ${horasContratoSql()} AS horas_contrato,
                 af.id_funciones,
                 af.funcion_sustantiva,
                 af.horas_funcion,
@@ -82,7 +83,7 @@ const getAgendas = async (req, res) => {
             FROM usuarios u
             JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
             JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
-            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            ${joinContratoPeriodo({ periodo: '$1' })}
             JOIN programa_academico pa ON pa.id_programa = u.id_programa
             JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
@@ -315,12 +316,12 @@ const getAgendaDetalle = async (req, res) => {
                 u.correo,
                 pa.nombre_programa,
                 tc.tipo AS tipo_contrato,
-                tc.horas_contrato
+                ${horasContratoSql()} AS horas_contrato
             FROM usuarios u
-            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            ${joinContratoPeriodo({ periodo: '$2' })}
             JOIN programa_academico pa ON pa.id_programa = u.id_programa
             WHERE u.id_usuario = $1
-        `, [idUsuario]);
+        `, [idUsuario, idPeriodo]);
 
         if (docenteRes.rows.length === 0) {
             return res.status(404).json({ error: 'Docente no encontrado.' });

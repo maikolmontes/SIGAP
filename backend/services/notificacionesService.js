@@ -959,6 +959,63 @@ const notificarVistoBuenoAsignacion = async ({ idDocente, idFunciones, idRevisor
 
 const reiniciarAvisoVistoAsignacion = (idFunciones) => reiniciarNotificacion(claveVistoAsignacion(idFunciones));
 
+// ---- 8.6b Contrato del docente cambiado por el Director  ➔  Planeación / Admin -------
+// El contrato del período lo fija el Director desde "Asignaciones de Planeación" (antes de liberar la agenda).
+// Planeación cargó esos datos, así que se entera de qué cambió, quién y por qué importa (las horas se comparan con él).
+const getPlaneacion = async () => {
+    const r = await pool.query(
+        `SELECT DISTINCT u.id_usuario, u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
+         FROM usuarios u
+         JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
+         JOIN roles r ON r.id_rol = ur.id_rol
+         WHERE u.activo = TRUE AND (LOWER(r.nombre_rol) LIKE '%planea%' OR LOWER(r.nombre_rol) LIKE '%admin%')`
+    );
+    return r.rows;
+};
+
+const describirContrato = ({ tipo, horas }) => (Number(horas) > 0 ? `${tipo} (${Number(horas)} h)` : `${tipo} (sin horas fijas)`);
+
+const notificarContratoCambiado = async ({ idDocente, idDirector = null, anterior, nuevo }) => {
+    const periodo = await getPeriodoActivo();
+    if (!periodo) return { ok: false, motivo: 'sin_periodo_activo' };
+    const docente = await getUsuario(idDocente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const director = idDirector ? await getUsuario(idDirector) : null;
+    const quien = director ? director.nombre_completo : 'La dirección de programa';
+    const destinatarios = (await getPlaneacion()).filter((p) => Number(p.id_usuario) !== Number(idDirector));
+    if (destinatarios.length === 0) return { ok: false, motivo: 'sin_destinatarios' };
+
+    const antes = describirContrato(anterior);
+    const despues = describirContrato(nuevo);
+    const clave = `contrato_cambiado:${idDocente}:${periodo.id_periodo}:${Date.now()}`;
+    const enlace = '/planeacion/periodos';
+
+    await notificacionesApp.crearParaVarios(destinatarios.map((d) => d.id_usuario), {
+        tipo: 'contrato_cambiado',
+        titulo: `Contrato corregido: ${docente.nombre_completo}`,
+        mensaje: `${quien} cambió su contrato del período ${nombrePeriodo(periodo)} de ${antes} a ${despues}.`,
+        enlace,
+        clave,
+    });
+
+    const resultados = [];
+    for (const destinatario of destinatarios) {
+        const { subject, html } = plantillas.plantillaAviso({
+            asunto: `Contrato corregido — ${docente.nombre_completo}`,
+            titulo: 'Contrato corregido por la dirección',
+            nombre: destinatario.nombre_completo,
+            parrafo: `${quien} corrigió el contrato de ${docente.nombre_completo} en el período ${nombrePeriodo(periodo)} antes de liberar su agenda. Las horas de su carga se comparan con este contrato.`,
+            datos: [['Docente', docente.nombre_completo], ['Programa', docente.nombre_programa], ['Período', nombrePeriodo(periodo)], ['Contrato anterior', antes], ['Contrato nuevo', despues]],
+            boton: { texto: 'Ver el período', enlace: plantillas.url(enlace) },
+        });
+        resultados.push(await enviarYRegistrar({
+            tipo: 'contrato_cambiado', clave: `${clave}:${destinatario.id_usuario}`, to: destinatario.correo, subject, html,
+            remitente: await getRemitente(idDirector, ETIQUETA_DIRECTOR),
+        }));
+    }
+    return { ok: resultados.some((r) => r.ok), enviados: resultados.length };
+};
+
 // ---- 8.7 Semana habilitada por Planeación  ➔  Docentes con agenda ---------------
 // La campana avisa siempre; el correo es masivo, así que solo sale si se pide ({ correo: true }).
 const textoVentana = (inicio, fin) => {
@@ -1202,6 +1259,7 @@ const enSegundoPlanoAPI = {
     asignacionesAprobadasAhora: esperando('asignacionesAprobadas', notificarAsignacionesAprobadas),
     asignacionesCorregidasAhora: esperando('asignacionesCorregidas', notificarAsignacionesCorregidas),
     vistoBuenoAsignacionAhora: esperando('vistoBuenoAsignacion', notificarVistoBuenoAsignacion),
+    contratoCambiadoAhora: esperando('contratoCambiado', notificarContratoCambiado),
     semanaHabilitadaAhora: esperando('semanaHabilitada', notificarSemanaHabilitada, 8000),
     corteCorregidoAhora: esperando('corteCorregido', notificarCorteCorregido),
 };
@@ -1223,6 +1281,7 @@ module.exports = {
     notificarAsignacionesAprobadas,
     notificarAsignacionesCorregidas,
     notificarVistoBuenoAsignacion,
+    notificarContratoCambiado,
     reiniciarAvisoVistoAsignacion,
     notificarSemanaHabilitada,
     notificarCortesPorCerrar,

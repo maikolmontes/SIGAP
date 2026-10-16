@@ -5,6 +5,7 @@ const notificacionesApp = require('../services/notificacionesApp');
 const { respaldarAgendas } = require('../services/respaldoAgendasService');
 const auditoria = require('../services/auditoriaService');
 const { condicionCatalogo, asegurarEsquemaCatalogo } = require('../utils/catalogo');
+const { joinContratoPeriodo, horasContratoSql } = require('../utils/contratoPeriodo');
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 const {
     leerListado, clasificarFila, clasificarVinculacion, revisarCarga, normalizar, TIPO_CONTRATO_POR_SIGLA,
@@ -309,13 +310,14 @@ const procesarListado = async (req, res, modo) => {
             const nombreExcel = filas.find((f) => f.nombre)?.nombre || null;
             const u = (await client.query(`
                 SELECT u.id_usuario, u.nombres, u.apellidos, u.id_programa, u.id_contrato,
-                       pa.nombre_programa, tc.tipo AS tipo_contrato, tc.horas_contrato
+                       tc.id_contrato AS id_contrato_periodo,
+                       pa.nombre_programa, tc.tipo AS tipo_contrato, ${horasContratoSql()} AS horas_contrato
                 FROM usuarios u
                 LEFT JOIN programa_academico pa ON pa.id_programa = u.id_programa
-                LEFT JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+                ${joinContratoPeriodo({ periodo: '$2', tipoJoin: 'LEFT JOIN' })}
                 WHERE u.numero_documento = $1
                 ORDER BY u.id_usuario LIMIT 1
-            `, [documento])).rows[0];
+            `, [documento, idPeriodo])).rows[0];
 
             if (!u || u.id_programa !== idPrograma) {
                 docentesNoEncontrados.push({
@@ -340,6 +342,7 @@ const procesarListado = async (req, res, modo) => {
                 // 1. Vinculación (columna VIN) → tipo de contrato del docente
                 let sigla = SIGLA_POR_CONTRATO[normalizar(u.tipo_contrato)] || null;
                 let horasContrato = Number(u.horas_contrato) || 0;
+                let contratoNuevoDelPeriodo = null;
                 const vinculaciones = [...new Set(filas.map((f) => f.vinculacion).filter(Boolean))];
                 const siglas = [...new Set(vinculaciones.map(clasificarVinculacion))];
                 if (siglas.length > 1) {
@@ -353,6 +356,8 @@ const procesarListado = async (req, res, modo) => {
                             await client.query('UPDATE usuarios SET id_contrato = $1 WHERE id_usuario = $2', [contrato.id_contrato, u.id_usuario]);
                             totales.contratosActualizados++;
                         }
+                        // En el período solo cambia si el contrato es otro (así no pisa las horas que el Director fijó en Hora Cátedra)
+                        if (contrato.id_contrato !== u.id_contrato_periodo) contratoNuevoDelPeriodo = contrato;
                     } else if (siglas[0] === 'ADM') {
                         sigla = 'ADM';
                         alertar(`Vinculación ADM (personal administrativo): se conserva el contrato registrado (${u.tipo_contrato || 'sin contrato'}).`, 'info');
@@ -368,6 +373,12 @@ const procesarListado = async (req, res, modo) => {
                     'INSERT INTO docente_periodo (id_usuario, id_periodo) VALUES ($1, $2) ON CONFLICT DO NOTHING',
                     [u.id_usuario, idPeriodo]
                 );
+                if (contratoNuevoDelPeriodo) {
+                    await client.query(
+                        'UPDATE docente_periodo SET id_contrato = $1, horas_contrato = $2 WHERE id_usuario = $3 AND id_periodo = $4',
+                        [contratoNuevoDelPeriodo.id_contrato, contratoNuevoDelPeriodo.horas_contrato, u.id_usuario, idPeriodo]
+                    );
+                }
 
                 // 2. Importar desde cero: quitar solo lo precargado que nadie ha trabajado
                 const conservadas = modo === 'importar'
@@ -536,7 +547,7 @@ const getDashboardDirector = async (req, res) => {
                     f.id_facultad,
                     f.nombre_facultad,
                     tc.tipo AS tipo_contrato,
-                    tc.horas_contrato,
+                    COALESCE(dp.horas_contrato, tc.horas_contrato) AS horas_contrato,
                     COUNT(af.id_funciones) AS total_funciones,
                     COUNT(CASE WHEN af.estado_agenda = 'Aceptado' THEN af.id_funciones END) AS funciones_aceptadas,
                     -- Una función aprobada por el Director también está diligenciada:
@@ -551,7 +562,7 @@ const getDashboardDirector = async (req, res) => {
                 JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
                 JOIN programa_academico pa ON pa.id_programa = u.id_programa
                 JOIN facultad f ON f.id_facultad = pa.id_facultad
-                JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+                JOIN tipo_contrato tc ON tc.id_contrato = COALESCE(dp.id_contrato, u.id_contrato)
                 JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
                 JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
                 LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
@@ -570,7 +581,7 @@ const getDashboardDirector = async (req, res) => {
             docentesQuery += `
                 GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
                          pa.id_programa, pa.nombre_programa, f.id_facultad, f.nombre_facultad,
-                         tc.tipo, tc.horas_contrato
+                         tc.tipo, tc.horas_contrato, dp.horas_contrato
                 ORDER BY u.nombres, u.apellidos
             `;
 
@@ -699,14 +710,14 @@ const getDistribucionDocente = async (req, res) => {
                 u.nombres || ' ' || u.apellidos AS nombre,
                 u.correo,
                 tc.tipo AS tipo_contrato,
-                tc.horas_contrato,
+                ${horasContratoSql()} AS horas_contrato,
                 COALESCE(SUM(af.horas_funcion), 0) AS horas_asignadas
             FROM usuarios u
-            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            ${joinContratoPeriodo({ periodo: '$2' })}
             LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
             LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $2
             WHERE u.id_usuario = $1
-            GROUP BY u.nombres, u.apellidos, u.correo, tc.tipo, tc.horas_contrato
+            GROUP BY u.nombres, u.apellidos, u.correo, tc.tipo, tc.horas_contrato, dpc.horas_contrato
         `, [idUsuario, idPeriodo]);
 
         const docente = docenteRes.rows[0] || null;
