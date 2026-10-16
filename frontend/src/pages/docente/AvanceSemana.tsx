@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Layout from '../../components/common/Layout';
-import { FileText, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare, Trash2, CheckCircle2, Clock } from 'lucide-react';
+import { FileText, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare, Trash2, CheckCircle2, Clock, ArrowRight } from 'lucide-react';
 import api from '../../services/api';
 import { confirmar, avisar } from '../../components/common/dialogo';
 import { resumenAvance, firmaDeAvance, fmtCantidad } from '../../utils/avanceSemana';
@@ -18,6 +18,28 @@ interface AvanceSemanaProps {
   rolActual?: 'docente' | 'director' | 'planeacion';
 }
 
+// Función con el estado de revisión de cada corte (lo que el director aprobó o devolvió)
+interface FuncionConCortes {
+  id_funciones: number;
+  funcion_sustantiva: string;
+  revision_cortes?: Record<string, { estado: string; observacion?: string | null; corregido_en?: string | null; actualizado_en?: string }>;
+}
+
+// En qué va una función en este corte, dicho para el docente (sin fila de revisión = todavía no hay nada que mostrar)
+const estadoDeLaFuncion = (fn: FuncionConCortes, semana: string): { texto: string; clase: string } | null => {
+  const corte = fn.revision_cortes?.[semana];
+  if (!corte) return null;
+  switch (corte.estado) {
+    case 'Aprobado': return { texto: 'Aprobada', clase: 'bg-green-100 text-green-700 border-green-200' };
+    case 'Visto bueno': return { texto: 'Revisada · pasa al director', clase: 'bg-teal-100 text-teal-700 border-teal-200' };
+    case 'Devuelto': return { texto: 'Devuelta', clase: 'bg-orange-100 text-orange-700 border-orange-200' };
+    default:
+      return corte.corregido_en
+        ? { texto: 'Corregida · en revisión', clase: 'bg-sky-100 text-sky-700 border-sky-200' }
+        : { texto: 'En revisión', clase: 'bg-amber-100 text-amber-700 border-amber-200' };
+  }
+};
+
 export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSemanaProps) {
   const semestreActivo = useSemestreActivo();
   const nombreCorte = etiquetaCorte(semana, semestreActivo);
@@ -33,6 +55,10 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   const [guardadoEn, setGuardadoEn] = useState<Date | null>(null);
   // Modal de avance: al guardar dice si quedó completo o dónde falta (también se abre a pedido con "Ver dónde falta")
   const [modalAvance, setModalAvance] = useState<{ guardado: boolean; aviso?: string } | null>(null);
+  // Ventana con las funciones que el director devolvió en este corte y el motivo
+  const [modalDevueltas, setModalDevueltas] = useState(false);
+  // Confirmación de que la corrección de una función devuelta ya fue enviada al director
+  const [modalCorreccion, setModalCorreccion] = useState<{ nombre: string; faltan: string[] } | null>(null);
   // Indicador al que se llegó desde "dónde falta": su fila se resalta unos segundos
   const [resaltado, setResaltado] = useState<number | null>(null);
   // Aviso al entrar al reporte: hay que registrar TODO el avance del corte antes de guardar
@@ -80,7 +106,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     setAvisoEntrada(false);
   };
 
-  const cargarData = async () => {
+  const cargarData = async (sinAvisoDevueltas = false) => {
     try {
       setLoading(true);
       const userId = (user as any)?.id_usuario || user?.id;
@@ -146,6 +172,21 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
          
          setData(struct);
          setFirmaGuardada(firmaDeAvance(struct));
+
+         // Si el director devolvió alguna función de este corte, se muestra el motivo: siempre al llegar desde el aviso
+         // (?devuelto=1) y, si entró por su cuenta, una vez por devolución en esta sesión del navegador.
+         const devueltasAhora = struct.filter((fn: FuncionConCortes) => fn.revision_cortes?.[semana]?.estado === 'Devuelto');
+         if (devueltasAhora.length > 0 && week.abierta && !sinAvisoDevueltas) {
+           const desdeAviso = new URLSearchParams(window.location.search).get('devuelto') === '1';
+           const huella = devueltasAhora.map((fn: FuncionConCortes) => `${fn.id_funciones}:${fn.revision_cortes?.[semana]?.actualizado_en}`).join('|');
+           const claveVisto = `sigap_devuelta_vista_${semana}`;
+           let yaVisto = false;
+           try { yaVisto = sessionStorage.getItem(claveVisto) === huella; } catch { /* sin almacenamiento */ }
+           if (desdeAviso || !yaVisto) {
+             setModalDevueltas(true);
+             try { sessionStorage.setItem(claveVisto, huella); } catch { /* sin almacenamiento */ }
+           }
+         }
       }
     } catch (error) {
       console.error("Error cargando data de avance:", error);
@@ -434,7 +475,50 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
 
   // Avance frente a las metas y dónde falta, calculados con lo que hay en pantalla (guardado o no)
   const resumen = useMemo(() => resumenAvance(data), [data]);
+
+  // Funciones que el director devolvió en este corte (con el motivo)
+  const devueltas = useMemo(
+    () => data
+      .map((fn: FuncionConCortes, indice: number) => ({ indice, nombre: fn.funcion_sustantiva, corte: fn.revision_cortes?.[semana] }))
+      .filter((fn) => fn.corte?.estado === 'Devuelto'),
+    [data, semana]
+  );
   const sinGuardar = firmaGuardada !== null && firmaDeAvance(data) !== firmaGuardada;
+
+  // ¿La función que se está viendo fue devuelta por el director en este corte?
+  const funcionActivaDevuelta = (data[selectedFunctionIndex] as FuncionConCortes | undefined)?.revision_cortes?.[semana]?.estado === 'Devuelto';
+
+  // El docente ya corrigió la función devuelta: se guardan sus cambios (si los hay) y vuelve a revisión del director
+  const enviarCorreccion = async () => {
+    const fn = data[selectedFunctionIndex] as FuncionConCortes | undefined;
+    if (!fn) return;
+    if (!sinGuardar) {
+      const sigue = await confirmar({
+        tipo: 'pregunta',
+        titulo: '¿Enviar la corrección?',
+        mensaje: `No cambiaste ninguna cifra en «${fn.funcion_sustantiva}». ¿Ya corregiste lo que pidió tu director (por ejemplo, subiendo una evidencia) y quieres enviarla a revisión?`,
+        textoAceptar: 'Sí, enviar',
+      });
+      if (!sigue) return;
+    }
+    try {
+      setGuardando(true);
+      if (sinGuardar) {
+        const indicadores = data.flatMap((fu) => fu.actividades.flatMap((a: { indicadores: unknown[] }) => a.indicadores));
+        await api.post('/agenda/guardar-avance', { indicadores, semana });
+      }
+      await api.put(`/agenda/cortes/${fn.id_funciones}/${semana}/corregido`);
+      setGuardadoEn(new Date());
+      const faltan = devueltas.filter((d) => d.nombre !== fn.funcion_sustantiva).map((d) => d.nombre);
+      await cargarData(true);
+      setModalCorreccion({ nombre: fn.funcion_sustantiva, faltan });
+    } catch (error) {
+      const e = error as { response?: { data?: { error?: string } } };
+      void avisar({ tipo: 'error', titulo: 'No se pudo enviar la corrección', mensaje: e.response?.data?.error || 'Ocurrió un error al enviar la corrección.' });
+    } finally {
+      setGuardando(false);
+    }
+  };
 
   // Pasada la fecha de cierre el docente solo puede consultar su avance y sus evidencias
   const soloLectura = semanaInfo?.motivo_cierre === 'cerrada';
@@ -450,6 +534,20 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     const urgencia = dias <= 1 ? 'urgente' : dias <= 3 ? 'pronto' : 'normal';
     return { larga, queda, urgencia };
   })();
+
+  // Botón flotante: con cambios sin guardar guarda el avance; sin cambios, en la Semana 16, lleva al siguiente
+  // indicador que falta (como "Siguiente por aceptar" en la agenda); si no hay nada por hacer, solo confirma.
+  const siguienteFaltante = (() => {
+    if (resumen.faltantes.length === 0) return null;
+    const distinto = resumen.faltantes.find((fl) => fl.funcion !== selectedFunctionIndex || fl.actividad !== selectedActivityIndex);
+    return distinto ?? resumen.faltantes[0];
+  })();
+  const irAlFaltante = () => {
+    if (!siguienteFaltante) return;
+    setSelectedFunctionIndex(siguienteFaltante.funcion);
+    setSelectedActivityIndex(siguienteFaltante.actividad);
+    setResaltado(siguienteFaltante.idIndicador);
+  };
 
   const etiquetaGuardado = () => {
     if (soloLectura) return <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border bg-gray-100 text-gray-600 border-gray-200">Solo lectura</span>;
@@ -550,6 +648,101 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
           <p className="font-medium text-sm">
             {semanaInfo?.mensaje_cierre} Aquí ves tu avance y tus evidencias tal como quedaron, pero ya no se pueden modificar.
           </p>
+        </div>
+      )}
+
+      {!soloLectura && devueltas.length > 0 && (
+        <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 p-4 flex flex-col sm:flex-row sm:items-center gap-3" role="status">
+          <AlertCircle className="w-5 h-5 text-orange-600 shrink-0" />
+          <p className="flex-1 text-sm text-orange-900">
+            <span className="font-bold">Tu director devolvió {devueltas.length === 1 ? 'una función' : `${devueltas.length} funciones`} de este corte:</span>{' '}
+            {devueltas.map((d) => `«${d.nombre}»`).join(', ')}. Corrígela y pulsa <strong>Guardar y enviar corrección</strong> en esa función.
+          </p>
+          <button
+            onClick={() => setModalDevueltas(true)}
+            className="shrink-0 px-3 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition-colors"
+          >
+            Ver el motivo
+          </button>
+        </div>
+      )}
+
+      {modalDevueltas && devueltas.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-devueltas"
+          onClick={() => setModalDevueltas(false)}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 pb-3 text-center shrink-0">
+              <div className="flex items-center justify-center w-14 h-14 rounded-full bg-orange-100 mx-auto mb-4">
+                <AlertCircle className="w-8 h-8 text-orange-600" />
+              </div>
+              <h2 id="titulo-devueltas" className="text-xl font-bold text-[#1a2744]">
+                Tu director devolvió tu avance de la {nombreCorte}
+              </h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Entra a cada función, corrige lo que se indica y pulsa <strong>Guardar y enviar corrección</strong>: así vuelve a revisión de tu director.
+              </p>
+            </div>
+            <ul className="px-6 pb-2 space-y-2.5 overflow-y-auto">
+              {devueltas.map((d) => (
+                <li key={d.indice} className="rounded-xl border border-orange-200 bg-orange-50/60 p-4">
+                  <p className="text-sm font-bold text-orange-900">{d.nombre}</p>
+                  <p className="text-sm text-gray-800 mt-1 whitespace-pre-line">{d.corte?.observacion || 'El director no escribió un motivo.'}</p>
+                  <button
+                    onClick={() => { setSelectedFunctionIndex(d.indice); setSelectedActivityIndex(0); setModalDevueltas(false); }}
+                    className="mt-2 text-xs font-bold text-orange-700 hover:text-orange-900 hover:underline"
+                  >
+                    Ir a esta función →
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="p-6 pt-4 shrink-0">
+              <button
+                autoFocus
+                onClick={() => setModalDevueltas(false)}
+                className="w-full px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalCorreccion && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-correccion"
+          onClick={() => setModalCorreccion(null)}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mx-auto mb-5">
+              <CheckCircle2 className="w-9 h-9 text-green-600" />
+            </div>
+            <h2 id="titulo-correccion" className="text-xl font-bold text-[#1a2744] mb-2">Corrección enviada</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              <strong>«{modalCorreccion.nombre}»</strong> volvió a revisión de tu director. Te avisaremos cuando la apruebe o te la devuelva.
+            </p>
+            {modalCorreccion.faltan.length > 0 && (
+              <p className="text-xs text-orange-800 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 mb-4">
+                Aún tienes por corregir: {modalCorreccion.faltan.map((n) => `«${n}»`).join(', ')}.
+              </p>
+            )}
+            <button
+              autoFocus
+              onClick={() => setModalCorreccion(null)}
+              className="w-full px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
+            >
+              Entendido
+            </button>
+          </div>
         </div>
       )}
 
@@ -714,7 +907,13 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                             : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
                         }`}
                     >
-                        {f.funcion_sustantiva}
+                        <span className="inline-flex items-center gap-2">
+                            {f.funcion_sustantiva}
+                            {(() => {
+                                const e = estadoDeLaFuncion(f as FuncionConCortes, semana);
+                                return e ? <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${selectedFunctionIndex === idx ? 'bg-white text-gray-800 border-white' : e.clase}`}>{e.texto}</span> : null;
+                            })()}
+                        </span>
                     </button>
                 ))}
             </div>
@@ -732,8 +931,14 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                             <div className="text-white/60 text-[10px] mt-1.5 font-bold uppercase tracking-widest">Función Sustantiva Seleccionada</div>
                         </div>
                     </div>
-                    <div className="bg-white/10 px-3 py-1 rounded-full border border-white/10">
-                        <span className="text-white text-xs font-bold">{data[selectedFunctionIndex].horas_funcion} Horas</span>
+                    <div className="flex items-center gap-2">
+                        {(() => {
+                            const e = estadoDeLaFuncion(data[selectedFunctionIndex] as FuncionConCortes, semana);
+                            return e ? <span className={`text-xs font-bold px-3 py-1 rounded-full border ${e.clase}`}>{e.texto}</span> : null;
+                        })()}
+                        <div className="bg-white/10 px-3 py-1 rounded-full border border-white/10">
+                            <span className="text-white text-xs font-bold">{data[selectedFunctionIndex].horas_funcion} Horas</span>
+                        </div>
                     </div>
                  </div>
                  
@@ -1030,24 +1235,48 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                  )}
                  </div>
 
-                 {!soloLectura && (
-<div className="bg-gray-50 px-6 py-4 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 border-t border-gray-200">
-                    {etiquetaGuardado()}
-                    <button 
-                        onClick={guardarAvance}
-                        disabled={guardando}
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold transition-colors shadow-sm disabled:bg-blue-400 disabled:cursor-not-allowed"
-                    >
-                        {guardando ? (
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                            <Save className="w-4 h-4" />
-                        )}
-                        {guardando ? 'Guardando...' : `Guardar Avance Semanal`}
-                    </button>
-                 </div>
-)}
             </div>
+            {/* Botón flotante: la acción que toca, siempre a la vista */}
+            {!soloLectura && (
+              <div className="sticky bottom-4 z-30 mt-6 flex justify-end pointer-events-none" role="region" aria-label="Acción del reporte">
+                {funcionActivaDevuelta ? (
+                  <button
+                    onClick={enviarCorreccion}
+                    disabled={guardando}
+                    className="pointer-events-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-bold shadow-lg shadow-green-900/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {guardando
+                      ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      : <CheckCircle2 className="w-4 h-4" />}
+                    {guardando ? 'Enviando...' : 'Guardar y enviar corrección'}
+                  </button>
+                ) : sinGuardar || guardando ? (
+                  <button
+                    onClick={guardarAvance}
+                    disabled={guardando}
+                    className="pointer-events-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-bold shadow-lg shadow-green-900/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {guardando
+                      ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      : <Save className="w-4 h-4" />}
+                    {guardando ? 'Guardando...' : 'Guardar Avance Semanal'}
+                  </button>
+                ) : semana === '16' && siguienteFaltante ? (
+                  <button
+                    onClick={irAlFaltante}
+                    className="pointer-events-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#1a2744] hover:bg-[#243560] text-white text-sm font-bold shadow-lg shadow-blue-900/20 transition-colors"
+                  >
+                    Faltan {resumen.faltantes.length} {resumen.faltantes.length === 1 ? 'indicador' : 'indicadores'} · Ir al siguiente
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <span className="pointer-events-auto inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-white border border-green-200 text-green-700 text-sm font-bold shadow-lg shadow-green-900/10">
+                    <CheckCircle2 className="w-4 h-4" />
+                    {resumen.completo ? 'Avance completo y guardado' : 'Todo guardado'}
+                  </span>
+                )}
+              </div>
+            )}
           </>
       ) : (
           <div className="bg-white p-12 rounded-xl shadow-sm border border-gray-200 flex flex-col items-center text-center">

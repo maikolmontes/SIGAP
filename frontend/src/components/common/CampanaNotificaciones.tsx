@@ -29,6 +29,7 @@ const ESTILO_POR_TIPO: Record<string, { icono: ComponentType<{ className?: strin
     visto_bueno_asignacion: { icono: ClipboardCheck, color: 'bg-indigo-50 text-indigo-600' },
     semana_habilitada: { icono: CalendarDays, color: 'bg-blue-50 text-blue-600' },
     corte_por_cerrar: { icono: Clock, color: 'bg-amber-50 text-amber-600' },
+    corte_corregido: { icono: ClipboardCheck, color: 'bg-teal-50 text-teal-600' },
 }
 const ESTILO_POR_DEFECTO = { icono: Bell, color: 'bg-gray-100 text-gray-600' }
 

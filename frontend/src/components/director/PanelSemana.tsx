@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { agendaDiligenciada } from './agendaDiligenciada';
-import { Search, RefreshCw, Eye, Clock, Lock, Unlock } from 'lucide-react';
+import { Eye, Clock, Lock, Unlock } from 'lucide-react';
+import BarraConsulta, { CampoFiltro } from './BarraConsulta';
+import { CLASE_SELECT, useVistaAgendas } from './vistaAgendas';
 import { etiquetaSemestre } from '../../utils/periodo'
 
 const badgeRevision = (estado: string) => {
@@ -41,6 +43,9 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
     const [loading, setLoading] = useState(true);
     const [busqueda, setBusqueda] = useState('');
     const [filtroPrograma, setFiltroPrograma] = useState('');
+    const [filtroReporte, setFiltroReporte] = useState('');
+    const [filtroRevision, setFiltroRevision] = useState('');
+    const [vista, setVista] = useVistaAgendas();
     const [paginaActual, setPaginaActual] = useState(1);
     const [regPorPag, setRegPorPag] = useState(10);
     const navigate = useNavigate();
@@ -69,21 +74,27 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
 
     const corteDe = (a: any) => (semana === '8' ? a.corte_8 : a.corte_16) || { estado: 'Sin indicadores', reportados: 0, total: 0 };
 
-    // El corte solo aplica a docentes que ya aceptaron su agenda: es el mismo
-    // criterio de la semana 0, para que las tres pestañas listen a los mismos
-    // docentes. Además hacen falta indicadores, o no hay nada que reportar.
-    //
-    // Al revisor de una función además solo le interesan los que YA subieron
-    // algo en este corte: lo que no se ha reportado no es suyo por revisar.
+    // Cada pestaña lista a los docentes que YA llegaron a esa etapa: la semana 0 muestra las agendas
+    // diligenciadas y cada corte solo a quienes ya registraron su avance en él. Quien aún no reporta
+    // no aparece (se cuenta aparte, abajo); entra a la lista en cuanto guarda su avance.
     const conAgenda = useMemo(
         () => agendas.filter(a => {
             if (!agendaDiligenciada(a)) return false;
             if ((a.total_indicadores || 0) === 0) return false;
-            if (modulo !== 'revision') return true;
             const c = semana === '8' ? a.corte_8 : a.corte_16;
             return (c?.reportados || 0) > 0;
         }),
-        [agendas, modulo, semana]
+        [agendas, semana]
+    );
+
+    // Docentes con agenda que todavía no registran avance en este corte (no se listan)
+    const sinReportar = useMemo(
+        () => agendas.filter(a => {
+            if (!agendaDiligenciada(a) || (a.total_indicadores || 0) === 0) return false;
+            const c = semana === '8' ? a.corte_8 : a.corte_16;
+            return (c?.reportados || 0) === 0;
+        }).length,
+        [agendas, semana]
     );
 
     const programas = useMemo(
@@ -92,11 +103,21 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
     );
 
     const filtradas = useMemo(() => conAgenda.filter(a => {
-        const coincide = a.nombre_docente?.toLowerCase().includes(busqueda.toLowerCase())
-            || a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase());
+        const q = busqueda.toLowerCase().trim();
+        const coincide = !q
+            || a.nombre_docente?.toLowerCase().includes(q)
+            || a.nombre_programa?.toLowerCase().includes(q)
+            || a.correo?.toLowerCase().includes(q);
         const delPrograma = !filtroPrograma || a.nombre_programa === filtroPrograma;
-        return coincide && delPrograma;
-    }), [conAgenda, busqueda, filtroPrograma]);
+        const c = corteDe(a);
+        const delReporte = !filtroReporte || c.estado === filtroReporte;
+        const deLaRevision = !filtroRevision || (c.revision || 'Sin reportar') === filtroRevision;
+        return coincide && delPrograma && delReporte && deLaRevision;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }), [conAgenda, busqueda, filtroPrograma, filtroReporte, filtroRevision, semana]);
+
+    const hayFiltros = !!(filtroPrograma || filtroReporte || filtroRevision);
+    const limpiarFiltros = () => { setFiltroPrograma(''); setFiltroReporte(''); setFiltroRevision(''); setPaginaActual(1); };
 
     const totalPaginas = Math.max(1, Math.ceil(filtradas.length / regPorPag));
     const paginaSegura = Math.min(paginaActual, totalPaginas);
@@ -111,7 +132,7 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
     const hayReportes = conAgenda.some(a => corteDe(a).reportados > 0);
     const estadoCorte = abierto ? 'abierto' : (hayReportes ? 'cerrado' : 'sin_abrir');
     const completados = conAgenda.filter(a => corteDe(a).estado === 'Completado').length;
-    const pendientes = conAgenda.filter(a => corteDe(a).estado === 'Pendiente').length;
+    const enProgreso = conAgenda.filter(a => corteDe(a).estado === 'En progreso').length;
 
     return (
         <div>
@@ -154,14 +175,9 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
 
             <div className="grid grid-cols-3 gap-4 mb-6">
                 {[
-                    { label: 'Docentes con agenda', value: conAgenda.length, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-                    { label: modulo === 'revision' ? 'Reportaron completo' : `Reportaron semana ${semana}`,
-                      value: completados, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
-                    // Con el corte cerrado un pendiente es un incumplimiento;
-                    // con el corte sin abrir, simplemente todavía no les toca.
-                    { label: estadoCorte === 'sin_abrir' ? 'Aún no reportan' : 'Sin reportar', value: pendientes,
-                      color: estadoCorte === 'sin_abrir' ? 'text-gray-500' : 'text-red-600',
-                      bg: 'bg-red-50', border: estadoCorte === 'sin_abrir' ? 'border-gray-100' : 'border-red-100' },
+                    { label: `Con avance en la semana ${semana}`, value: conAgenda.length, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
+                    { label: 'Avance completo', value: completados, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
+                    { label: 'Avance en progreso', value: enProgreso, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
                 ].map(m => (
                     <div key={m.label} className={`bg-white rounded-2xl p-4 shadow-sm border ${m.border}`}>
                         <div className={`text-2xl font-black ${m.color}`}>{m.value}</div>
@@ -170,37 +186,46 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
                 ))}
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-                <div className="px-5 py-4 border-b border-gray-100 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-                    <div className="relative flex-1 max-w-md w-full">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Buscar docente o programa..."
-                            value={busqueda}
-                            onChange={e => setBusqueda(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-                        />
-                    </div>
-                    <div className="flex items-center gap-2">
-                    <select
-                        value={filtroPrograma}
-                        onChange={e => setFiltroPrograma(e.target.value)}
-                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:border-blue-400"
-                    >
+            {sinReportar > 0 && (
+                <p className="-mt-3 mb-5 text-xs text-gray-500">
+                    {sinReportar} docente{sinReportar !== 1 ? 's' : ''} con agenda aún no {sinReportar !== 1 ? 'registran' : 'registra'} su avance de la semana {semana}: aparecer{sinReportar !== 1 ? 'án' : 'á'} aquí cuando lo guarde{sinReportar !== 1 ? 'n' : ''}.
+                </p>
+            )}
+
+            <BarraConsulta
+                busqueda={busqueda}
+                onBusqueda={(v) => { setBusqueda(v); setPaginaActual(1); }}
+                vista={vista}
+                onVista={setVista}
+                hayFiltros={hayFiltros}
+                onLimpiar={limpiarFiltros}
+                cargando={loading}
+                onActualizar={cargar}
+            >
+                <CampoFiltro etiqueta="Programa">
+                    <select value={filtroPrograma} onChange={e => { setFiltroPrograma(e.target.value); setPaginaActual(1); }} className={CLASE_SELECT}>
                         <option value="">Todos los programas</option>
                         {programas.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
-                    <button
-                        onClick={cargar}
-                        disabled={loading}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-100 transition-colors disabled:opacity-50"
-                    >
-                        <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Actualizar
-                    </button>
-                    </div>
-                </div>
+                </CampoFiltro>
+                <CampoFiltro etiqueta={`Reporte de la semana ${semana}`}>
+                    <select value={filtroReporte} onChange={e => { setFiltroReporte(e.target.value); setPaginaActual(1); }} className={CLASE_SELECT}>
+                        <option value="">Todos</option>
+                        <option value="Completado">Avance completo</option>
+                        <option value="En progreso">Avance en progreso</option>
+                    </select>
+                </CampoFiltro>
+                <CampoFiltro etiqueta="Revisión">
+                    <select value={filtroRevision} onChange={e => { setFiltroRevision(e.target.value); setPaginaActual(1); }} className={CLASE_SELECT}>
+                        <option value="">Todas</option>
+                        <option value="Pendiente por revisar">Pendiente por revisar</option>
+                        <option value="Revisado parcial">Revisado parcial</option>
+                        <option value="Revisado">Revisado</option>
+                    </select>
+                </CampoFiltro>
+            </BarraConsulta>
 
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
                 <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
                     {loading ? (
                         <div className="flex justify-center py-16">
@@ -211,18 +236,50 @@ export default function PanelSemana({ semana, modulo = 'director' }: { semana: '
                             <Clock className="w-12 h-12 mx-auto mb-3 opacity-30" />
                             <p className="font-medium">
                                 {conAgenda.length === 0
-                                    ? (modulo === 'revision'
-                                        ? `Ningún docente ha subido su avance de la semana ${semana} todavía`
-                                        : 'Ningún docente ha diligenciado su agenda todavía')
+                                    ? `Ningún docente ha registrado su avance de la semana ${semana} todavía`
                                     : 'No se encontraron docentes'}
                             </p>
                             {conAgenda.length === 0 && (
                                 <p className="text-sm mt-1">
-                                    {modulo === 'revision'
-                                        ? 'Aparecerán aquí en cuanto guarden su avance semanal.'
-                                        : 'El corte se puede revisar cuando definan sus indicadores.'}
+                                    Aparecerán aquí en cuanto guarden su avance semanal.
                                 </p>
                             )}
+                        </div>
+                    ) : vista === 'tarjetas' ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-5">
+                            {filtPagina.map(a => {
+                                const corte = corteDe(a);
+                                return (
+                                    <div key={a.id_usuario} className="rounded-2xl border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all p-4 flex flex-col gap-3">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                                                {iniciales(a.nombre_docente)}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="font-bold text-gray-900 text-sm leading-tight truncate">{a.nombre_docente}</p>
+                                                <p className="text-xs text-gray-400 truncate">{a.nombre_programa} · {a.tipo_contrato} · {Math.round(num(a.total_horas))}h</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                                corte.estado === 'Pendiente' && estadoCorte === 'sin_abrir' ? 'bg-gray-100 text-gray-500' : badgeCorte(corte.estado)
+                                            }`}>
+                                                {corte.estado === 'Pendiente' && estadoCorte === 'sin_abrir' ? 'Sin abrir' : corte.estado}
+                                            </span>
+                                            <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${badgeRevision(corte.revision || 'Sin reportar')}`}>
+                                                {corte.revision || 'Sin reportar'}
+                                            </span>
+                                            <span className="text-[11px] text-gray-400">{corte.reportados}/{corte.total} indicadores</span>
+                                        </div>
+                                        <button
+                                            onClick={() => navigate(modulo === 'revision' ? `/revision/semanas/${semana}/docente/${a.id_usuario}` : `/director/agendas/${a.id_usuario}/semana/${semana}`)}
+                                            className="mt-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+                                        >
+                                            <Eye className="w-3.5 h-3.5" /> Revisar
+                                        </button>
+                                    </div>
+                                );
+                            })}
                         </div>
                     ) : (
                         <table className="w-full text-sm">

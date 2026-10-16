@@ -28,6 +28,8 @@ interface FuncionBloque {
     funcionSustantiva: string;
     horasFuncion: number | '';
     estadoAgenda: string;
+    // Observaciones del director cuando devolvió la agenda
+    observaciones?: string;
     actividades: Actividad[];
 }
 
@@ -42,6 +44,29 @@ const META_MAXIMA = 20;
 
 // Si el docente marca "No volver a mostrar", se guarda en este navegador
 const CLAVE_AVISO_INICIO = 'sigap_aviso_agenda_visto';
+
+// Una función cuenta como lista cuando el docente ya la aceptó o el director ya la aprobó
+const cuentaComoAceptada = (f: FuncionBloque) => f.estadoAgenda === 'Aceptado' || f.estadoAgenda === 'Aprobada';
+
+type VistaEstado = 'pendiente' | 'aceptada' | 'aprobada' | 'devuelta';
+const vistaEstado = (f: FuncionBloque): VistaEstado =>
+    f.estadoAgenda === 'Aprobada' ? 'aprobada'
+        : f.estadoAgenda === 'Devuelta' ? 'devuelta'
+        : f.estadoAgenda === 'Aceptado' ? 'aceptada'
+        : 'pendiente';
+
+// Qué le falta a una actividad para poder aceptar su función (las mismas reglas de aceptarFuncion),
+// para marcar los campos en rojo apenas el docente intenta aceptar
+const faltasDeActividad = (nombreFuncion: string, a: Actividad) => {
+    if (nombreFuncion === 'Docencia Directa') return { actividad: false, descripcion: false, meta: false, indicador: false };
+    const indirecta = nombreFuncion === 'Docencia Indirecta';
+    return {
+        actividad: !a.actividadLibre,
+        descripcion: !a.resultadoEsperado,
+        meta: !indirecta && ((!a.meta && a.meta !== 0) || Number(a.meta) > META_MAXIMA),
+        indicador: !a.indicadores.some(i => i.nombre_indicador && i.nombre_indicador.trim() !== ''),
+    };
+};
 
 export default function AgendaDocente() {
     const { user } = useAuth();
@@ -61,10 +86,16 @@ export default function AgendaDocente() {
     const [noMostrarAviso, setNoMostrarAviso] = useState(false);
     // Aviso al aceptar una función: cuál se aceptó y cuál sigue (null si ya no quedan por aceptar)
     const [confirmacion, setConfirmacion] = useState<{ nombre: string; siguiente: number | null } | null>(null);
+    // Función en la que el docente intentó aceptar con datos incompletos: sus campos faltantes se marcan en rojo
+    const [intentoAceptar, setIntentoAceptar] = useState<number | null>(null);
+    // Funciones editadas desde la última vez que se guardaron (la barra de abajo ofrece guardarlas)
+    const [idsModificados, setIdsModificados] = useState<(string | number)[]>([]);
 
     const [semanaActiva, setSemanaActiva] = useState(false);
     const [periodoAbierto, setPeriodoAbierto] = useState(true);
     const [tiempoRestanteTexto, setTiempoRestanteTexto] = useState('');
+    // Plazo de la Semana 0 mientras está abierta: fecha de cierre y lo que falta
+    const [plazo, setPlazo] = useState<{ fecha: string; dias: number; horas: number } | null>(null);
 
     // "Otro/Cuál" (Académico-Administrativo) y "Otro, ¿Cuál?" (Vicerrectoría para la Evangelización de las Culturas): la
     // actividad no está en el catálogo, así que el docente escribe la descripción y
@@ -117,7 +148,8 @@ export default function AgendaDocente() {
                             const diffMs = fin.getTime() - ahora.getTime();
                             const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
                             const horas = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                            setTiempoRestanteTexto(`Tiempo restante: ${dias} días / ${horas} horas`);
+                            setTiempoRestanteTexto('Plazo abierto');
+                            setPlazo({ fecha: fin.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }), dias, horas });
                         } else {
                             setSemanaActiva(false);
                             setTiempoRestanteTexto('Semana finalizada');
@@ -196,6 +228,7 @@ export default function AgendaDocente() {
                             funcionSustantiva: f.funcion_sustantiva,
                             horasFuncion: parseFloat(f.horas_funcion),
                             estadoAgenda: f.estado_agenda || 'Pendiente',
+                            observaciones: f.observaciones_generales || '',
                             actividades: finalActs.length > 0 ? finalActs : [{
                                 id: generarId(), idEspacioAcademico: '', actividadLibre: '', horasActividad: '', resultadoEsperado: '', meta: '', indicadores: [{ id: generarId(), nombre_indicador: '' }]
                             }]
@@ -216,6 +249,11 @@ export default function AgendaDocente() {
         cargarData();
     }, [user]);
 
+    const marcarModificada = (funcIndex: number) => {
+        const id = funciones[funcIndex]?.id;
+        if (id !== undefined) setIdsModificados(prev => (prev.includes(id) ? prev : [...prev, id]));
+    };
+
     const cambiarFuncion = (funcIndex: number, campo: keyof FuncionBloque, valor: any) => {
         const nuevas = [...funciones];
         nuevas[funcIndex] = { ...nuevas[funcIndex], [campo]: valor };
@@ -223,6 +261,7 @@ export default function AgendaDocente() {
     };
 
     const cambiarActividad = (funcIndex: number, actIndex: number, campo: keyof Actividad, valor: any) => {
+        marcarModificada(funcIndex);
         const nuevas = [...funciones];
         nuevas[funcIndex].actividades[actIndex] = {
             ...nuevas[funcIndex].actividades[actIndex],
@@ -264,17 +303,20 @@ export default function AgendaDocente() {
     };
 
     const cambiarIndicador = (funcIndex: number, actIndex: number, indIndex: number, valor: string) => {
+        marcarModificada(funcIndex);
         const nuevas = [...funciones];
         nuevas[funcIndex].actividades[actIndex].indicadores[indIndex].nombre_indicador = valor;
         setFunciones(nuevas);
     };
 
     const agregarIndicador = (funcIndex: number, actIndex: number) => {
+        marcarModificada(funcIndex);
         const nuevas = [...funciones];
         nuevas[funcIndex].actividades[actIndex].indicadores.push({ id: generarId(), nombre_indicador: '' });
         setFunciones(nuevas);
     }
     const eliminarIndicador = (funcIndex: number, actIndex: number, indIndex: number) => {
+        marcarModificada(funcIndex);
         const nuevas = [...funciones];
         if (nuevas[funcIndex].actividades[actIndex].indicadores.length > 1) {
             nuevas[funcIndex].actividades[actIndex].indicadores.splice(indIndex, 1);
@@ -303,6 +345,7 @@ export default function AgendaDocente() {
         });
 
         if (erroresValidacion.length > 0) {
+            setIntentoAceptar(fIndex);
             setMensaje({
                 titulo: `No se puede aceptar "${funcion.funcionSustantiva}"`,
                 detalles: erroresValidacion
@@ -354,6 +397,8 @@ export default function AgendaDocente() {
             const nuevas = [...funciones];
             nuevas[fIndex].estadoAgenda = 'Aceptado';
             setFunciones(nuevas);
+            setIntentoAceptar(null);
+            setIdsModificados(prev => prev.filter(x => x !== funcion.id));
             
             setConfirmacion({ nombre: funcion.funcionSustantiva, siguiente: siguienteSinAceptar(fIndex, nuevas) });
         } catch (error: any) {
@@ -367,13 +412,19 @@ export default function AgendaDocente() {
     // La siguiente función sin aceptar, empezando por la que sigue a `desde` y dando la vuelta
     const siguienteSinAceptar = (desde: number, lista: FuncionBloque[]): number | null =>
         lista.map((_, k) => (desde + 1 + k) % lista.length)
-            .find(k => k !== desde && lista[k].estadoAgenda !== 'Aceptado') ?? null;
+            .find(k => k !== desde && !cuentaComoAceptada(lista[k])) ?? null;
 
     // Abre una función y deja la pantalla al inicio de ella (las tarjetas de funciones);
     // window.scrollTo no mueve el contenedor con scroll del Layout, por eso scrollIntoView
     const irAFuncion = (indice: number) => {
         setActiveFunctionIndex(indice);
         setTimeout(() => document.getElementById('funciones-agenda')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    };
+
+    // Al cerrar el aviso de campos incompletos, la pantalla baja al primero que falta
+    const cerrarMensaje = () => {
+        setMensaje(null);
+        setTimeout(() => document.querySelector('[data-falta="true"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
     };
 
     const cerrarAvisoInicio = () => {
@@ -417,8 +468,19 @@ export default function AgendaDocente() {
     // Siguiente función por aceptar a partir de la que se está viendo (botón del resumen)
     const siguientePendiente = siguienteSinAceptar(activeFunctionIndex, funciones);
 
+    // Acción principal de la barra: guardar la función que se está viendo (si falta aceptarla o la editaron)
+    // o, si ya está al día, pasar a la siguiente. El texto dice qué pasa: "Guardar y enviar agenda" cuando es la última.
+    const funcionActiva = funciones[activeFunctionIndex];
+    const activaPorAceptar = !!funcionActiva && !cuentaComoAceptada(funcionActiva);
+    const activaModificada = !!funcionActiva && idsModificados.includes(funcionActiva.id);
+    const quedanOtrasPorAceptar = funciones.some((fn, i) => i !== activeFunctionIndex && !cuentaComoAceptada(fn));
+    const hayQueGuardar = activaPorAceptar || activaModificada;
+    const textoGuardar = activaPorAceptar
+        ? (quedanOtrasPorAceptar ? 'Aceptar función' : 'Guardar y enviar agenda')
+        : (quedanOtrasPorAceptar ? 'Guardar cambios' : 'Guardar agenda');
+
     // Se muestra una vez cargada la agenda, si todavía se puede editar y quedan funciones por aceptar
-    const hayPorAceptar = funciones.some(f => f.estadoAgenda !== 'Aceptado');
+    const hayPorAceptar = funciones.some(f => !cuentaComoAceptada(f));
     useEffect(() => {
         if (cargandoEspacios || !periodoAbierto || !semanaActiva || !hayPorAceptar || funciones.length === 0) return;
         let oculto = false;
@@ -438,17 +500,37 @@ export default function AgendaDocente() {
                             Planificación de Agenda
                         </h1>
                         <p className="text-blue-100 text-sm mt-1">
-                            Completa la información importada por tu director utilizando el catálogo oficial. Presiona <strong>Aceptar</strong> en cada función para confirmar.
+                            Completa cada función con el catálogo oficial y pulsa <strong>Aceptar</strong>. Cuando todas estén aceptadas, tu agenda se envía a tu director.
                         </p>
                     </div>
-                    {tiempoRestanteTexto && (
+                    {semanaActiva && plazo ? (
+                        <div className="shrink-0 rounded-xl border border-white/15 bg-white/10 px-4 py-3 sm:text-right">
+                            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-blue-200 sm:justify-end">
+                                <Clock className="w-3.5 h-3.5" />
+                                Plazo para completar la agenda
+                            </div>
+                            <div className="text-white font-semibold text-sm mt-1">Cierra el {plazo.fecha}</div>
+                            <span
+                                className={`inline-block mt-2 text-xs font-bold px-2.5 py-1 rounded-full ${
+                                    plazo.dias <= 1 ? 'bg-red-500/30 text-red-100'
+                                        : plazo.dias <= 7 ? 'bg-amber-400/25 text-amber-100'
+                                        : 'bg-white/15 text-blue-100'
+                                }`}
+                            >
+                                {plazo.dias >= 2 ? `Faltan ${plazo.dias} días`
+                                    : plazo.dias === 1 ? 'Falta 1 día'
+                                    : plazo.horas >= 1 ? `Cierra hoy · faltan ${plazo.horas} h`
+                                    : 'Cierra en menos de 1 hora'}
+                            </span>
+                        </div>
+                    ) : tiempoRestanteTexto ? (
                         <div className={`px-4 py-2 rounded-lg font-bold text-sm shrink-0 ${semanaActiva ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'}`}>
                             <div className="flex items-center gap-2">
                                 <Clock className="w-4 h-4" />
                                 {tiempoRestanteTexto}
                             </div>
                         </div>
-                    )}
+                    ) : null}
                 </div>
             </div>
 
@@ -573,7 +655,7 @@ export default function AgendaDocente() {
                     role="alertdialog"
                     aria-modal="true"
                     aria-labelledby="titulo-error-funcion"
-                    onClick={() => setMensaje(null)}
+                    onClick={cerrarMensaje}
                 >
                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mx-auto mb-5">
@@ -588,7 +670,7 @@ export default function AgendaDocente() {
                         </ul>
                         <button
                             autoFocus
-                            onClick={() => setMensaje(null)}
+                            onClick={cerrarMensaje}
                             className="w-full px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
                         >
                             Entendido
@@ -596,6 +678,72 @@ export default function AgendaDocente() {
                     </div>
                 </div>
             )}
+
+            {/* Estado de la agenda: dónde está y qué sigue, siempre a la vista */}
+            {periodoAbierto && !cargandoEspacios && funciones.length > 0 && (() => {
+                const idxDevuelta = funciones.findIndex(f => f.estadoAgenda === 'Devuelta');
+                const todasAprobadas = funciones.every(f => f.estadoAgenda === 'Aprobada');
+                const todasAceptadas = funciones.every(cuentaComoAceptada);
+                const faltan = funciones.filter(f => !cuentaComoAceptada(f));
+
+                if (idxDevuelta >= 0) {
+                    const f = funciones[idxDevuelta];
+                    return (
+                        <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 p-4 flex flex-col sm:flex-row sm:items-start gap-3" role="status">
+                            <AlertTriangle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-orange-900">Tu director devolvió tu agenda para correcciones</p>
+                                {f.observaciones && (
+                                    <p className="text-sm text-orange-900/90 mt-1 whitespace-pre-line max-h-28 overflow-y-auto">{f.observaciones}</p>
+                                )}
+                                <p className="text-xs text-orange-800/80 mt-1">
+                                    Corrige lo que se indica y vuelve a aceptar la función. Por aceptar: {faltan.map(x => `«${x.funcionSustantiva}»`).join(', ')}.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => irAFuncion(idxDevuelta)}
+                                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition-colors"
+                            >
+                                Ir a «{f.funcionSustantiva}» <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    );
+                }
+                if (todasAprobadas) {
+                    return (
+                        <div className="mb-6 rounded-xl border border-green-200 bg-green-50 p-4 flex items-start gap-3" role="status">
+                            <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+                            <p className="text-sm text-green-900"><span className="font-bold">Tu agenda fue aprobada.</span> No necesitas hacer nada más en la planificación; sigue con los reportes de avance cuando se abran las semanas.</p>
+                        </div>
+                    );
+                }
+                if (todasAceptadas) {
+                    return (
+                        <div className="mb-6 rounded-xl border border-teal-200 bg-teal-50 p-4 flex items-start gap-3" role="status">
+                            <CheckCircle2 className="w-5 h-5 text-teal-600 shrink-0 mt-0.5" />
+                            <p className="text-sm text-teal-900">
+                                <span className="font-bold">Tu agenda está completa y ya fue enviada a tu director para revisión.</span>{' '}
+                                Si cambias algo, pulsa <strong>Guardar cambios</strong> en esa función.
+                            </p>
+                        </div>
+                    );
+                }
+                return (
+                    <div className="mb-6 rounded-xl border border-blue-100 bg-white p-4 shadow-sm" role="status">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                            <p className="text-sm font-bold text-[#1a2744]">
+                                Agenda en borrador · {funciones.length - faltan.length} de {funciones.length} funciones aceptadas
+                            </p>
+                            <p className="text-xs text-gray-500">
+                                Falta aceptar: {faltan.map(x => `«${x.funcionSustantiva}»`).join(', ')}. Al aceptar la última, se envía a tu director.
+                            </p>
+                        </div>
+                        <div className="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden" aria-hidden="true">
+                            <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${((funciones.length - faltan.length) / funciones.length) * 100}%` }} />
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* Solo renderizar el formulario si el periodo está abierto */}
             {periodoAbierto ? (
@@ -612,16 +760,20 @@ export default function AgendaDocente() {
                     {/* Selector de Tarjetas (Tabs) */}
                     <div id="funciones-agenda" className="scroll-mt-20 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-2">
                         {funciones.map((f, i) => {
-                            const aceptada = f.estadoAgenda === 'Aceptado';
+                            const vista = vistaEstado(f);
+                            const aceptada = vista === 'aceptada' || vista === 'aprobada';
+                            const devuelta = vista === 'devuelta';
                             return (
                             <button
                                 key={f.id}
-                                onClick={() => setActiveFunctionIndex(i)}
+                                onClick={() => { setActiveFunctionIndex(i); setIntentoAceptar(null); }}
                                 className={`text-left p-4 rounded-xl border-2 transition-all flex flex-col gap-2 relative overflow-hidden group ${
                                     activeFunctionIndex === i 
                                     ? 'border-transparent bg-[#1a2744] shadow-lg shadow-blue-900/20 scale-[1.02]' 
                                     : aceptada 
                                         ? 'border-green-300 bg-green-50/60 hover:bg-green-100/70 hover:border-green-400'
+                                        : devuelta
+                                            ? 'border-orange-300 bg-orange-50/70 hover:bg-orange-100/70 hover:border-orange-400'
                                         : 'border-blue-100/50 bg-blue-50/40 hover:bg-blue-100/50 hover:border-blue-300'
                                 }`}
                             >
@@ -629,7 +781,9 @@ export default function AgendaDocente() {
                                     <span className={`text-[10px] font-bold uppercase tracking-wider ${activeFunctionIndex === i ? 'text-blue-300' : aceptada ? 'text-green-600' : 'text-blue-500/70'}`}>
                                         Función {i + 1}
                                     </span>
-                                    {aceptada && activeFunctionIndex !== i ? (
+                                    {devuelta && activeFunctionIndex !== i ? (
+                                        <AlertTriangle className="w-4 h-4 text-orange-500" />
+                                    ) : aceptada && activeFunctionIndex !== i ? (
                                         <CheckCircle2 className="w-4 h-4 text-green-500" />
                                     ) : (
                                         <Clock className={`w-3.5 h-3.5 ${activeFunctionIndex === i ? 'text-blue-400' : 'text-blue-300 group-hover:text-blue-500 transition-colors'}`} />
@@ -642,8 +796,8 @@ export default function AgendaDocente() {
                                     <p className={`text-xs font-medium ${activeFunctionIndex === i ? 'text-blue-200' : 'text-blue-700'}`}>
                                         {f.horasFuncion} horas
                                     </p>
-                                    {aceptada && activeFunctionIndex !== i && (
-                                        <span className="text-[9px] font-bold text-green-700 bg-green-200 px-1.5 py-0.5 rounded">ACEPTADA</span>
+                                    {activeFunctionIndex !== i && (
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${devuelta ? 'text-orange-700 bg-orange-200' : vista === 'pendiente' ? 'text-gray-600 bg-gray-200' : vista === 'aprobada' ? 'text-green-800 bg-green-300' : 'text-green-700 bg-green-200'}`}>{devuelta ? 'DEVUELTA' : vista === 'pendiente' ? 'PENDIENTE' : vista === 'aprobada' ? 'APROBADA' : 'ACEPTADA'}</span>
                                     )}
                                 </div>
                             </button>
@@ -661,31 +815,27 @@ export default function AgendaDocente() {
 
                         return (
                         <div className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden relative ${esDeshabilitado ? 'border-gray-200 opacity-60' : 'border-blue-100'}`}>
-                            <div className="bg-blue-50/50 px-6 py-5 border-b border-blue-100 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-                                <div className="flex-1 w-full flex flex-col sm:flex-row gap-4">
-                                    <div className="flex-1">
-                                        <label className="flex items-center gap-2 text-sm font-bold text-blue-900 mb-1.5">
-                                            <Flag className="w-4 h-4 text-blue-600" />
-                                            Función Sustantiva (Actual)
-                                        </label>
-                                        <input
-                                            readOnly
-                                            className="w-full border-2 border-transparent bg-gray-100 rounded-lg px-4 py-2 text-sm font-bold outline-none text-gray-700"
-                                            value={funcion.funcionSustantiva || 'No asignada'}
-                                        />
-                                    </div>
-                                    <div className="sm:w-48">
-                                        <label className="flex items-center gap-2 text-sm font-bold text-blue-900 mb-1.5">
-                                            <Clock className="w-4 h-4 text-blue-600" />
-                                            Horas Totales Asignadas
-                                        </label>
-                                        <input
-                                            type="text"
-                                            readOnly
-                                            className="w-full border-2 border-transparent bg-gray-100 rounded-lg px-4 py-2 text-sm outline-none font-bold text-gray-800"
-                                            value={funcion.horasFuncion}
-                                        />
-                                    </div>
+                            <div className="bg-blue-50/50 px-6 py-4 border-b border-blue-100 flex flex-wrap items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-[11px] font-bold uppercase tracking-wider text-blue-500">Función {fIndex + 1} de {funciones.length}</p>
+                                    <h2 className="text-lg font-black text-[#1a2744] flex items-center gap-2">
+                                        <Flag className="w-4 h-4 text-blue-600 shrink-0" />
+                                        {funcion.funcionSustantiva || 'No asignada'}
+                                    </h2>
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-900 bg-white border border-blue-100 px-2.5 py-1 rounded-full">
+                                        <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                        {funcion.horasFuncion} horas asignadas
+                                    </span>
+                                    {(() => {
+                                        const v = vistaEstado(funcion);
+                                        const estilo = v === 'devuelta' ? 'text-orange-700 bg-orange-100 border-orange-200'
+                                            : v === 'pendiente' ? 'text-gray-600 bg-gray-100 border-gray-200'
+                                            : 'text-green-700 bg-green-100 border-green-200';
+                                        const texto = v === 'devuelta' ? 'Devuelta' : v === 'pendiente' ? 'Pendiente de aceptar' : v === 'aprobada' ? 'Aprobada' : 'Aceptada';
+                                        return <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${estilo}`}>{texto}</span>;
+                                    })()}
                                 </div>
                             </div>
 
@@ -704,9 +854,21 @@ export default function AgendaDocente() {
                                             const catsActs = getActividadesDelCatalogo(funcion.funcionSustantiva);
                                             const catsDescs = getDescripcionesDeActividad(funcion.funcionSustantiva, actividad.actividadLibre);
                                             const catsInds = getIndicadoresDeDescripcion(funcion.funcionSustantiva, actividad.actividadLibre, actividad.resultadoEsperado);
+                                            const faltas = faltasDeActividad(funcion.funcionSustantiva, actividad);
+                                            const marcar = intentoAceptar === fIndex;
 
                                             return (
                                             <div key={actividad.id} className="bg-white border border-gray-200 border-b-4 border-b-gray-300 rounded-xl p-6 shadow-sm relative group hover:border-b-blue-400 transition-all">
+                                                <div className="flex items-center justify-between gap-2 mb-4 pb-3 border-b border-gray-100">
+                                                    <span className="inline-flex items-center gap-2 text-sm font-bold text-[#1a2744]">
+                                                        <span className="w-6 h-6 rounded-full bg-[#1a2744] text-white text-xs flex items-center justify-center">{aIndex + 1}</span>
+                                                        {esDocenciaDirecta ? 'Asignatura' : 'Actividad'} {aIndex + 1} de {funcion.actividades.length}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-100 px-2.5 py-1 rounded-md" title="Las horas las define tu director">
+                                                        <Lock className="w-3 h-3 text-gray-400" />
+                                                        {actividad.horasActividad || 0} h asignadas por tu director
+                                                    </span>
+                                                </div>
                                                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                                                     
                                                     <div className="lg:col-span-12 xl:col-span-5 space-y-4">
@@ -747,6 +909,7 @@ export default function AgendaDocente() {
                                                                 />
                                                             ) : (
                                                                 <select
+                                                                    data-falta={marcar && faltas.actividad ? 'true' : undefined}
                                                                     className={`w-full border ${!actividad.actividadLibre ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'} rounded-lg px-3 py-2 text-sm focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none disabled:opacity-60 disabled:bg-gray-100`}
                                                                     value={actividad.actividadLibre}
                                                                     onChange={(e) => cambiarActividad(fIndex, aIndex, 'actividadLibre', e.target.value)}
@@ -760,17 +923,6 @@ export default function AgendaDocente() {
                                                             )}
                                                         </div>
 
-                                                        <div>
-                                                            <label className="block text-xs font-bold text-gray-700 mb-1.5 flex justify-between">
-                                                                <span>Horas Asignadas (Director)</span>
-                                                            </label>
-                                                            <input
-                                                                type="text"
-                                                                readOnly
-                                                                className="w-full sm:w-1/3 border border-gray-300 bg-gray-100 rounded-lg px-3 py-2 text-sm font-semibold text-gray-800 outline-none"
-                                                                value={actividad.horasActividad}
-                                                            />
-                                                        </div>
                                                     </div>
 
                                                     <div className="lg:col-span-12 xl:col-span-7 space-y-4">
@@ -828,7 +980,8 @@ export default function AgendaDocente() {
                                                                         Descripción de Resultados <span className="text-gray-400 font-normal">(Escribe libremente)</span>
                                                                     </label>
                                                                     <textarea
-                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100"
+                                                                        data-falta={marcar && faltas.descripcion ? 'true' : undefined}
+                                                                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100${marcar && faltas.descripcion ? ' !border-red-400 !bg-red-50' : ''}`}
                                                                         rows={2}
                                                                         placeholder="Describe qué actividades realizarás en docencia indirecta..."
                                                                         value={actividad.resultadoEsperado}
@@ -842,7 +995,8 @@ export default function AgendaDocente() {
                                                                         <Target className="w-3.5 h-3.5" /> Construcción de Fichas de Desarrollo Temático
                                                                     </label>
                                                                     <textarea
-                                                                        className="w-full border border-cyan-200 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100"
+                                                                        data-falta={marcar && faltas.indicador ? 'true' : undefined}
+                                                                        className={`w-full border border-cyan-200 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100${marcar && faltas.indicador ? ' !border-red-400 !bg-red-50' : ''}`}
                                                                         rows={2}
                                                                         placeholder="Describe las fichas de desarrollo temático..."
                                                                         value={actividad.indicadores[0]?.nombre_indicador || ''}
@@ -867,7 +1021,8 @@ export default function AgendaDocente() {
                                                                     />
                                                                 ) : esActividadOtro(actividad.actividadLibre) ? (
                                                                     <textarea
-                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100"
+                                                                        data-falta={marcar && faltas.descripcion ? 'true' : undefined}
+                                                                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white resize-y min-h-[60px] disabled:opacity-60 disabled:bg-gray-100${marcar && faltas.descripcion ? ' !border-red-400 !bg-red-50' : ''}`}
                                                                         rows={2}
                                                                         placeholder="Escribe cuál es la actividad y el resultado esperado..."
                                                                         value={actividad.resultadoEsperado}
@@ -876,7 +1031,8 @@ export default function AgendaDocente() {
                                                                     />
                                                                 ) : (
                                                                     <select
-                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white transition-colors disabled:opacity-60 disabled:bg-gray-100"
+                                                                        data-falta={marcar && faltas.descripcion ? 'true' : undefined}
+                                                                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white transition-colors disabled:opacity-60 disabled:bg-gray-100${marcar && faltas.descripcion ? ' !border-red-400 !bg-red-50' : ''}`}
                                                                         value={actividad.resultadoEsperado}
                                                                         onChange={(e) => cambiarActividad(fIndex, aIndex, 'resultadoEsperado', e.target.value)}
                                                                         disabled={!semanaActiva || !actividad.actividadLibre}
@@ -902,7 +1058,8 @@ export default function AgendaDocente() {
                                                                         min={0}
                                                                         max={META_MAXIMA}
                                                                         title={`Máximo ${META_MAXIMA}`}
-                                                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white disabled:opacity-60 disabled:bg-gray-100"
+                                                                        data-falta={marcar && faltas.meta ? 'true' : undefined}
+                                                                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none bg-white disabled:opacity-60 disabled:bg-gray-100${marcar && faltas.meta ? ' !border-red-400 !bg-red-50' : ''}`}
                                                                         value={actividad.meta}
                                                                         onChange={(e) => {
                                                                             // La meta es el denominador del avance: nunca negativa ni mayor al máximo
@@ -917,7 +1074,7 @@ export default function AgendaDocente() {
                                                         </div>
 
                                                         {!esDeshabilitado && (
-                                                            <div className="bg-orange-50/50 rounded-lg p-4 border border-orange-100">
+                                                            <div data-falta={marcar && faltas.indicador ? 'true' : undefined} className={`bg-orange-50/50 rounded-lg p-4 border ${marcar && faltas.indicador ? 'border-red-400 ring-1 ring-red-300' : 'border-orange-100'}`}>
                                                                 <div className="flex items-center justify-between mb-3">
                                                                     <label className="flex items-center gap-1.5 text-xs font-bold text-orange-800">
                                                                         <Target className="w-3.5 h-3.5" /> Indicadores (Entregables)
@@ -932,6 +1089,7 @@ export default function AgendaDocente() {
                                                                     </button>
                                                                 </div>
 
+                                                                {marcar && faltas.indicador && <p className="text-xs font-semibold text-red-600 mb-2">Falta al menos un indicador.</p>}
                                                                 <div className="space-y-2.5">
                                                                     {actividad.indicadores.map((ind, iIndex) => (
                                                                         <div key={ind.id} className="flex gap-2 items-center">
@@ -988,33 +1146,10 @@ export default function AgendaDocente() {
                                         })}
                                     </div>
 
-                                    {!esDeshabilitado && (
-                                        <div className="mt-8 pt-6 border-t border-gray-200 flex items-center justify-between">
-                                            {funcion.estadoAgenda === 'Aceptado' && (
-                                                <span className="flex items-center gap-2 text-green-700 text-sm font-bold">
-                                                    <CheckCircle2 className="w-5 h-5" />
-                                                    Función Aceptada
-                                                </span>
-                                            )}
-                                            <div className="ml-auto">
-                                                <button
-                                                    onClick={() => aceptarFuncion(fIndex)}
-                                                    disabled={guardando || !semanaActiva || !periodoAbierto}
-                                                    className={`px-6 py-2.5 font-bold rounded-lg shadow-md flex items-center gap-2 transition-all transform hover:scale-105 disabled:opacity-50 disabled:transform-none disabled:cursor-not-allowed ${
-                                                        funcion.estadoAgenda === 'Aceptado'
-                                                            ? 'bg-green-600 hover:bg-green-700 text-white shadow-green-500/20'
-                                                            : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20'
-                                                    }`}
-                                                >
-                                                    {guardando ? (
-                                                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                                    ) : (
-                                                        <CheckCircle2 className="w-5 h-5" />
-                                                    )}
-                                                    {funcion.estadoAgenda === 'Aceptado' ? 'Actualizar' : 'Aceptar'} ({funcion.actividades.length} Actividades)
-                                                </button>
-                                            </div>
-                                        </div>
+                                    {!esDeshabilitado && (activaPorAceptar || activaModificada) && (
+                                        <p className="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500">
+                                            Cuando termines esta función, pulsa <strong className="text-gray-700">{textoGuardar}</strong> en el botón de abajo.
+                                        </p>
                                     )}
                                 </div>
                             )}
@@ -1035,7 +1170,7 @@ export default function AgendaDocente() {
                             </h2>
                             <div className="flex items-center gap-3">
                                 <span className="text-blue-300 text-xs">
-                                    {funciones.filter(f => f.estadoAgenda === 'Aceptado').length}/{funciones.length} funciones aceptadas
+                                    {funciones.filter(cuentaComoAceptada).length}/{funciones.length} funciones aceptadas
                                 </span>
                                 {siguientePendiente !== null && (
                                     <button
@@ -1137,6 +1272,40 @@ export default function AgendaDocente() {
                 </div>
             )}
             
+            {/* Botón fijo abajo: la acción que toca (el progreso de la agenda se ve arriba) */}
+            {periodoAbierto && !cargandoEspacios && funciones.length > 0 && (
+                <div className="sticky bottom-4 z-30 mt-6 flex justify-end pointer-events-none" role="region" aria-label="Acción de la agenda">
+                    {hayQueGuardar ? (
+                        <button
+                            onClick={() => aceptarFuncion(activeFunctionIndex)}
+                            disabled={guardando || !semanaActiva}
+                            className="pointer-events-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-bold shadow-lg shadow-green-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {guardando
+                                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                : <CheckCircle2 className="w-4 h-4" />}
+                            {textoGuardar}
+                        </button>
+                    ) : siguientePendiente !== null ? (
+                        <button
+                            onClick={() => irAFuncion(siguientePendiente)}
+                            className="pointer-events-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#1a2744] hover:bg-[#243560] text-white text-sm font-bold shadow-lg shadow-blue-900/20 transition-colors"
+                        >
+                            Siguiente por aceptar: {funciones[siguientePendiente].funcionSustantiva}
+                            <ArrowRight className="w-4 h-4" />
+                        </button>
+                    ) : (
+                        <button
+                            onClick={verResumenAgenda}
+                            className="pointer-events-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-bold shadow-lg shadow-green-900/20 transition-colors"
+                        >
+                            <CheckCircle2 className="w-4 h-4" />
+                            Agenda completa · Ver resumen
+                        </button>
+                    )}
+                </div>
+            )}
+
             <div className="h-20"></div>
         </Layout>
     );

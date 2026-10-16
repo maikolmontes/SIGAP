@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Layout from '../../components/common/Layout';
 import api from '../../services/api';
-import { Search, Filter, Eye, AlertTriangle, CheckCircle2, XCircle, Clock, ChevronDown } from 'lucide-react';
+import { Eye, AlertTriangle, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import AsignacionesPorCorregir from '../../components/director/AsignacionesPorCorregir';
 import PanelAgendas from '../../components/director/PanelAgendas';
 import PanelSemana from '../../components/director/PanelSemana';
+import BarraConsulta, { CampoFiltro } from '../../components/director/BarraConsulta';
+import { CLASE_SELECT, useVistaAgendas } from '../../components/director/vistaAgendas';
 import { etiquetaSemestre, rotularCortes } from '../../utils/periodo'
 
 
@@ -25,7 +27,8 @@ export default function AgendasPorRevisar() {
     const [filtroEstado, setFiltroEstado] = useState('');
     const [filtroPrograma, setFiltroPrograma] = useState('');
     const [busqueda, setBusqueda] = useState('');
-    const [showFilters, setShowFilters] = useState(false);
+    const [filtroContrato, setFiltroContrato] = useState('');
+    const [vista, setVista] = useVistaAgendas();
     const [paginaActual, setPaginaActual] = useState(1);
     const [registrosPorPagina, setRegistrosPorPagina] = useState(10);
     // 'asignaciones'  = lo que cargó Planeación (aprobar y corregir horas)
@@ -59,10 +62,14 @@ export default function AgendasPorRevisar() {
         cargarAgendas();
     }, [cargarAgendas]);
 
-    const agendasFiltradas = useMemo(() => agendas.filter(a =>
-        a.nombre_docente.toLowerCase().includes(busqueda.toLowerCase()) ||
-        a.nombre_programa?.toLowerCase().includes(busqueda.toLowerCase())
-    ).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' })), [agendas, busqueda]);
+    const agendasFiltradas = useMemo(() => agendas.filter(a => {
+        const q = busqueda.toLowerCase().trim();
+        const coincide = !q
+            || a.nombre_docente.toLowerCase().includes(q)
+            || a.nombre_programa?.toLowerCase().includes(q)
+            || a.correo?.toLowerCase().includes(q);
+        return coincide && (!filtroContrato || a.tipo_contrato === filtroContrato);
+    }).sort((a, b) => (a.nombre_docente || '').localeCompare(b.nombre_docente || '', 'es', { sensitivity: 'base' })), [agendas, busqueda, filtroContrato]);
 
     const totalPaginas = Math.max(1, Math.ceil(agendasFiltradas.length / registrosPorPagina));
     const paginaSegura = Math.min(paginaActual, totalPaginas);
@@ -70,6 +77,10 @@ export default function AgendasPorRevisar() {
     const agendasPagina = agendasFiltradas.slice(inicio, inicio + registrosPorPagina);
 
     const programas = [...new Set(agendas.map(a => a.nombre_programa).filter(Boolean))];
+    const contratos = [...new Set(agendas.map(a => a.tipo_contrato).filter(Boolean))].sort();
+    const hayFiltros = !!(filtroEstado || filtroPrograma || filtroContrato);
+    const limpiarFiltros = () => { setFiltroEstado(''); setFiltroPrograma(''); setFiltroContrato(''); setPaginaActual(1); };
+    const revisar = (id: number) => navigate(`/director/agendas/${id}`, { state: { tab: 'diligenciadas' } });
     const periodoLabel = periodo ? `${periodo.anio}-${etiquetaSemestre(periodo.semestre)}` : 'Sin periodo';
 
     // Contadores
@@ -160,61 +171,40 @@ export default function AgendasPorRevisar() {
                 ))}
             </div>
 
-            {/* Barra de búsqueda y filtros */}
+            <BarraConsulta
+                busqueda={busqueda}
+                onBusqueda={(v) => { setBusqueda(v); setPaginaActual(1); }}
+                vista={vista}
+                onVista={setVista}
+                hayFiltros={hayFiltros}
+                onLimpiar={limpiarFiltros}
+                cargando={loading}
+                onActualizar={cargarAgendas}
+            >
+                <CampoFiltro etiqueta="Programa">
+                    <select value={filtroPrograma} onChange={(e) => { setFiltroPrograma(e.target.value); setPaginaActual(1); }} className={CLASE_SELECT}>
+                        <option value="">Todos los programas</option>
+                        {programas.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                </CampoFiltro>
+                <CampoFiltro etiqueta="Estado">
+                    <select value={filtroEstado} onChange={(e) => { setFiltroEstado(e.target.value); setPaginaActual(1); }} className={CLASE_SELECT}>
+                        <option value="">Todos los estados</option>
+                        <option value="Pendiente">Pendiente</option>
+                        <option value="Aceptado">Aceptado</option>
+                        <option value="Aprobada">Aprobada</option>
+                        <option value="Devuelta">Devuelta</option>
+                    </select>
+                </CampoFiltro>
+                <CampoFiltro etiqueta="Contrato">
+                    <select value={filtroContrato} onChange={(e) => { setFiltroContrato(e.target.value); setPaginaActual(1); }} className={CLASE_SELECT}>
+                        <option value="">Todos los contratos</option>
+                        {contratos.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                </CampoFiltro>
+            </BarraConsulta>
+
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6">
-                <div className="px-5 py-4 border-b border-gray-100 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-                    <div className="relative flex-1 max-w-md">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Buscar docente o programa..."
-                            value={busqueda}
-                            onChange={(e) => setBusqueda(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-                        />
-                    </div>
-                    <button
-                        onClick={() => setShowFilters(!showFilters)}
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors"
-                    >
-                        <Filter className="w-4 h-4" />
-                        Filtros
-                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
-                    </button>
-                </div>
-
-                {showFilters && (
-                    <div className="px-5 py-3 bg-gray-50/50 border-b border-gray-100 flex flex-wrap gap-3">
-                        <select
-                            value={filtroEstado}
-                            onChange={(e) => setFiltroEstado(e.target.value)}
-                            className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-400"
-                        >
-                            <option value="">Todos los estados</option>
-                            <option value="Pendiente">Pendiente</option>
-                            <option value="Aceptado">Aceptado</option>
-                            <option value="Aprobada">Aprobada</option>
-                            <option value="Devuelta">Devuelta</option>
-                        </select>
-                        <select
-                            value={filtroPrograma}
-                            onChange={(e) => setFiltroPrograma(e.target.value)}
-                            className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-400"
-                        >
-                            <option value="">Todos los programas</option>
-                            {programas.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                        {(filtroEstado || filtroPrograma) && (
-                            <button
-                                onClick={() => { setFiltroEstado(''); setFiltroPrograma(''); }}
-                                className="px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            >
-                                Limpiar filtros
-                            </button>
-                        )}
-                    </div>
-                )}
-
                 {/* Tabla */}
                 <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
                     {loading ? (
@@ -226,6 +216,43 @@ export default function AgendasPorRevisar() {
                             <Clock className="w-12 h-12 mx-auto mb-3 opacity-30" />
                             <p className="font-medium">No se encontraron agendas</p>
                             <p className="text-sm mt-1">Ajusta los filtros o espera a que los docentes envíen sus agendas</p>
+                        </div>
+                    ) : vista === 'tarjetas' ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-5">
+                            {agendasPagina.map((a) => {
+                                const badge = estadoBadge[a.estado_general] || estadoBadge.Pendiente;
+                                const esInconsistencia = a.perfil_docente === 'INCONSISTENCIAS EN AGENDA AC 30';
+                                return (
+                                    <div key={a.id_usuario} className="rounded-2xl border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all p-4 flex flex-col gap-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                                                    {a.nombre_docente?.charAt(0)}{a.nombre_docente?.split(' ')[1]?.charAt(0) || ''}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="font-bold text-gray-900 text-sm leading-tight truncate">{a.nombre_docente}</p>
+                                                    <p className="text-xs text-gray-400 truncate">{a.nombre_programa} · {a.tipo_contrato} · {Math.round(a.total_horas)}h</p>
+                                                </div>
+                                            </div>
+                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ${badge.bg} ${badge.text}`}>
+                                                <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                                                {a.estado_general}
+                                            </span>
+                                        </div>
+                                        <span className={`self-start inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded uppercase ${esInconsistencia ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
+                                            {esInconsistencia && <AlertTriangle className="w-3 h-3" />}
+                                            {a.perfil_docente}
+                                        </span>
+                                        <button
+                                            onClick={() => revisar(a.id_usuario)}
+                                            className="mt-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+                                        >
+                                            <Eye className="w-3.5 h-3.5" />
+                                            Revisar
+                                        </button>
+                                    </div>
+                                );
+                            })}
                         </div>
                     ) : (
                         <table className="w-full text-sm">
@@ -272,7 +299,7 @@ export default function AgendasPorRevisar() {
                                             </td>
                                             <td className="px-5 py-3.5 text-center">
                                                 <button
-                                                    onClick={() => navigate(`/director/agendas/${a.id_usuario}`)}
+                                                    onClick={() => navigate(`/director/agendas/${a.id_usuario}`, { state: { tab: 'diligenciadas' } })}
                                                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
                                                 >
                                                     <Eye className="w-3.5 h-3.5" />

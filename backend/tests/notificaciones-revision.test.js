@@ -60,6 +60,7 @@ const baseFalsa = (cfg = {}) => {
         if (/SELECT af.id_funciones, af.funcion_sustantiva, af.id_periodo, ua.id_usuario AS id_docente/.test(sql)) {
             return { rows: [{ id_funciones: p[0], funcion_sustantiva: 'Docencia Directa', id_periodo: 10, id_docente: 1, anio: 2026, semestre: config.semestre }] };
         }
+        if (/SELECT observacion FROM revision_corte/.test(sql)) return { rows: [{ observacion: config.motivoPrevio === undefined ? 'Falta el acta firmada' : config.motivoPrevio }] };
         if (/af.estado_agenda <> 'Por Aprobar' LIMIT 1/.test(sql)) return { rows: config.agendaVisible ? [{ '?column?': 1 }] : [] };
         if (/NOT EXISTS/.test(sql)) return { rows: config.pendientes };
         if (/estado_agenda <> 'Por Aprobar' AND u.activo = TRUE/.test(sql)) return { rows: config.docentesConAgenda };
@@ -92,7 +93,7 @@ test('corte devuelto: campana y correo llevan el motivo y reinician el aviso de 
     await servicio.notificarCorteRevisado({ idFunciones: 100, semana: 16, estado: 'Devuelto', idRevisor: 2, observacion: 'Falta el acta firmada' });
     const [aviso] = deUsuario(db.campana, 1);
     assert.equal(aviso.tipo, 'corte_devuelto');
-    assert.equal(aviso.enlace, '/docente/avance-semana-16');
+    assert.equal(aviso.enlace, '/docente/avance-semana-16?devuelto=1', 'el enlace abre el reporte mostrando el motivo');
     assert.match(aviso.mensaje, /Falta el acta firmada/);
     assert.ok(correosA(db.bitacora, 'ana@cesmag.edu.co').some((b) => b.tipo === 'corte_devuelto'));
     assert.ok(!db.bitacora.some((b) => b.clave === 'avance_guardado:1:10:16'), 'el docente debe poder volver a avisar al guardar');
@@ -109,6 +110,33 @@ test('un estado que no es Aprobado ni Devuelto no avisa', async () => {
     const r = await servicio.notificarCorteRevisado({ idFunciones: 100, semana: 8, estado: 'Visto bueno' });
     assert.equal(r.motivo, 'estado_sin_aviso');
     assert.equal(db.campana.length, 0);
+});
+
+// ---- Corrección de una función devuelta ➔ directores ----
+test('corrección enviada: los directores reciben campana y correo que dicen que es una corrección', async () => {
+    const db = baseFalsa();
+    await servicio.notificarCorteCorregido({ idFunciones: 100, semana: 8, idDocente: 1 });
+    for (const id of [2, 3]) {
+        const [aviso] = deUsuario(db.campana, id);
+        assert.equal(aviso.tipo, 'corte_corregido');
+        assert.equal(aviso.enlace, '/director/agendas/1/semana/8');
+        assert.match(aviso.titulo, /Ana Docente corrigió «Docencia Directa»/);
+    }
+    const [correo] = correosA(db.bitacora, 'luis@cesmag.edu.co');
+    assert.equal(correo.tipo, 'corte_corregido');
+    assert.match(correo.asunto, /corrigió/);
+    assert.equal(correo.remitente, 'Ana Docente (Docente · SIGAP)', 'sale en nombre del docente, con su correo para responder');
+});
+
+test('corrección enviada: el docente que además es su propio director no se avisa a sí mismo; sin directores no hay aviso', async () => {
+    const db = baseFalsa({ directores: [USUARIOS[1], USUARIOS[2]] });
+    await servicio.notificarCorteCorregido({ idFunciones: 100, semana: 16, idDocente: 1 });
+    assert.equal(deUsuario(db.campana, 1).length, 0);
+    assert.equal(deUsuario(db.campana, 2).length, 1);
+
+    const vacia = baseFalsa({ directores: [] });
+    assert.equal((await servicio.notificarCorteCorregido({ idFunciones: 100, semana: 8, idDocente: 1 })).motivo, 'sin_directores');
+    assert.equal(vacia.campana.length, 0);
 });
 
 // ---- Visto bueno de un corte ➔ directores ----

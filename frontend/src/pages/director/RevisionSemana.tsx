@@ -59,6 +59,8 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
     const [aviso, setAviso] = useState<{ tipo: 'exito' | 'error'; msg: string } | null>(null);
 
     const [accionando, setAccionando] = useState<number | null>(null);
+    // Corte que se está devolviendo al docente, con el motivo que se escribe
+    const [devolviendo, setDevolviendo] = useState<{ id: number; texto: string } | null>(null);
     const [evidenciaAbierta, setEvidenciaAbierta] = useState<EvidenciaVisor | null>(null);
 
     const cargar = useCallback(async () => {
@@ -107,6 +109,25 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
             await cargar();
         } catch (err: any) {
             setAviso({ tipo: 'error', msg: err.response?.data?.error || 'No se pudo completar la acción.' });
+        } finally {
+            setAccionando(null);
+        }
+    };
+
+    // Devuelve el corte de una función al docente: el motivo es obligatorio y le llega por la campana y el correo
+    const devolverCorte = async () => {
+        if (!devolviendo) return;
+        const motivo = devolviendo.texto.trim();
+        if (!motivo) { setAviso({ tipo: 'error', msg: 'Escribe por qué devuelves el corte.' }); return; }
+        setAccionando(devolviendo.id);
+        try {
+            const res = await api.put(`/director/cortes/${devolviendo.id}/${semana}/devolver`, { observacion: motivo });
+            setAviso({ tipo: 'exito', msg: res.data.mensaje });
+            setDevolviendo(null);
+            await cargar();
+        } catch (err) {
+            const e = err as { response?: { data?: { error?: string } } };
+            setAviso({ tipo: 'error', msg: e.response?.data?.error || 'No se pudo devolver el corte.' });
         } finally {
             setAccionando(null);
         }
@@ -368,7 +389,7 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
                         const corte = (f.revision_cortes || {})[semana] || null;
                         const estado = corte?.estado || 'Sin reportar';
                         const rotulo = estado === 'Visto bueno' ? 'Revisado'
-                            : estado === 'Pendiente' ? 'Pendiente por revisar'
+                            : estado === 'Pendiente' ? (corte?.corregido_en ? 'Corregido por el docente' : 'Pendiente por revisar')
                             : estado === 'Aprobado' ? 'Cerrado por el Director'
                             : estado;
                         const esMia = f.en_alcance !== false;
@@ -376,6 +397,7 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
 
                         const puedeDarVisto = esMia && corte && ['Pendiente', 'Devuelto'].includes(estado);
                         const puedeCerrar = puedeAprobar && corte && estado !== 'Aprobado';
+                        const puedeDevolver = esMia && !!corte && ['Pendiente', 'Visto bueno'].includes(estado);
 
                         return (
                             <div key={f.id_funciones} className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs">
@@ -397,7 +419,7 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
                                         estado === 'Aprobado'    ? 'bg-green-50 text-green-700 border-green-200'
                                             : estado === 'Visto bueno' ? 'bg-blue-50 text-blue-700 border-blue-200'
                                             : estado === 'Devuelto'    ? 'bg-orange-50 text-orange-700 border-orange-200'
-                                            : estado === 'Pendiente'   ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                            : estado === 'Pendiente'   ? (corte?.corregido_en ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-amber-50 text-amber-700 border-amber-200')
                                             : 'bg-gray-50 text-gray-500 border-gray-200'
                                     }`}>
                                         {rotulo}
@@ -417,12 +439,14 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
                                     </div>
                                 )}
 
-                                {corte && (puedeDarVisto || puedeCerrar || (esMia && !puedeAprobar && estado === 'Visto bueno')) && (
+                                {corte && (puedeDarVisto || puedeCerrar || puedeDevolver || (esMia && !puedeAprobar && estado === 'Visto bueno')) && (
                                     <div className="px-5 py-2.5 bg-gray-50/80 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2">
                                         <span className="text-[11px] text-gray-500">
                                             {estado === 'Visto bueno' && corte.visto_bueno_nombre && `Revisado por ${corte.visto_bueno_nombre}`}
                                             {estado === 'Devuelto' && corte.observacion && `Devuelto: ${corte.observacion}`}
-                                            {estado === 'Pendiente' && 'Pendiente por revisar'}
+                                            {estado === 'Pendiente' && (corte.corregido_en
+                                                ? `Corregido por el docente el ${new Date(corte.corregido_en).toLocaleDateString('es-CO', { day: 'numeric', month: 'long' })}${corte.observacion ? ` · Lo que devolviste: ${corte.observacion}` : ''}`
+                                                : 'Pendiente por revisar')}
                                         </span>
                                         <div className="flex items-center gap-2">
                                             {(puedeDarVisto || puedeCerrar) && (
@@ -435,6 +459,15 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
                                                     {accionando === f.id_funciones ? 'Guardando...' : 'Marcar como revisado'}
                                                 </button>
                                             )}
+                                            {puedeDevolver && (
+                                                <button
+                                                    onClick={() => setDevolviendo({ id: f.id_funciones, texto: '' })}
+                                                    disabled={accionando === f.id_funciones}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-orange-50 border border-orange-200 text-orange-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                                                >
+                                                    <Undo2 className="w-3.5 h-3.5" /> Devolver
+                                                </button>
+                                            )}
                                             {esMia && !puedeAprobar && estado === 'Visto bueno' && (
                                                 <button
                                                     onClick={() => accionCorte(f.id_funciones, 'quitar-visto')}
@@ -444,6 +477,38 @@ export default function RevisionSemana({ modulo = 'director' }: RevisionSemanaPr
                                                     <Undo2 className="w-3.5 h-3.5" /> Quitar revisado
                                                 </button>
                                             )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {devolviendo?.id === f.id_funciones && (
+                                    <div className="px-5 py-3 bg-orange-50/60 border-t border-orange-100 space-y-2">
+                                        <label className="block text-xs font-bold text-orange-800" htmlFor={`motivo-${f.id_funciones}`}>
+                                            ¿Por qué devuelves este corte? El docente lo verá en la campana y en su correo.
+                                        </label>
+                                        <textarea
+                                            id={`motivo-${f.id_funciones}`}
+                                            autoFocus
+                                            rows={3}
+                                            value={devolviendo?.texto ?? ""}
+                                            onChange={(e) => setDevolviendo({ id: f.id_funciones, texto: e.target.value })}
+                                            placeholder="Describe qué debe corregir o completar..."
+                                            className="w-full border border-orange-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-200"
+                                        />
+                                        <div className="flex items-center justify-end gap-2">
+                                            <button
+                                                onClick={() => setDevolviendo(null)}
+                                                className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                onClick={devolverCorte}
+                                                disabled={accionando === f.id_funciones || !(devolviendo?.texto ?? "").trim()}
+                                                className="px-3 py-1.5 text-xs font-bold text-white bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 rounded-lg cursor-pointer"
+                                            >
+                                                {accionando === f.id_funciones ? 'Enviando...' : 'Devolver al docente'}
+                                            </button>
                                         </div>
                                     </div>
                                 )}

@@ -9,6 +9,7 @@ router.use(verifyToken);
 router.get('/base/:id_usuario', controller.getAgendaBase);
 router.post('/guardar-funcion', controller.guardarFuncionDocente);
 router.post('/guardar-avance', controller.guardarAvanceDocente);
+router.put('/cortes/:id_funciones/:semana/corregido', controller.corregirCorte);
 router.get('/:id_usuario', controller.getAgenda);
 
 module.exports = router;

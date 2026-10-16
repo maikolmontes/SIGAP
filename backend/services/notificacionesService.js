@@ -714,6 +714,8 @@ const notificarCorteRevisado = async ({ idFunciones, semana, estado, idRevisor =
     const aprobado = estado === 'Aprobado';
     const corte = etiquetaCorte(semana, f.semestre);
     const quien = revisor ? revisor.nombre_completo : 'La dirección de programa';
+    // Si lo devolvieron, el enlace abre el reporte con el motivo a la vista (?devuelto=1 muestra la ventana del motivo)
+    const enlaceCorte = aprobado ? enlaceAvanceDocente(semana) : `${enlaceAvanceDocente(semana)}?devuelto=1`;
 
     // Si lo devolvieron, tendrá que volver a guardar: el próximo guardado debe avisar de nuevo a la dirección
     if (!aprobado) await reiniciarNotificacion(claveAvanceGuardado(f.id_docente, f.id_periodo, semana));
@@ -725,7 +727,7 @@ const notificarCorteRevisado = async ({ idFunciones, semana, estado, idRevisor =
         mensaje: aprobado
             ? `${quien} aprobó «${f.funcion_sustantiva}» en ${corte}.`
             : `${quien} devolvió «${f.funcion_sustantiva}» en ${corte}: ${observacion || 'revisa las observaciones.'}`,
-        enlace: enlaceAvanceDocente(semana),
+        enlace: enlaceCorte,
     });
     if (!docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
 
@@ -739,7 +741,7 @@ const notificarCorteRevisado = async ({ idFunciones, semana, estado, idRevisor =
             : `Su avance de la función «${f.funcion_sustantiva}» fue devuelto para que lo revise y lo ajuste. Cuando termine, guárdelo de nuevo para que vuelva a revisión.`,
         datos: [['Período', periodoDeFuncion(f)], ['Corte', corte], ['Función', f.funcion_sustantiva], [aprobado ? 'Aprobado por' : 'Devuelto por', quien]],
         recuadro: aprobado ? null : { titulo: 'Motivo de la devolución', texto: observacion },
-        boton: { texto: 'Ver mi avance', enlace: plantillas.url(enlaceAvanceDocente(semana)), color: aprobado ? plantillas.COLORES.verde : plantillas.COLORES.naranja },
+        boton: { texto: aprobado ? 'Ver mi avance' : 'Ver el motivo y corregir', enlace: plantillas.url(enlaceCorte), color: aprobado ? plantillas.COLORES.verde : plantillas.COLORES.naranja },
     });
     return enviarYRegistrar({
         tipo: aprobado ? 'corte_aprobado' : 'corte_devuelto',
@@ -1090,6 +1092,53 @@ const notificarCortesPorCerrar = async ({ dias = 3, idRemitente = null, correo =
     return { ok: true, cortes: cortes.length, total, enviados };
 };
 
+// ---- 8.9 El docente corrigió una función devuelta  ➔  Directores del programa ----------
+// Es el "ya corregí" del docente: la función vuelve a revisión y la dirección se entera de que es una
+// corrección (con lo que ella había pedido), no de un guardado cualquiera.
+const notificarCorteCorregido = async ({ idFunciones, semana, idDocente = null }) => {
+    const f = await datosDeFuncion(idFunciones);
+    if (!f) return { ok: false, motivo: 'funcion_no_encontrada' };
+    const docente = await getUsuario(idDocente || f.id_docente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const directores = (await getDirectoresDePrograma(docente.id_programa)).filter((d) => Number(d.id_usuario) !== Number(docente.id_usuario));
+    if (directores.length === 0) return { ok: false, motivo: 'sin_directores' };
+
+    // Lo que la dirección había pedido corregir (queda guardado en la devolución)
+    const previo = (await pool.query('SELECT observacion FROM revision_corte WHERE id_funciones = $1 AND semana = $2', [idFunciones, Number(semana)])).rows[0];
+    const motivoPrevio = previo?.observacion || null;
+
+    const corte = etiquetaCorte(semana, f.semestre);
+    const enlace = `/director/agendas/${f.id_docente}/semana/${Number(semana)}`;
+
+    await notificacionesApp.crearParaVarios(directores.map((d) => d.id_usuario), {
+        tipo: 'corte_corregido',
+        titulo: `${docente.nombre_completo} corrigió «${f.funcion_sustantiva}»`,
+        mensaje: `Envió de nuevo su avance de ${corte} después de tu devolución. Está listo para revisar.`,
+        enlace,
+        clave: `corte_corregido:${idFunciones}:${Number(semana)}`,
+    });
+
+    const resultados = [];
+    for (const director of directores) {
+        const { subject, html } = plantillas.plantillaAviso({
+            asunto: `${docente.nombre_completo} corrigió «${f.funcion_sustantiva}» — ${corte}`,
+            titulo: `Corrección enviada en ${corte}`,
+            nombre: director.nombre_completo,
+            parrafo: `${docente.nombre_completo} corrigió la función «${f.funcion_sustantiva}» que usted había devuelto y la envió de nuevo a revisión.`,
+            datos: [['Docente', docente.nombre_completo], ['Programa', docente.nombre_programa], ['Período', periodoDeFuncion(f)], ['Corte', corte], ['Función', f.funcion_sustantiva]],
+            recuadro: motivoPrevio ? { titulo: 'Lo que usted había pedido corregir', texto: motivoPrevio, color: plantillas.COLORES.verde } : null,
+            boton: { texto: 'Revisar la corrección', enlace: plantillas.url(enlace) },
+        });
+        resultados.push(await enviarYRegistrar({
+            tipo: 'corte_corregido',
+            clave: `corte_corregido:${idFunciones}:${Number(semana)}:${Date.now()}`,
+            to: director.correo, subject, html,
+            remitente: await getRemitente(docente.id_usuario, 'Docente'),
+        }));
+    }
+    return { ok: resultados.some((r) => r.ok), enviados: resultados.length };
+};
+
 // ----------------------------------------------------------------
 // Versiones "dispara y olvida" para usar dentro de los controladores
 // ----------------------------------------------------------------
@@ -1154,6 +1203,7 @@ const enSegundoPlanoAPI = {
     asignacionesCorregidasAhora: esperando('asignacionesCorregidas', notificarAsignacionesCorregidas),
     vistoBuenoAsignacionAhora: esperando('vistoBuenoAsignacion', notificarVistoBuenoAsignacion),
     semanaHabilitadaAhora: esperando('semanaHabilitada', notificarSemanaHabilitada, 8000),
+    corteCorregidoAhora: esperando('corteCorregido', notificarCorteCorregido),
 };
 
 module.exports = {
@@ -1176,6 +1226,7 @@ module.exports = {
     reiniciarAvisoVistoAsignacion,
     notificarSemanaHabilitada,
     notificarCortesPorCerrar,
+    notificarCorteCorregido,
     // Versiones en segundo plano
     background: enSegundoPlanoAPI,
     // Auxiliares reutilizables
