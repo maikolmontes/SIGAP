@@ -20,7 +20,7 @@ const DIRECTA = 'Docencia Directa';
 const INDIRECTA = 'Docencia Indirecta';
 const INVESTIGACION = 'Investigación';
 const ACADEMICO_ADMIN = 'Académico-Administrativo';
-const VICERRECTORIA = 'Vicerrectoría';
+const VICERRECTORIA = 'Vicerrectoría para la Evangelización de las Culturas';
 const CALIDAD = 'Aseguramiento de Calidad';
 
 // Acuerdo 030/2024, cap. 2 art. 7: la docencia indirecta es el 30 % de la directa

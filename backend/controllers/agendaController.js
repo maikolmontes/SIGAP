@@ -2,6 +2,7 @@ const pool = require('../db/connection');
 const notificaciones = require('../services/notificacionesService');
 const { rolesEfectivos } = require('../utils/rolActivo');
 const { verificarSemana } = require('../utils/semanaAbierta');
+const { asegurarCorregidoEn } = require('../utils/esquemaRevisionCorte');
 const { idUsuarioDe, puedeVerDocente } = require('../middleware/accesoEvidencias');
 
 // Meta máxima que puede escribir un docente en una actividad de su agenda
@@ -185,7 +186,8 @@ const getAgendaBase = async (req, res) => {
                 af.id_funciones,
                 af.funcion_sustantiva,
                 af.horas_funcion,
-                af.estado_agenda
+                af.estado_agenda,
+                af.observaciones_generales
             FROM usuario_asignacion ua
             JOIN asignacion_funciones af ON ua.id_funciones = af.id_funciones
             JOIN periodo p ON p.id_periodo = af.id_periodo
@@ -258,8 +260,30 @@ const getAgendaBase = async (req, res) => {
             ORDER BY af.id_funciones, aa.id_asignacionact, d.id_descripcion, i.id_indicadores
         `, [id_usuario]);
 
+        // Estado de revisión de cada corte (semana 8 y 16) por función: así el docente ve cuáles le devolvieron y por qué
+        let cortes = [];
+        const idsFunciones = funciones.rows.map((fn) => fn.id_funciones);
+        if (idsFunciones.length > 0) {
+            try {
+                await asegurarCorregidoEn();
+                cortes = (await pool.query(
+                    'SELECT id_funciones, semana, estado, observacion, corregido_en, actualizado_en FROM revision_corte WHERE id_funciones = ANY($1::int[])',
+                    [idsFunciones]
+                )).rows;
+            } catch (error) {
+                console.warn('No se pudo leer revision_corte:', error.message);
+            }
+        }
+        const funcionesConCortes = funciones.rows.map((fn) => ({
+            ...fn,
+            revision_cortes: Object.fromEntries(
+                cortes.filter((c) => c.id_funciones === fn.id_funciones)
+                    .map((c) => [String(c.semana), { estado: c.estado, observacion: c.observacion, corregido_en: c.corregido_en, actualizado_en: c.actualizado_en }])
+            ),
+        }));
+
         res.json({
-            funciones: funciones.rows,
+            funciones: funcionesConCortes,
             actividades: actividades.rows
         });
 
@@ -577,6 +601,14 @@ const guardarAvanceDocente = async (req, res) => {
                 }
             }
 
+            // Solo se manda a revisión lo que de verdad cambió: guardar sin tocar una función no debe deshacer el
+            // visto bueno que otro revisor ya le dio ni reabrir lo que ya estaba revisado.
+            const aNumero = (v) => { const n = parseFloat(v); return Number.isNaN(n) || n < 0 ? 0 : n; };
+            const previo8 = resultMeta.rows.length > 0 ? aNumero(resultMeta.rows[0].guardado_8) : 0;
+            const previo16 = resultMeta.rows.length > 0 ? aNumero(resultMeta.rows[0].guardado_16) : 0;
+            const cambio8 = Math.abs(ejec8 - previo8) > 1e-9;
+            const cambio16 = Math.abs(ejec16 - previo16) > 1e-9;
+
             // El docente solo registra su ejecución. Las observaciones son del
             // Director y viven en observaciones_director; antes esta consulta
             // escribía indicadores.observaciones con cadena vacía en cada guardado.
@@ -592,8 +624,8 @@ const guardarAvanceDocente = async (req, res) => {
             ]);
 
             // Guardar el avance manda el corte de esa función a revisión.
-            // Si estaba devuelto, vuelve a 'Pendiente' y se limpia el motivo;
-            // si el Director ya lo cerró, no se reabre solo.
+            // Si el Director ya lo cerró no se reabre solo, y si lo DEVOLVIÓ sigue devuelto hasta que el docente
+            // envíe la corrección (PUT /agenda/cortes/:id/:semana/corregido): guardar otra cosa no la borra.
             const funcRes = await client.query(`
                 SELECT af.id_funciones
                 FROM indicadores i
@@ -606,16 +638,23 @@ const guardarAvanceDocente = async (req, res) => {
 
             if (funcRes.rows.length > 0) {
                 const idFunciones = funcRes.rows[0].id_funciones;
-                for (const [semanaCorte, valor] of [[8, ejec8], [16, ejec16]]) {
+                for (const [semanaCorte, valor, cambio] of [[8, ejec8, cambio8], [16, ejec16, cambio16]]) {
                     if (valor <= 0) continue;
+                    if (!cambio) {
+                        // Sin cambios en este corte: solo se crea la fila si no existía; si ya está revisada, se deja como está
+                        await client.query(`
+                            INSERT INTO revision_corte (id_funciones, semana, estado, actualizado_en)
+                            VALUES ($1, $2, 'Pendiente', NOW())
+                            ON CONFLICT (id_funciones, semana) DO NOTHING
+                        `, [idFunciones, semanaCorte]);
+                        continue;
+                    }
                     await client.query(`
                         INSERT INTO revision_corte (id_funciones, semana, estado, actualizado_en)
                         VALUES ($1, $2, 'Pendiente', NOW())
                         ON CONFLICT (id_funciones, semana) DO UPDATE
-                        SET estado = CASE WHEN revision_corte.estado = 'Aprobado'
+                        SET estado = CASE WHEN revision_corte.estado IN ('Aprobado', 'Devuelto')
                                           THEN revision_corte.estado ELSE 'Pendiente' END,
-                            observacion = CASE WHEN revision_corte.estado = 'Devuelto'
-                                               THEN NULL ELSE revision_corte.observacion END,
                             actualizado_en = NOW()
                     `, [idFunciones, semanaCorte]);
                 }
@@ -623,7 +662,24 @@ const guardarAvanceDocente = async (req, res) => {
         }
 
         await client.query('COMMIT');
-        
+
+        // Aviso a la dirección (campana y correo) de que hay un avance para revisar: una vez por docente y corte,
+        // y solo si el corte guardado trae algo registrado.
+        // Si todavía tiene funciones devueltas en este corte, el aviso a la dirección sale al enviar la corrección
+        let hayDevuelta = false;
+        if (corteGuardado) {
+            try {
+                hayDevuelta = (await pool.query(
+                    `SELECT 1 FROM revision_corte rc JOIN usuario_asignacion ua ON ua.id_funciones = rc.id_funciones
+                     WHERE ua.id_usuario = $1 AND rc.semana = $2 AND rc.estado = 'Devuelto' LIMIT 1`,
+                    [idUsuarioDe(req), Number(corteGuardado)]
+                )).rows.length > 0;
+            } catch { /* sin la tabla: se avisa como siempre */ }
+        }
+        if (corteGuardado && !hayDevuelta && indicadores.some((i) => parseFloat(i && i[`ejecucion_${corteGuardado}`]) > 0)) {
+            await notificaciones.background.avanceGuardadoAhora({ idDocente: idUsuarioDe(req), semana: Number(corteGuardado) });
+        }
+
         const respuesta = { mensaje: 'Avance guardado correctamente.' };
         if (advertencias.length > 0) {
             respuesta.advertencias = advertencias;
@@ -640,4 +696,43 @@ const guardarAvanceDocente = async (req, res) => {
     }
 };
 
-module.exports = { getAgenda, getAgendaBase, guardarFuncionDocente, guardarAvanceDocente };
+// PUT /api/agenda/cortes/:id_funciones/:semana/corregido
+// El docente avisa que ya corrigió una función que el director devolvió: vuelve a 'Pendiente' (revisión) y se
+// conserva el motivo para que la dirección compare. Solo el dueño de la función y solo mientras el corte esté abierto.
+const corregirCorte = async (req, res) => {
+    const idFunciones = parseInt(req.params.id_funciones, 10);
+    const semana = parseInt(req.params.semana, 10);
+    if (isNaN(idFunciones) || ![8, 16].includes(semana)) {
+        return res.status(400).json({ error: 'Función o semana inválida.' });
+    }
+
+    try {
+        const dueno = await pool.query('SELECT 1 FROM usuario_asignacion WHERE id_funciones = $1 AND id_usuario = $2', [idFunciones, idUsuarioDe(req)]);
+        if (dueno.rows.length === 0) {
+            return res.status(403).json({ error: 'Esta función no es de tu agenda.' });
+        }
+        if (!esPlaneacionOAdmin(req)) {
+            const corte = await verificarSemana(String(semana));
+            if (!corte.abierta) return res.status(403).json({ error: corte.mensaje || `La Semana ${semana} no está abierta.` });
+        }
+
+        await asegurarCorregidoEn();
+        const r = await pool.query(
+            `UPDATE revision_corte
+                SET estado = 'Pendiente', corregido_en = NOW(), actualizado_en = NOW()
+              WHERE id_funciones = $1 AND semana = $2 AND estado = 'Devuelto'`,
+            [idFunciones, semana]
+        );
+        if (r.rowCount === 0) {
+            return res.status(409).json({ error: 'Esta función no está devuelta en este corte.' });
+        }
+
+        await notificaciones.background.corteCorregidoAhora({ idFunciones, semana, idDocente: idUsuarioDe(req) });
+        res.json({ mensaje: 'Corrección enviada: la función volvió a revisión de tu director.', estado: 'Pendiente' });
+    } catch (error) {
+        console.error('Error en corregirCorte:', error.message);
+        res.status(500).json({ error: 'Error al enviar la corrección.' });
+    }
+};
+
+module.exports = { getAgenda, getAgendaBase, guardarFuncionDocente, guardarAvanceDocente, corregirCorte };

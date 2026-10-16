@@ -77,7 +77,7 @@ const menuDocente: MenuItem[] = [
     { label: 'Reporte Semana 16', path: '/docente/avance-semana-16', icon: Clock },
     { label: 'Evidencias', path: '/docente/evidencias', icon: FileText },
     { label: 'Reportes', isHeader: true },
-    { label: 'Informe de evidencias', path: '/docente/reportes', icon: FileSpreadsheet },
+    { label: 'Historial de agendas', path: '/docente/reportes', icon: FileSpreadsheet },
 ]
 
 const menuConsultor: MenuItem[] = [

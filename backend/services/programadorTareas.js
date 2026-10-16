@@ -59,6 +59,15 @@ const revisar = async (ahora = new Date()) => {
     const dias = leerDias(process.env.EMAIL_RECORDATORIOS_DIAS);
     ultimoDiaEjecutado = hoy; // se marca aunque hoy no toque, para no consultar de nuevo
 
+    // Cortes (semana 8 y 16) que cierran pronto: avisa a quien aún no registra avance. Se filtra por la fecha de cierre
+    // de cada corte (EMAIL_CORTES_DIAS, 3 por omisión) y el aviso se deduplica por docente y corte.
+    try {
+        const porCerrar = await notificaciones.notificarCortesPorCerrar({ dias: parseInt(process.env.EMAIL_CORTES_DIAS || '3', 10) });
+        if (porCerrar.ok) console.log(`[programador] Cortes por cerrar: ${porCerrar.total} docente(s) avisados, ${porCerrar.enviados} correo(s).`);
+    } catch (error) {
+        console.error('[programador] El aviso de cortes por cerrar falló:', error.message);
+    }
+
     if (!debeEnviarHoy(faltan, dias)) return { ejecutado: false, motivo: 'hoy_no_toca', faltan };
 
     const resultado = await notificaciones.notificarRecordatorioPlazo({});

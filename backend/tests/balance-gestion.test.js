@@ -62,7 +62,7 @@ test('el informe junta docentes, funciones y cortes, y el resumen cuadra con las
     }), { idPrograma: 1, idPeriodo: 9 });
 
     assert.equal(inf.periodo.etiqueta, '2026-Intersemestral I');
-    assert.deepEqual(inf.nombresCortes, { corte1: 'Semana X', corte2: 'Semana X (final)' }, 'en un intersemestral los cortes se llaman Semana X');
+    assert.deepEqual(inf.nombresCortes, { corte1: 'Semana 8', corte2: 'Semana 16' }, 'en un intersemestral los cortes también se llaman Semana 8 y Semana 16');
     assert.deepEqual(inf.directores, ['Ana Directora']);
 
     assert.deepEqual(inf.docentes.map((d) => d.estado), ['Aprobada', 'Devuelta', 'Sin agenda']);
@@ -87,7 +87,7 @@ test('el informe junta docentes, funciones y cortes, y el resumen cuadra con las
     assert.equal(inf.cortes.corte2.devueltas, 1);
     assert.equal(inf.cortes.corte2.pendientes, 6);
 
-    assert.equal(inf.observaciones[0].corte, 'Semana X (final)');
+    assert.equal(inf.observaciones[0].corte, 'Semana 16');
     assert.equal(inf.observaciones[0].texto, 'faltan cosas', 'se recorta el texto');
 });
 
@@ -127,7 +127,7 @@ test('el detalle trae una entrada por actividad, con su descripción, indicadore
     assert.equal(g.meta, 8);
     assert.equal(g.cumplimiento, 50, '(2 + 2) / 8');
     assert.equal(g.evidencias.length, 2);
-    assert.deepEqual(g.evidencias.map((e) => [e.tipo, e.corte]), [['Archivo', 'Semana X'], ['Enlace', 'Semana X (final)']]);
+    assert.deepEqual(g.evidencias.map((e) => [e.tipo, e.corte]), [['Archivo', 'Semana 8'], ['Enlace', 'Semana 16']]);
     assert.equal(inf.evidencias.length, 2);
     assert.ok(!('idsDocentes' in inf.actividades[0]), 'el detalle interno no se envía al cliente');
 });

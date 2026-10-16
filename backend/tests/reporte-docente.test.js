@@ -26,7 +26,7 @@ const nivel2 = (doc) => doc.secciones.filter((s) => s.nivel === 2);
 
 test('la portada identifica al docente, su programa y el período', () => {
     const doc = redactarReporte(datos([fila()]));
-    assert.equal(doc.titulo, 'Informe de evidencias del docente');
+    assert.equal(doc.titulo, 'Historial de agendas del docente');
     assert.match(doc.subtitulo, /Ana Pérez/);
     assert.equal(doc.portada.programa, 'Ingeniería de Sistemas');
     assert.equal(doc.portada.periodo, '2026-II');
@@ -98,11 +98,11 @@ test('una actividad sin evidencias lo dice en lugar de dejar una tabla vacía', 
     assert.equal(bloques[1].texto, 'Esta actividad todavía no tiene evidencias registradas.');
 });
 
-test('en un intersemestral los cortes se llaman "Semana X"', () => {
+test('en un intersemestral los cortes también se llaman "Semana 8" y "Semana 16"', () => {
     const doc = redactarReporte(datos([fila(evidencia())], { periodo: { ...PERIODO, semestre: 3 } }));
     const [indicadores, evidencias] = tablas(nivel2(doc)[0]);
-    assert.deepEqual(indicadores.columnas.slice(3, 5), ['Ejecución Semana X', 'Ejecución Semana X (final)']);
-    assert.equal(evidencias.filas[0][1], 'Semana X');
+    assert.deepEqual(indicadores.columnas.slice(3, 5), ['Ejecución Semana 8', 'Ejecución Semana 16']);
+    assert.equal(evidencias.filas[0][1], 'Semana 8');
 });
 
 test('una meta en 0 no divide por cero: el avance queda sin cifra', () => {
@@ -156,5 +156,5 @@ test('construirReporteDocente: arma el informe con la forma del balance (program
     assert.equal(r.programa.nombre, 'Sistemas');
     assert.deepEqual(r.directores, []);
     assert.match(r.archivoBase, /Ana Pérez/);
-    assert.equal(r.documento.titulo, 'Informe de evidencias del docente');
+    assert.equal(r.documento.titulo, 'Historial de agendas del docente');
 });

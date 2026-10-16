@@ -61,10 +61,10 @@ test('las fechas pueden llegar como Date de pg o como texto, con o sin hora', ()
     assert.equal(estadoDeSemana(semana({ fecha_fin: new Date(2026, 9, 9) }), { hoy: '2026-10-10' }).motivo, 'cerrada');
 });
 
-test('en un intersemestral el corte se llama "Semana X"', () => {
+test('en un intersemestral el corte también se llama "Semana 8"', () => {
     const e = estadoDeSemana(semana(), { hoy: '2026-10-10', semestre: 3 });
-    assert.match(e.mensaje, /Semana X cerró/);
-    assert.doesNotMatch(e.mensaje, /Semana 8/);
+    assert.match(e.mensaje, /Semana 8 cerró/);
+    assert.doesNotMatch(e.mensaje, /Semana X/);
 });
 
 test('"hoy" se toma en la hora de Colombia, no en UTC', () => {
@@ -82,4 +82,26 @@ test('verificarSemana consulta la semana del período activo y la evalúa', asyn
     assert.equal(e.motivo, 'cerrada');
     const sinFila = await verificarSemana('16', 5, { query: async () => ({ rows: [] }) });
     assert.equal(sinFila.motivo, 'sin_semana');
+});
+
+// ---- Tiempo que queda para el cierre (lo que ve el docente en los reportes de la semana 8 y 16) ----
+test('diasHasta: cuenta días enteros hasta el cierre; el último día cuenta completo', () => {
+    const { diasHasta } = require('../utils/semanaAbierta');
+    assert.equal(diasHasta('2026-10-12', '2026-10-09'), 3);
+    assert.equal(diasHasta('2026-10-12', '2026-10-11'), 1);
+    assert.equal(diasHasta('2026-10-12', '2026-10-12'), 0, 'el día del cierre sigue abierto');
+    assert.equal(diasHasta('2026-10-12', '2026-10-14'), -2);
+});
+
+test('diasHasta: cruza el fin de mes y de año, y acepta fechas que llegan como Date', () => {
+    const { diasHasta } = require('../utils/semanaAbierta');
+    assert.equal(diasHasta('2026-11-02', '2026-10-30'), 3);
+    assert.equal(diasHasta('2027-01-02', '2026-12-30'), 3);
+    assert.equal(diasHasta(new Date(2026, 9, 12), '2026-10-10'), 2);
+});
+
+test('diasHasta: sin fecha de cierre no hay conteo', () => {
+    const { diasHasta } = require('../utils/semanaAbierta');
+    assert.equal(diasHasta(null, '2026-10-10'), null);
+    assert.equal(diasHasta('no-es-fecha', '2026-10-10'), null);
 });

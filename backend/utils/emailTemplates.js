@@ -399,6 +399,29 @@ const plantillaPrueba = ({ solicitante } = {}) => ({
     })
 });
 
+// ================================================================
+// Aviso genérico (revisión de cortes, asignaciones y semanas)
+// ----------------------------------------------------------------
+// Una sola plantilla para los avisos que solo cambian de texto:
+//   asunto, titulo, nombre (a quién se saluda), parrafo, datos [[etiqueta, valor]],
+//   recuadro { titulo, texto, color }, boton { texto, enlace, color }, nota
+// Todo lo que llega de datos de usuario se escapa; los saltos de línea del recuadro se conservan.
+// ================================================================
+const plantillaAviso = ({ asunto, titulo, preheader, nombre, parrafo, datos = [], recuadro: caja = null, boton: accion = null, nota = null }) => ({
+    subject: asunto,
+    html: layout({
+        titulo,
+        preheader: preheader || parrafo || titulo,
+        cuerpo: `
+        ${saludo(nombre)}
+        <p style="margin:0 0 14px;">${parrafo ? esc(parrafo) : ''}</p>
+        ${tablaDatos(datos)}
+        ${caja ? recuadro(caja.titulo, nl2br(caja.texto || 'Sin texto.'), caja.color || COLORES.naranja) : ''}
+        ${accion ? boton(accion.texto, accion.enlace, accion.color || COLORES.verde) : ''}
+        ${nota ? `<p style="margin:0;font-size:13px;color:${COLORES.textoSuave};">${esc(nota)}</p>` : ''}`
+    })
+});
+
 module.exports = {
     COLORES,
     url,
@@ -411,5 +434,6 @@ module.exports = {
     plantillaPeriodoAperturado,
     plantillaRecordatorioPlazo,
     plantillaAsignacionesCargadas,
+    plantillaAviso,
     plantillaPrueba
 };

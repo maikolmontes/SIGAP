@@ -20,6 +20,16 @@ const ESTILO_POR_TIPO: Record<string, { icono: ComponentType<{ className?: strin
     asignaciones_cargadas: { icono: BookOpen, color: 'bg-teal-50 text-teal-600' },
     recordatorio_plazo: { icono: Clock, color: 'bg-amber-50 text-amber-600' },
     observacion_director: { icono: MessageSquare, color: 'bg-sky-50 text-sky-600' },
+    corte_aprobado: { icono: CheckCircle2, color: 'bg-emerald-50 text-emerald-600' },
+    corte_devuelto: { icono: AlertCircle, color: 'bg-orange-50 text-orange-600' },
+    corte_visto_bueno: { icono: ClipboardCheck, color: 'bg-indigo-50 text-indigo-600' },
+    avance_guardado: { icono: ClipboardCheck, color: 'bg-sky-50 text-sky-600' },
+    asignaciones_aprobadas: { icono: CheckCircle2, color: 'bg-teal-50 text-teal-600' },
+    asignaciones_corregidas: { icono: BookOpen, color: 'bg-amber-50 text-amber-600' },
+    visto_bueno_asignacion: { icono: ClipboardCheck, color: 'bg-indigo-50 text-indigo-600' },
+    semana_habilitada: { icono: CalendarDays, color: 'bg-blue-50 text-blue-600' },
+    corte_por_cerrar: { icono: Clock, color: 'bg-amber-50 text-amber-600' },
+    corte_corregido: { icono: ClipboardCheck, color: 'bg-teal-50 text-teal-600' },
 }
 const ESTILO_POR_DEFECTO = { icono: Bell, color: 'bg-gray-100 text-gray-600' }
 

@@ -14,7 +14,8 @@ const pool = require('../db/connection');
 const { sendEmail, resolverRemitente } = require('./emailService');
 const plantillas = require('../utils/emailTemplates');
 const notificacionesApp = require('./notificacionesApp');
-const { etiquetaPeriodo } = require('../utils/periodo');
+const { etiquetaPeriodo, etiquetaCorte } = require('../utils/periodo');
+const { hoyEnColombia } = require('../utils/semanaAbierta');
 
 // ----------------------------------------------------------------
 // Utilidades internas
@@ -653,9 +654,509 @@ const notificarRecordatorioPlazo = async ({ idPrograma = null, idRemitente = nul
     return { ok: enviados > 0, enviados, omitidos, total: pendientes.rows.length };
 };
 
+// ================================================================
+// 8. Revisión de cortes, asignaciones y semanas
+// ----------------------------------------------------------------
+// Todos llevan campana Y correo, con los mismos destinatarios:
+//   · corte aprobado / devuelto            ➔ Docente
+//   · visto bueno de un corte              ➔ Directores del programa
+//   · docente guardó su avance de un corte ➔ Directores del programa
+//   · asignaciones aprobadas / corregidas  ➔ Docente
+//   · visto bueno de las asignaciones      ➔ Directores del programa
+//   · semana habilitada, corte por cerrar  ➔ Docentes con agenda
+// ================================================================
+const ETIQUETA_REVISION = 'Revisión de agenda';
+
+const claveAvanceGuardado = (idDocente, idPeriodo, semana) => `avance_guardado:${idDocente}:${idPeriodo}:${Number(semana)}`;
+const claveVistoCorte = (idFunciones, semana) => `corte_visto:${idFunciones}:${Number(semana)}`;
+const claveVistoAsignacion = (idFunciones) => `visto_asignacion:${idFunciones}`;
+
+const enlaceAvanceDocente = (semana) => `/docente/avance-semana-${Number(semana) === 16 ? 16 : 8}`;
+
+// Función sustantiva de un docente: nombre, dueño y período
+const datosDeFuncion = async (idFunciones) => {
+    const r = await pool.query(
+        `SELECT af.id_funciones, af.funcion_sustantiva, af.id_periodo, ua.id_usuario AS id_docente, p.anio, p.semestre
+         FROM asignacion_funciones af
+         JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+         LEFT JOIN periodo p ON p.id_periodo = af.id_periodo
+         WHERE af.id_funciones = $1
+         LIMIT 1`,
+        [idFunciones]
+    );
+    return r.rows[0] || null;
+};
+
+const periodoDeFuncion = (f) => (f && f.anio ? nombrePeriodo({ anio: f.anio, semestre: f.semestre }) : null);
+
+// Docentes con la agenda ya liberada (los de "Por Aprobar" todavía no la ven) en el período dado
+const getDocentesConAgenda = async (idPeriodo) => {
+    const r = await pool.query(
+        `SELECT DISTINCT u.id_usuario, u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
+         FROM usuarios u
+         JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
+         JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones
+         WHERE af.id_periodo = $1 AND af.estado_agenda <> 'Por Aprobar' AND u.activo = TRUE`,
+        [idPeriodo]
+    );
+    return r.rows;
+};
+
+// ---- 8.1 Corte aprobado o devuelto  ➔  Docente --------------------------------
+const notificarCorteRevisado = async ({ idFunciones, semana, estado, idRevisor = null, observacion = null, esDirector = true }) => {
+    if (!['Aprobado', 'Devuelto'].includes(estado)) return { ok: false, motivo: 'estado_sin_aviso' };
+    const f = await datosDeFuncion(idFunciones);
+    if (!f) return { ok: false, motivo: 'funcion_no_encontrada' };
+    const docente = await getUsuario(f.id_docente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const revisor = idRevisor ? await getUsuario(idRevisor) : null;
+
+    const aprobado = estado === 'Aprobado';
+    const corte = etiquetaCorte(semana, f.semestre);
+    const quien = revisor ? revisor.nombre_completo : 'La dirección de programa';
+    // Si lo devolvieron, el enlace abre el reporte con el motivo a la vista (?devuelto=1 muestra la ventana del motivo)
+    const enlaceCorte = aprobado ? enlaceAvanceDocente(semana) : `${enlaceAvanceDocente(semana)}?devuelto=1`;
+
+    // Si lo devolvieron, tendrá que volver a guardar: el próximo guardado debe avisar de nuevo a la dirección
+    if (!aprobado) await reiniciarNotificacion(claveAvanceGuardado(f.id_docente, f.id_periodo, semana));
+
+    await notificacionesApp.crear({
+        idUsuario: f.id_docente,
+        tipo: aprobado ? 'corte_aprobado' : 'corte_devuelto',
+        titulo: aprobado ? `Tu avance de ${corte} fue aprobado` : `Tu avance de ${corte} fue devuelto`,
+        mensaje: aprobado
+            ? `${quien} aprobó «${f.funcion_sustantiva}» en ${corte}.`
+            : `${quien} devolvió «${f.funcion_sustantiva}» en ${corte}: ${observacion || 'revisa las observaciones.'}`,
+        enlace: enlaceCorte,
+    });
+    if (!docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
+
+    const { subject, html } = plantillas.plantillaAviso({
+        asunto: aprobado ? `Su avance de ${corte} fue aprobado` : `Su avance de ${corte} fue devuelto`,
+        titulo: aprobado ? `Avance de ${corte} aprobado` : `Avance de ${corte} devuelto`,
+        preheader: aprobado ? `${quien} aprobó su avance de ${corte}.` : `${quien} devolvió su avance de ${corte} con observaciones.`,
+        nombre: docente.nombre_completo,
+        parrafo: aprobado
+            ? `Le informamos que su avance de la función «${f.funcion_sustantiva}» fue aprobado. No necesita hacer nada más en este corte.`
+            : `Su avance de la función «${f.funcion_sustantiva}» fue devuelto para que lo revise y lo ajuste. Cuando termine, guárdelo de nuevo para que vuelva a revisión.`,
+        datos: [['Período', periodoDeFuncion(f)], ['Corte', corte], ['Función', f.funcion_sustantiva], [aprobado ? 'Aprobado por' : 'Devuelto por', quien]],
+        recuadro: aprobado ? null : { titulo: 'Motivo de la devolución', texto: observacion },
+        boton: { texto: aprobado ? 'Ver mi avance' : 'Ver el motivo y corregir', enlace: plantillas.url(enlaceCorte), color: aprobado ? plantillas.COLORES.verde : plantillas.COLORES.naranja },
+    });
+    return enviarYRegistrar({
+        tipo: aprobado ? 'corte_aprobado' : 'corte_devuelto',
+        clave: `${aprobado ? 'corte_aprobado' : 'corte_devuelto'}:${idFunciones}:${Number(semana)}:${Date.now()}`,
+        to: docente.correo, subject, html,
+        remitente: await getRemitente(idRevisor, esDirector ? ETIQUETA_DIRECTOR : ETIQUETA_REVISION),
+    });
+};
+
+// ---- 8.2 Visto bueno de un corte  ➔  Directores del programa --------------------
+const notificarVistoBuenoCorte = async ({ idFunciones, semana, idRevisor = null }) => {
+    const f = await datosDeFuncion(idFunciones);
+    if (!f) return { ok: false, motivo: 'funcion_no_encontrada' };
+    const clave = claveVistoCorte(idFunciones, semana);
+    if (await yaNotificado(clave)) return { ok: false, motivo: 'ya_notificado' };
+
+    const docente = await getUsuario(f.id_docente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const revisor = idRevisor ? await getUsuario(idRevisor) : null;
+    const directores = (await getDirectoresDePrograma(docente.id_programa)).filter((d) => Number(d.id_usuario) !== Number(idRevisor));
+    if (directores.length === 0) return { ok: false, motivo: 'sin_directores' };
+
+    const corte = etiquetaCorte(semana, f.semestre);
+    const quien = revisor ? revisor.nombre_completo : 'El revisor de la función';
+    const enlace = `/director/agendas/${f.id_docente}/semana/${Number(semana)}`;
+
+    await notificacionesApp.crearParaVarios(directores.map((d) => d.id_usuario), {
+        tipo: 'corte_visto_bueno',
+        titulo: `Visto bueno en ${corte}: pasa a tu revisión`,
+        mensaje: `${quien} dio el visto bueno a «${f.funcion_sustantiva}» de ${docente.nombre_completo} en ${corte}. Falta tu aprobación.`,
+        enlace,
+        clave,
+    });
+
+    const resultados = [];
+    for (const director of directores) {
+        const { subject, html } = plantillas.plantillaAviso({
+            asunto: `Visto bueno en ${corte} — ${docente.nombre_completo}`,
+            titulo: `Visto bueno en ${corte}`,
+            nombre: director.nombre_completo,
+            parrafo: `${quien} revisó «${f.funcion_sustantiva}» de ${docente.nombre_completo} y le dio el visto bueno. Ahora le corresponde a usted aprobar o devolver el corte.`,
+            datos: [['Docente', docente.nombre_completo], ['Programa', docente.nombre_programa], ['Período', periodoDeFuncion(f)], ['Corte', corte], ['Función', f.funcion_sustantiva]],
+            boton: { texto: 'Revisar el corte', enlace: plantillas.url(enlace) },
+        });
+        resultados.push(await enviarYRegistrar({
+            tipo: 'corte_visto_bueno', clave, to: director.correo, subject, html,
+            remitente: await getRemitente(idRevisor, ETIQUETA_REVISION),
+        }));
+    }
+    return { ok: resultados.some((r) => r.ok), enviados: resultados.length };
+};
+
+// Si retiran el visto bueno (o devuelven el corte) y luego lo vuelven a dar, la dirección debe enterarse otra vez
+const reiniciarAvisoVistoCorte = (idFunciones, semana) => reiniciarNotificacion(claveVistoCorte(idFunciones, semana));
+
+// ---- 8.3 El docente guardó su avance de un corte  ➔  Directores del programa -----
+// Un solo aviso por docente y corte hasta que se devuelva el corte: guardar varias veces no llena la campana
+// ni la bandeja de correo de la dirección.
+const notificarAvanceGuardado = async ({ idDocente, semana }) => {
+    if (![8, 16].includes(Number(semana))) return { ok: false, motivo: 'corte_invalido' };
+    const periodo = await getPeriodoActivo();
+    if (!periodo) return { ok: false, motivo: 'sin_periodo_activo' };
+
+    const clave = claveAvanceGuardado(idDocente, periodo.id_periodo, semana);
+    if (await yaNotificado(clave)) return { ok: false, motivo: 'ya_notificado' };
+
+    const docente = await getUsuario(idDocente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const directores = (await getDirectoresDePrograma(docente.id_programa)).filter((d) => Number(d.id_usuario) !== Number(idDocente));
+    if (directores.length === 0) return { ok: false, motivo: 'sin_directores' };
+
+    const corte = etiquetaCorte(semana, periodo.semestre);
+    const enlace = `/director/agendas/${idDocente}/semana/${Number(semana)}`;
+
+    await notificacionesApp.crearParaVarios(directores.map((d) => d.id_usuario), {
+        tipo: 'avance_guardado',
+        titulo: `Avance de ${corte} listo para revisión`,
+        mensaje: `${docente.nombre_completo} registró su avance de ${corte} (${nombrePeriodo(periodo)}).`,
+        enlace,
+        clave: `avance_guardado:${idDocente}:${Number(semana)}`,
+    });
+
+    const resultados = [];
+    for (const director of directores) {
+        const { subject, html } = plantillas.plantillaAviso({
+            asunto: `Avance de ${corte} listo para revisión — ${docente.nombre_completo}`,
+            titulo: `Avance de ${corte} listo para revisión`,
+            nombre: director.nombre_completo,
+            parrafo: `${docente.nombre_completo} registró su avance de ${corte} y está disponible para su revisión.`,
+            datos: [['Docente', docente.nombre_completo], ['Programa', docente.nombre_programa], ['Período', nombrePeriodo(periodo)], ['Corte', corte]],
+            boton: { texto: 'Revisar el avance', enlace: plantillas.url(enlace) },
+        });
+        resultados.push(await enviarYRegistrar({ tipo: 'avance_guardado', clave, to: director.correo, subject, html }));
+    }
+    return { ok: resultados.some((r) => r.ok), enviados: resultados.length };
+};
+
+// ---- 8.4 Asignaciones aprobadas por el Director  ➔  Docente ----------------------
+const notificarAsignacionesAprobadas = async ({ idDocente, idDirector = null }) => {
+    const periodo = await getPeriodoActivo();
+    const docente = await getUsuario(idDocente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const director = idDirector ? await getUsuario(idDirector) : null;
+    const quien = director ? director.nombre_completo : 'La dirección de programa';
+
+    await notificacionesApp.crear({
+        idUsuario: idDocente,
+        tipo: 'asignaciones_aprobadas',
+        titulo: 'Tu agenda ya está disponible',
+        mensaje: `${quien} aprobó tu carga académica${periodo ? ` del período ${nombrePeriodo(periodo)}` : ''}. Ya puedes diligenciar tu agenda.`,
+        enlace: '/docente/agenda',
+    });
+    if (!docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
+
+    const { subject, html } = plantillas.plantillaAviso({
+        asunto: `Su agenda ya está disponible${periodo ? ` — ${nombrePeriodo(periodo)}` : ''}`,
+        titulo: 'Su agenda ya está disponible',
+        nombre: docente.nombre_completo,
+        parrafo: 'La dirección del programa revisó y aprobó su carga académica. Ya puede ingresar al SIGAP, completar su agenda y enviarla a revisión.',
+        datos: [['Período', periodo ? nombrePeriodo(periodo) : null], ['Aprobada por', quien], ['Programa', docente.nombre_programa]],
+        boton: { texto: 'Ir a mi agenda', enlace: plantillas.url('/docente/agenda') },
+    });
+    return enviarYRegistrar({
+        tipo: 'asignaciones_aprobadas',
+        clave: `asignaciones_aprobadas:${idDocente}:${periodo ? periodo.id_periodo : 0}:${Date.now()}`,
+        to: docente.correo, subject, html,
+        remitente: await getRemitente(idDirector, ETIQUETA_DIRECTOR),
+    });
+};
+
+// ---- 8.5 Horas corregidas por el Director  ➔  Docente ---------------------------
+// Solo si el docente ya ve su agenda: mientras sigue "Por Aprobar" no tiene nada que revisar.
+const notificarAsignacionesCorregidas = async ({ idDocente, idDirector = null, cantidad = null }) => {
+    const periodo = await getPeriodoActivo();
+    if (!periodo) return { ok: false, motivo: 'sin_periodo_activo' };
+    const visibles = await pool.query(
+        `SELECT 1 FROM asignacion_funciones af JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+         WHERE ua.id_usuario = $1 AND af.id_periodo = $2 AND af.estado_agenda <> 'Por Aprobar' LIMIT 1`,
+        [idDocente, periodo.id_periodo]
+    );
+    if (visibles.rows.length === 0) return { ok: false, motivo: 'agenda_aun_oculta' };
+
+    const docente = await getUsuario(idDocente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const director = idDirector ? await getUsuario(idDirector) : null;
+    const quien = director ? director.nombre_completo : 'La dirección de programa';
+
+    await notificacionesApp.crear({
+        idUsuario: idDocente,
+        tipo: 'asignaciones_corregidas',
+        titulo: 'Se corrigieron las horas de tu agenda',
+        mensaje: `${quien} ajustó las horas de ${cantidad ? (cantidad === 1 ? '1 actividad' : `${cantidad} actividades`) : 'tu carga académica'} del período ${nombrePeriodo(periodo)}. Revisa tu agenda.`,
+        enlace: '/docente/agenda',
+        clave: `asignaciones_corregidas:${periodo.id_periodo}`,
+    });
+    if (!docente.correo) return { ok: false, motivo: 'docente_sin_correo' };
+
+    const { subject, html } = plantillas.plantillaAviso({
+        asunto: `Se corrigieron las horas de su agenda — ${nombrePeriodo(periodo)}`,
+        titulo: 'Horas de su agenda corregidas',
+        nombre: docente.nombre_completo,
+        parrafo: 'La dirección del programa corrigió las horas de algunas de sus actividades. Le recomendamos revisar su agenda para confirmar que todo esté correcto.',
+        datos: [['Período', nombrePeriodo(periodo)], ['Corregidas por', quien], ['Actividades ajustadas', cantidad]],
+        boton: { texto: 'Ver mi agenda', enlace: plantillas.url('/docente/agenda') },
+    });
+    return enviarYRegistrar({
+        tipo: 'asignaciones_corregidas',
+        clave: `asignaciones_corregidas:${idDocente}:${periodo.id_periodo}:${Date.now()}`,
+        to: docente.correo, subject, html,
+        remitente: await getRemitente(idDirector, ETIQUETA_DIRECTOR),
+    });
+};
+
+// ---- 8.6 Visto bueno de las asignaciones de una función  ➔  Directores -----------
+const notificarVistoBuenoAsignacion = async ({ idDocente, idFunciones, idRevisor = null }) => {
+    const f = await datosDeFuncion(idFunciones);
+    if (!f) return { ok: false, motivo: 'funcion_no_encontrada' };
+    const clave = claveVistoAsignacion(idFunciones);
+    if (await yaNotificado(clave)) return { ok: false, motivo: 'ya_notificado' };
+
+    const docente = await getUsuario(idDocente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const revisor = idRevisor ? await getUsuario(idRevisor) : null;
+    const directores = (await getDirectoresDePrograma(docente.id_programa)).filter((d) => Number(d.id_usuario) !== Number(idRevisor));
+    if (directores.length === 0) return { ok: false, motivo: 'sin_directores' };
+
+    const quien = revisor ? revisor.nombre_completo : 'El revisor de la función';
+    const enlace = `/director/agendas/${idDocente}`;
+
+    await notificacionesApp.crearParaVarios(directores.map((d) => d.id_usuario), {
+        tipo: 'visto_bueno_asignacion',
+        titulo: 'Visto bueno en las asignaciones',
+        mensaje: `${quien} dio el visto bueno a «${f.funcion_sustantiva}» de ${docente.nombre_completo}. Falta tu aprobación para liberar la agenda.`,
+        enlace,
+        clave,
+    });
+
+    const resultados = [];
+    for (const director of directores) {
+        const { subject, html } = plantillas.plantillaAviso({
+            asunto: `Visto bueno en las asignaciones — ${docente.nombre_completo}`,
+            titulo: 'Visto bueno en las asignaciones',
+            nombre: director.nombre_completo,
+            parrafo: `${quien} revisó «${f.funcion_sustantiva}» de ${docente.nombre_completo} y le dio el visto bueno. La agenda solo se libera al docente cuando usted aprueba las asignaciones.`,
+            datos: [['Docente', docente.nombre_completo], ['Programa', docente.nombre_programa], ['Período', periodoDeFuncion(f)], ['Función', f.funcion_sustantiva]],
+            boton: { texto: 'Revisar las asignaciones', enlace: plantillas.url(enlace) },
+        });
+        resultados.push(await enviarYRegistrar({
+            tipo: 'visto_bueno_asignacion', clave, to: director.correo, subject, html,
+            remitente: await getRemitente(idRevisor, ETIQUETA_REVISION),
+        }));
+    }
+    return { ok: resultados.some((r) => r.ok), enviados: resultados.length };
+};
+
+const reiniciarAvisoVistoAsignacion = (idFunciones) => reiniciarNotificacion(claveVistoAsignacion(idFunciones));
+
+// ---- 8.7 Semana habilitada por Planeación  ➔  Docentes con agenda ---------------
+// La campana avisa siempre; el correo es masivo, así que solo sale si se pide ({ correo: true }).
+const textoVentana = (inicio, fin) => {
+    const i = formatearFecha(inicio);
+    const f = formatearFecha(fin);
+    if (i && f) return `del ${i} al ${f}`;
+    if (f) return `hasta el ${f}`;
+    return null;
+};
+
+const notificarSemanaHabilitada = async ({ semanas = [], idRemitente = null, correo = false }) => {
+    const periodo = await getPeriodoActivo();
+    if (!periodo) return { ok: false, motivo: 'sin_periodo_activo' };
+    const abiertas = semanas.filter((s) => ['0', '8', '16'].includes(String(s.numero_semana)));
+    if (abiertas.length === 0) return { ok: false, motivo: 'sin_semanas' };
+
+    const docentes = await getDocentesConAgenda(periodo.id_periodo);
+    if (docentes.length === 0) return { ok: false, motivo: 'sin_docentes' };
+    const remitente = correo ? await getRemitente(idRemitente, ETIQUETA_PLANEACION) : null;
+
+    let enviados = 0;
+    for (const semana of abiertas) {
+        const numero = String(semana.numero_semana);
+        const esAgenda = numero === '0';
+        const etiqueta = esAgenda ? 'el registro de la agenda' : etiquetaCorte(numero, periodo.semestre);
+        const ventana = textoVentana(semana.fecha_inicio, semana.fecha_fin);
+        const enlace = esAgenda ? '/docente/agenda' : enlaceAvanceDocente(numero);
+
+        await notificacionesApp.crearParaVarios(docentes.map((d) => d.id_usuario), {
+            tipo: 'semana_habilitada',
+            titulo: esAgenda ? 'Se abrió el registro de tu agenda' : `Se abrió la ${etiqueta}`,
+            mensaje: esAgenda
+                ? `Ya puedes completar y guardar tu agenda${ventana ? ` ${ventana}` : ''}.`
+                : `Ya puedes registrar tu avance y subir tus evidencias${ventana ? ` ${ventana}` : ''}.`,
+            enlace,
+            clave: `semana_habilitada:${periodo.id_periodo}:${numero}`,
+        });
+        if (!correo) continue;
+
+        for (const docente of docentes.filter((d) => d.correo)) {
+            const clave = `semana_habilitada:${docente.id_usuario}:${periodo.id_periodo}:${numero}`;
+            if (await yaNotificado(clave)) continue;
+            const { subject, html } = plantillas.plantillaAviso({
+                asunto: esAgenda ? `Se abrió el registro de su agenda — ${nombrePeriodo(periodo)}` : `Se abrió la ${etiqueta} — ${nombrePeriodo(periodo)}`,
+                titulo: esAgenda ? 'Registro de agenda abierto' : `${etiqueta} abierta`,
+                nombre: docente.nombre_completo,
+                parrafo: esAgenda
+                    ? 'Planeación habilitó el registro de la agenda. Ya puede completarla y enviarla a revisión.'
+                    : `Planeación habilitó la ${etiqueta}. Ya puede registrar la ejecución de sus indicadores y subir sus evidencias.`,
+                datos: [['Período', nombrePeriodo(periodo)], ['Disponible', ventana]],
+                boton: { texto: esAgenda ? 'Ir a mi agenda' : 'Registrar mi avance', enlace: plantillas.url(enlace) },
+            });
+            const r = await enviarYRegistrar({ tipo: 'semana_habilitada', clave, to: docente.correo, subject, html, remitente });
+            if (r.ok) enviados++;
+        }
+    }
+    return { ok: true, docentes: docentes.length, enviados };
+};
+
+// ---- 8.8 Corte por cerrar  ➔  Docentes con agenda que aún no registran avance -----
+// Avisa de los cortes habilitados cuya fecha de cierre cae en los próximos "dias" días.
+const notificarCortesPorCerrar = async ({ dias = 3, idRemitente = null, correo = true } = {}) => {
+    const periodo = await getPeriodoActivo();
+    if (!periodo) return { ok: false, motivo: 'sin_periodo_activo' };
+    const hoy = hoyEnColombia();
+    const tope = Math.max(0, parseInt(dias, 10) || 0);
+
+    const cortes = (await pool.query(
+        `SELECT numero_semana, fecha_fin
+         FROM semana
+         WHERE id_periodo = $1 AND habilitada = TRUE AND numero_semana IN ('8', '16')
+           AND fecha_fin IS NOT NULL AND fecha_fin >= $2::date AND fecha_fin <= ($2::date + $3::int)`,
+        [periodo.id_periodo, hoy, tope]
+    )).rows;
+    if (cortes.length === 0) return { ok: false, motivo: 'sin_cortes_por_cerrar' };
+
+    const remitente = correo ? await getRemitente(idRemitente, ETIQUETA_PLANEACION) : null;
+    let enviados = 0;
+    let total = 0;
+
+    for (const corteFila of cortes) {
+        const numero = String(corteFila.numero_semana);
+        const etiqueta = etiquetaCorte(numero, periodo.semestre);
+        const fin = formatearFecha(corteFila.fecha_fin);
+        const columna = numero === '8' ? 'ejecucion_8' : 'ejecucion_16';
+
+        // Docentes con agenda liberada que todavía no registran nada en este corte
+        const pendientes = (await pool.query(
+            `SELECT DISTINCT u.id_usuario, u.correo, TRIM(u.nombres || ' ' || u.apellidos) AS nombre_completo
+             FROM usuarios u
+             JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
+             JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones
+             WHERE af.id_periodo = $1 AND af.estado_agenda <> 'Por Aprobar' AND u.activo = TRUE
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM usuario_asignacion ua2
+                   JOIN asignacion_funciones af2 ON af2.id_funciones = ua2.id_funciones AND af2.id_periodo = $1
+                   JOIN asignacion_actividades aa ON aa.id_funciones = af2.id_funciones
+                   JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact
+                   JOIN indicadores i ON i.id_descripcion = d.id_descripcion
+                   WHERE ua2.id_usuario = u.id_usuario AND d.activo IS NOT FALSE AND i.activo IS NOT FALSE AND COALESCE(i.${columna}, 0) > 0
+               )`,
+            [periodo.id_periodo]
+        )).rows;
+        total += pendientes.length;
+
+        await notificacionesApp.crearParaVarios(pendientes.map((d) => d.id_usuario), {
+            tipo: 'corte_por_cerrar',
+            titulo: `La ${etiqueta} está por cerrar`,
+            mensaje: `${fin ? `Cierra el ${fin}. ` : ''}Aún no has registrado avance en este corte.`,
+            enlace: enlaceAvanceDocente(numero),
+            clave: `corte_por_cerrar:${periodo.id_periodo}:${numero}`,
+        });
+        if (!correo) continue;
+
+        for (const docente of pendientes.filter((d) => d.correo)) {
+            const clave = `corte_por_cerrar:${docente.id_usuario}:${periodo.id_periodo}:${numero}`;
+            if (await yaNotificado(clave)) continue;
+            const { subject, html } = plantillas.plantillaAviso({
+                asunto: `La ${etiqueta} está por cerrar — ${nombrePeriodo(periodo)}`,
+                titulo: `La ${etiqueta} está por cerrar`,
+                nombre: docente.nombre_completo,
+                parrafo: `${fin ? `La ${etiqueta} cierra el ${fin}. ` : ''}Todavía no registra avance en este corte. Cuando cierre, solo podrá consultarlo.`,
+                datos: [['Período', nombrePeriodo(periodo)], ['Corte', etiqueta], ['Cierra', fin]],
+                boton: { texto: 'Registrar mi avance', enlace: plantillas.url(enlaceAvanceDocente(numero)), color: plantillas.COLORES.naranja },
+            });
+            const r = await enviarYRegistrar({ tipo: 'corte_por_cerrar', clave, to: docente.correo, subject, html, remitente });
+            if (r.ok) enviados++;
+        }
+    }
+    return { ok: true, cortes: cortes.length, total, enviados };
+};
+
+// ---- 8.9 El docente corrigió una función devuelta  ➔  Directores del programa ----------
+// Es el "ya corregí" del docente: la función vuelve a revisión y la dirección se entera de que es una
+// corrección (con lo que ella había pedido), no de un guardado cualquiera.
+const notificarCorteCorregido = async ({ idFunciones, semana, idDocente = null }) => {
+    const f = await datosDeFuncion(idFunciones);
+    if (!f) return { ok: false, motivo: 'funcion_no_encontrada' };
+    const docente = await getUsuario(idDocente || f.id_docente);
+    if (!docente) return { ok: false, motivo: 'docente_no_encontrado' };
+    const directores = (await getDirectoresDePrograma(docente.id_programa)).filter((d) => Number(d.id_usuario) !== Number(docente.id_usuario));
+    if (directores.length === 0) return { ok: false, motivo: 'sin_directores' };
+
+    // Lo que la dirección había pedido corregir (queda guardado en la devolución)
+    const previo = (await pool.query('SELECT observacion FROM revision_corte WHERE id_funciones = $1 AND semana = $2', [idFunciones, Number(semana)])).rows[0];
+    const motivoPrevio = previo?.observacion || null;
+
+    const corte = etiquetaCorte(semana, f.semestre);
+    const enlace = `/director/agendas/${f.id_docente}/semana/${Number(semana)}`;
+
+    await notificacionesApp.crearParaVarios(directores.map((d) => d.id_usuario), {
+        tipo: 'corte_corregido',
+        titulo: `${docente.nombre_completo} corrigió «${f.funcion_sustantiva}»`,
+        mensaje: `Envió de nuevo su avance de ${corte} después de tu devolución. Está listo para revisar.`,
+        enlace,
+        clave: `corte_corregido:${idFunciones}:${Number(semana)}`,
+    });
+
+    const resultados = [];
+    for (const director of directores) {
+        const { subject, html } = plantillas.plantillaAviso({
+            asunto: `${docente.nombre_completo} corrigió «${f.funcion_sustantiva}» — ${corte}`,
+            titulo: `Corrección enviada en ${corte}`,
+            nombre: director.nombre_completo,
+            parrafo: `${docente.nombre_completo} corrigió la función «${f.funcion_sustantiva}» que usted había devuelto y la envió de nuevo a revisión.`,
+            datos: [['Docente', docente.nombre_completo], ['Programa', docente.nombre_programa], ['Período', periodoDeFuncion(f)], ['Corte', corte], ['Función', f.funcion_sustantiva]],
+            recuadro: motivoPrevio ? { titulo: 'Lo que usted había pedido corregir', texto: motivoPrevio, color: plantillas.COLORES.verde } : null,
+            boton: { texto: 'Revisar la corrección', enlace: plantillas.url(enlace) },
+        });
+        resultados.push(await enviarYRegistrar({
+            tipo: 'corte_corregido',
+            clave: `corte_corregido:${idFunciones}:${Number(semana)}:${Date.now()}`,
+            to: director.correo, subject, html,
+            remitente: await getRemitente(docente.id_usuario, 'Docente'),
+        }));
+    }
+    return { ok: resultados.some((r) => r.ok), enviados: resultados.length };
+};
+
 // ----------------------------------------------------------------
 // Versiones "dispara y olvida" para usar dentro de los controladores
 // ----------------------------------------------------------------
+// Como enSegundoPlano, pero el controlador ESPERA (hasta "limiteMs") antes de responder. Nunca lanza: si algo
+// falla o se demora, la acción de negocio ya quedó guardada.
+const esperando = (etiqueta, fn, limiteMs = 5000) => async (...args) => {
+    let temporizador;
+    const limite = new Promise((resolver) => { temporizador = setTimeout(resolver, limiteMs); });
+    try {
+        await Promise.race([
+            Promise.resolve().then(() => fn(...args)).catch((error) => console.error(`[notificaciones] ${etiqueta} falló:`, error.message)),
+            limite,
+        ]);
+    } finally {
+        clearTimeout(temporizador);
+    }
+};
+
 const enSegundoPlanoAPI = {
     agendaEnviada: (idUsuario) =>
         enSegundoPlano('agendaEnviada', () => notificarAgendaEnviada(idUsuario)),
@@ -692,7 +1193,17 @@ const enSegundoPlanoAPI = {
         enSegundoPlano('aperturaPeriodo', () => notificarAperturaPeriodo(idPeriodo, idRemitente)),
 
     asignacionesCargadas: (ids, idPeriodo, idRemitente) =>
-        enSegundoPlano('asignacionesCargadas', () => notificarAsignacionesCargadas(ids, idPeriodo, idRemitente))
+        enSegundoPlano('asignacionesCargadas', () => notificarAsignacionesCargadas(ids, idPeriodo, idRemitente)),
+
+    // Avisos de revisión de cortes, asignaciones y semanas: el controlador los espera (con tope)
+    corteRevisadoAhora: esperando('corteRevisado', notificarCorteRevisado),
+    vistoBuenoCorteAhora: esperando('vistoBuenoCorte', notificarVistoBuenoCorte),
+    avanceGuardadoAhora: esperando('avanceGuardado', notificarAvanceGuardado),
+    asignacionesAprobadasAhora: esperando('asignacionesAprobadas', notificarAsignacionesAprobadas),
+    asignacionesCorregidasAhora: esperando('asignacionesCorregidas', notificarAsignacionesCorregidas),
+    vistoBuenoAsignacionAhora: esperando('vistoBuenoAsignacion', notificarVistoBuenoAsignacion),
+    semanaHabilitadaAhora: esperando('semanaHabilitada', notificarSemanaHabilitada, 8000),
+    corteCorregidoAhora: esperando('corteCorregido', notificarCorteCorregido),
 };
 
 module.exports = {
@@ -705,6 +1216,17 @@ module.exports = {
     notificarAperturaPeriodo,
     notificarAsignacionesCargadas,
     notificarRecordatorioPlazo,
+    notificarCorteRevisado,
+    notificarVistoBuenoCorte,
+    reiniciarAvisoVistoCorte,
+    notificarAvanceGuardado,
+    notificarAsignacionesAprobadas,
+    notificarAsignacionesCorregidas,
+    notificarVistoBuenoAsignacion,
+    reiniciarAvisoVistoAsignacion,
+    notificarSemanaHabilitada,
+    notificarCortesPorCerrar,
+    notificarCorteCorregido,
     // Versiones en segundo plano
     background: enSegundoPlanoAPI,
     // Auxiliares reutilizables

@@ -6,6 +6,7 @@ const pool = require('../db/connection');
 const notificaciones = require('../services/notificacionesService');
 const { alcanceProgramas, docenteEnAlcance, alcanceFunciones } = require('../utils/rolActivo');
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
+const { asegurarCorregidoEn } = require('../utils/esquemaRevisionCorte');
 
 const SIN_PERMISO_DOCENTE = { error: 'Este docente no pertenece a los programas que gestionas.' };
 const SIN_PERMISO_FUNCION = { error: 'Tu rol no revisa esta función sustantiva.' };
@@ -430,10 +431,12 @@ const getAgendaDetalle = async (req, res) => {
             // no que exista la fila en revision_corte: los avances guardados antes
             // de que existiera la tabla no tienen fila y aun así hay que revisarlos.
             // Por eso se parte de las dos semanas y la fila es opcional.
+            await asegurarCorregidoEn();
             const cortesRes = await pool.query(`
                 SELECT s.semana,
                        COALESCE(rc.estado, 'Pendiente') AS estado,
                        rc.observacion,
+                       rc.corregido_en,
                        vb.nombres || ' ' || vb.apellidos AS visto_bueno_nombre,
                        ap.nombres || ' ' || ap.apellidos AS aprobado_nombre
                 FROM (VALUES (8), (16)) AS s(semana)

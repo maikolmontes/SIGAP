@@ -12,6 +12,7 @@
  */
 const pool = require('../db/connection');
 const { alcanceProgramas, docenteEnAlcance, alcanceFunciones } = require('../utils/rolActivo');
+const notificaciones = require('../services/notificacionesService');
 
 // ================================================================
 // GET /api/director/asignaciones
@@ -360,6 +361,11 @@ const corregirAsignaciones = async (req, res) => {
 
         await client.query('COMMIT');
 
+        // Si el docente ya ve su agenda, se le avisa (campana y correo) que se ajustaron sus horas
+        if (cambios.length > 0) {
+            await notificaciones.background.asignacionesCorregidasAhora({ idDocente: idUsuario, idDirector: req.user.id, cantidad: cambios.length });
+        }
+
         res.json({
             mensaje: 'Asignaciones corregidas correctamente.',
             actividades_actualizadas: cambios.length,
@@ -466,6 +472,11 @@ const aprobarAsignaciones = async (req, res) => {
 
         await client.query('COMMIT');
 
+        // La agenda quedó liberada: se avisa al docente (campana y correo)
+        if (result.rowCount > 0) {
+            await notificaciones.background.asignacionesAprobadasAhora({ idDocente: idUsuario, idDirector: req.user.id });
+        }
+
         res.json({
             mensaje: 'Asignaciones aprobadas. El docente ya puede ver y diligenciar su agenda.',
             funciones_aprobadas: result.rowCount,
@@ -537,6 +548,10 @@ const marcarVistoBueno = async (req, res) => {
             WHERE id_funciones = $3
             RETURNING visto_bueno_en
         `, [quitar ? null : req.user.id, quitar ? null : new Date(), idFunciones]);
+
+        // Aviso a los directores (campana y correo); si se retira la marca, se reinicia para que el próximo la avise
+        if (quitar) await notificaciones.reiniciarAvisoVistoAsignacion(idFunciones);
+        else await notificaciones.background.vistoBuenoAsignacionAhora({ idDocente: idUsuario, idFunciones, idRevisor: req.user.id });
 
         res.json({
             mensaje: quitar

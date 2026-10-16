@@ -7,7 +7,7 @@
 --
 --   Director      → Docencia Directa, Docencia Indirecta,
 --                   Académico-Administrativo, Aseguramiento de Calidad,
---                   Vicerrectoría        (restringido a SUS programas)
+--                   Vicerrectoría para la Evangelización de las Culturas (restringido a SUS programas)
 --   Investigación → Investigación        (institucional, todos los programas)
 --
 -- El alcance de programas sigue resolviéndose con director_programa;
@@ -68,7 +68,7 @@ CROSS JOIN (VALUES
     ('Docencia Indirecta'),
     ('Académico-Administrativo'),
     ('Aseguramiento de Calidad'),
-    ('Vicerrectoría')
+    ('Vicerrectoría para la Evangelización de las Culturas')
 ) AS f(funcion)
 WHERE LOWER(r.nombre_rol) = 'director'
 ON CONFLICT DO NOTHING;

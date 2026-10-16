@@ -20,7 +20,7 @@ const CATALOGO = new Map([
         'Coordinador de desarrollo académico e innovación pedagógica y curricular', 'Coordinador de programa de postgrado',
         'Coordinador de prácticas formativas', 'Dirección de grupo', 'Director de programa de pregrado', 'Egresados',
         'Estrategias de mejoramiento Saber Pro', 'Gestión Curricular', 'Comité curricular', 'Otro/Cuál']],
-    ['Vicerrectoría', ['Docentes de acompañamiento académico', 'Docentes de acompañamiento integral', 'Otro, ¿Cuál?']],
+    ['Vicerrectoría para la Evangelización de las Culturas', ['Docentes de acompañamiento académico', 'Docentes de acompañamiento integral', 'Otro, ¿Cuál?']],
     ['Aseguramiento de Calidad', ['Aseguramiento interno de la calidad']],
 ]);
 
@@ -109,7 +109,7 @@ test('encabezados de función del listado', () => {
     assert.equal(clasificar('HORAS ADMINISTRATIVAS', 'GESTIÓN CURRICULAR').funcion, 'Académico-Administrativo');
     assert.equal(clasificar('HORAS DE ASEGURAMIENTO DE LA CALIDAD', 'APOYO AUTO EVALUACIÓN').funcion, 'Aseguramiento de Calidad');
     assert.equal(clasificar('HORAS VICERRECTORIA DE INVESTIGACIONES', 'CO-INVESTIGADOR').funcion, 'Investigación');
-    assert.equal(clasificar('HORAS PROYECCION INSTITUCIONAL', 'ACOMPAÑAMIENTO INTEGRAL').funcion, 'Vicerrectoría');
+    assert.equal(clasificar('HORAS PROYECCION INSTITUCIONAL', 'ACOMPAÑAMIENTO INTEGRAL').funcion, 'Vicerrectoría para la Evangelización de las Culturas');
 });
 
 test('"HORAS ..." que no corresponde a ninguna función no inventa una función', () => {
@@ -244,5 +244,5 @@ test('un encabezado que no es ninguna función se informa en lugar de inventar u
 
 test('una función oculta (fuera del catálogo visible) deja de reconocerse', () => {
     const catalogo = new Map(CATALOGO); // sin 'Extensión y Proyección': la oculta no llega al mapa
-    assert.equal(L.clasificarFuncion('HORAS EXTENSIÓN Y PROYECCIÓN', PROGRAMAS, [...catalogo.keys()]).funcion, 'Vicerrectoría'); // vuelve a la palabra clave general
+    assert.equal(L.clasificarFuncion('HORAS EXTENSIÓN Y PROYECCIÓN', PROGRAMAS, [...catalogo.keys()]).funcion, 'Vicerrectoría para la Evangelización de las Culturas'); // vuelve a la palabra clave general
 });

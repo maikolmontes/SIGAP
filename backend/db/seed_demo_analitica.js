@@ -60,7 +60,7 @@ const RESULTADOS = {
     'Investigación': ['Artículo sometido a revista indexada', 'Ponencia en evento académico', 'Dirección de trabajo de grado'],
     'Académico-Administrativo': ['Informe de gestión del programa', 'Participación en comités', 'Seguimiento a egresados'],
     'Aseguramiento de Calidad': ['Documento de autoevaluación', 'Plan de mejoramiento'],
-    'Vicerrectoría': ['Apoyo a procesos institucionales']
+    'Vicerrectoría para la Evangelización de las Culturas': ['Apoyo a procesos institucionales']
 };
 
 const INDICADORES_TXT = {
@@ -69,7 +69,7 @@ const INDICADORES_TXT = {
     'Investigación': ['Productos de investigación radicados', 'Ponencias presentadas', 'Trabajos de grado dirigidos'],
     'Académico-Administrativo': ['Informes entregados', 'Reuniones de comité asistidas', 'Egresados contactados'],
     'Aseguramiento de Calidad': ['Documentos elaborados', 'Acciones de mejora ejecutadas'],
-    'Vicerrectoría': ['Actividades de apoyo realizadas']
+    'Vicerrectoría para la Evangelización de las Culturas': ['Actividades de apoyo realizadas']
 };
 
 // Reparto de horas por tipo de contrato. Suma exacta a las horas contratadas.

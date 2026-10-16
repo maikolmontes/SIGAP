@@ -37,6 +37,7 @@ export default function Notificaciones() {
   const [loading, setLoading] = useState(true);
   const [enviandoPrueba, setEnviandoPrueba] = useState(false);
   const [enviandoRecordatorios, setEnviandoRecordatorios] = useState(false);
+  const [enviandoCortes, setEnviandoCortes] = useState(false);
   const [correoPrueba, setCorreoPrueba] = useState('');
   const [mensaje, setMensaje] = useState<Mensaje>(null);
 
@@ -98,6 +99,27 @@ export default function Notificaciones() {
       mostrar('error', errorBackend(error, 'No se pudieron enviar los recordatorios.'));
     } finally {
       setEnviandoRecordatorios(false);
+    }
+  };
+
+  const enviarCortesPorCerrar = async () => {
+    const acepta = await confirmar({
+      tipo: 'pregunta',
+      titulo: '¿Avisar de los cortes por cerrar?',
+      mensaje: 'Se avisará, por la campana y por correo, a los docentes que aún no registran avance en un corte (semana 8 o 16) que cierra en los próximos 3 días. ¿Desea continuar?',
+      textoAceptar: 'Avisar',
+    });
+    if (!acepta) return;
+
+    try {
+      setEnviandoCortes(true);
+      const res = await api.post('/notificaciones/cortes-por-cerrar', {});
+      mostrar('exito', res.data.mensaje || 'Aviso enviado.');
+    } catch (error: unknown) {
+      console.error('Error al avisar de los cortes por cerrar:', error);
+      mostrar('error', errorBackend(error, 'No se pudo avisar de los cortes por cerrar.'));
+    } finally {
+      setEnviandoCortes(false);
     }
   };
 
@@ -264,6 +286,25 @@ export default function Notificaciones() {
               )}
               {enviandoRecordatorios ? 'Enviando recordatorios...' : 'Enviar recordatorios ahora'}
             </button>
+
+            <div className="border-t border-gray-100 mt-5 pt-5">
+              <h3 className="text-sm font-bold text-gray-900 mb-1">Cortes por cerrar</h3>
+              <p className="text-sm text-gray-500 mb-3">
+                Avisa a los docentes que aún no registran avance en un corte (semana 8 o 16) que cierra en los próximos 3 días.
+              </p>
+              <button
+                onClick={enviarCortesPorCerrar}
+                disabled={enviandoCortes}
+                className="w-full flex items-center justify-center gap-2 bg-[#1a2744] hover:bg-[#243560] disabled:opacity-50 text-white px-5 py-2.5 rounded-lg font-bold transition-colors"
+              >
+                {enviandoCortes ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <BellRing className="w-4 h-4" />
+                )}
+                {enviandoCortes ? 'Avisando...' : 'Avisar de los cortes por cerrar'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -288,7 +329,15 @@ export default function Notificaciones() {
                 ['Bienvenida', 'Nuevo usuario', 'Al crear el usuario desde Docentes y Usuarios'],
                 ['Apertura de período', 'Docentes y directores', 'Al crear o habilitar un período (si está activado en el .env)'],
                 ['Carga académica disponible', 'Docentes importados', 'Al importar asignaciones (si está activado en el .env)'],
-                ['Recordatorio de radicación', 'Docentes pendientes', 'Manual, desde el botón de esta página']
+                ['Recordatorio de radicación', 'Docentes pendientes', 'Manual, desde el botón de esta página'],
+                ['Avance listo para revisión', 'Director del programa', 'Cuando el docente guarda su avance de la semana 8 o 16 (una vez por corte)'],
+                ['Corte aprobado o devuelto', 'Docente', 'Cuando el director aprueba o devuelve un corte (con el motivo)'],
+                ['Visto bueno de un corte', 'Director del programa', 'Cuando el revisor de una función da su visto bueno'],
+                ['Asignaciones aprobadas', 'Docente', 'Cuando el director aprueba la carga académica y libera la agenda'],
+                ['Horas corregidas', 'Docente', 'Cuando el director ajusta las horas de una agenda que el docente ya ve'],
+                ['Visto bueno de asignaciones', 'Director del programa', 'Cuando el revisor de una función da su visto bueno a las asignaciones'],
+                ['Semana habilitada', 'Docentes con agenda', 'Al habilitar una semana (la campana siempre; el correo solo si se activa)'],
+                ['Corte por cerrar', 'Docentes sin avance', 'Manual, desde el botón de esta página']
               ].map(([evento, destino, cuando]) => (
                 <tr key={evento} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-semibold text-gray-900">{evento}</td>

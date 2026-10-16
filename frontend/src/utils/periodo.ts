@@ -1,7 +1,6 @@
 // Cómo se nombra un período académico (misma regla que backend/utils/periodo.js).
 //   semestre 1 = I · 2 = II · 3 = Intersemestral I · 4 = Intersemestral II
-// Los intersemestrales aún no tienen definidas las semanas de sus dos cortes de
-// avance: internamente siguen siendo el corte 8 y el 16, pero se muestran "Semana X".
+// Los intersemestrales tienen los mismos dos cortes de avance que un semestre: Semana 8 y Semana 16.
 
 export interface PeriodoBasico {
     anio?: number | string
@@ -29,11 +28,9 @@ export const etiquetaSemestreP = (semestre?: number | string | null): string =>
 export const etiquetaPeriodo = (p?: PeriodoBasico | null): string =>
     p ? `${p.anio}-${etiquetaSemestre(p.semestre)}` : ''
 
-/** "Semana 8" / "Semana 16"; en un intersemestral "Semana X" / "Semana X (final)". */
-export const etiquetaCorte = (corte: number | string, semestre?: number | string | null): string => {
-    if (!esIntersemestral(semestre)) return `Semana ${corte}`
-    return Number(corte) === 16 ? 'Semana X (final)' : 'Semana X'
-}
+/** "Semana 8" / "Semana 16", también en un intersemestral. El semestre se recibe por compatibilidad. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const etiquetaCorte = (corte: number | string, _semestre?: number | string | null): string => `Semana ${corte}`
 
 /** "Semestre I", "Semestre II", "Intersemestral I", "Intersemestral II". */
 export const etiquetaSemestreLarga = (semestre?: number | string | null): string =>
@@ -41,8 +38,6 @@ export const etiquetaSemestreLarga = (semestre?: number | string | null): string
         ? (SEMESTRES.find(s => s.valor === Number(semestre))?.nombre ?? '')
         : `Semestre ${etiquetaSemestre(semestre)}`
 
-/** Cambia "Semana 8" / "Semana 16" (o "Sem 8" / "Sem 16") de un texto por "X" / "X (final)" si el período es intersemestral. */
-export const rotularCortes = (texto: string, semestre?: number | string | null): string =>
-    esIntersemestral(semestre)
-        ? texto.replace(/\b(Semana|Sem|semana) 16\b/g, '$1 X (final)').replace(/\b(Semana|Sem|semana) 8\b/g, '$1 X')
-        : texto
+/** Antes cambiaba "Semana 8/16" por "Semana X" en los intersemestrales; ya no: los cortes se llaman igual en todos los períodos. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const rotularCortes = (texto: string, _semestre?: number | string | null): string => texto

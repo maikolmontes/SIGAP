@@ -5,7 +5,7 @@
  *   node sincronizar_catalogo_excel.js "<ruta del Excel>"             ← solo muestra qué cambiaría
  *   node sincronizar_catalogo_excel.js "<ruta del Excel>" --aplicar   ← aplica los cambios
  *
- * Qué hace, para Investigación, Académico-Administrativo, Vicerrectoría y Aseguramiento de Calidad:
+ * Qué hace, para Investigación, Académico-Administrativo, Vicerrectoría para la Evangelización de las Culturas y Aseguramiento de Calidad:
  *   - lo que falta en la base se crea; lo que tiene el mismo sentido pero otro texto se
  *     renombra con el texto del Excel (los textos se copian tal cual);
  *   - lo que sobra se elimina si ninguna agenda lo usa, y si alguna lo usa se oculta;

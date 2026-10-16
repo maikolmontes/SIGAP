@@ -14,6 +14,7 @@
  */
 const pool = require('../db/connection');
 const { alcanceFunciones, docenteEnAlcance } = require('../utils/rolActivo');
+const notificaciones = require('../services/notificacionesService');
 
 /**
  * Resuelve quién puede hacer qué sobre una función concreta.
@@ -143,6 +144,11 @@ const darVistoBueno = async (req, res) => {
             client.release();
         }
 
+        // Aviso a la dirección (campana y correo): el revisor dio su visto bueno y el corte pasa al Director.
+        // Si lo retiró, se reinicia la marca para que el siguiente visto bueno vuelva a avisar.
+        if (quitar) await notificaciones.reiniciarAvisoVistoCorte(idFunciones, semana);
+        else await notificaciones.background.vistoBuenoCorteAhora({ idFunciones, semana, idRevisor: req.user.id });
+
         res.json({
             mensaje: quitar
                 ? `Se retiró la marca de revisado en "${p.funcion_sustantiva}". Vuelve a quedar pendiente.`
@@ -202,6 +208,9 @@ const aprobarCorte = async (req, res) => {
             client.release();
         }
 
+        // Aviso al docente (campana y correo)
+        await notificaciones.background.corteRevisadoAhora({ idFunciones, semana, estado: 'Aprobado', idRevisor: req.user.id, esDirector: !!p.esComodin });
+
         res.json({ mensaje: `Corte de "${p.funcion_sustantiva}" aprobado.`, estado: 'Aprobado' });
 
     } catch (error) {
@@ -253,6 +262,12 @@ const devolverCorte = async (req, res) => {
         } finally {
             client.release();
         }
+
+        // Aviso al docente con el motivo (campana y correo). Al devolver, el visto bueno previo deja de valer.
+        await notificaciones.reiniciarAvisoVistoCorte(idFunciones, semana);
+        await notificaciones.background.corteRevisadoAhora({
+            idFunciones, semana, estado: 'Devuelto', idRevisor: req.user.id, observacion: observacion.trim(), esDirector: !!p.esComodin,
+        });
 
         res.json({
             mensaje: `Corte de "${p.funcion_sustantiva}" devuelto al docente.`,

@@ -12,6 +12,9 @@ router.post('/prueba', verifyToken, verifyRole('Planeacion', 'Admin'), controlle
 // Recordatorios de radicación — Planeación y Director de programa
 router.post('/recordatorios', verifyToken, verifyRole('Planeacion', 'Admin', 'Director'), controller.enviarRecordatorios);
 
+// Aviso a quienes no registran avance en un corte que cierra pronto — Planeación y Director de programa
+router.post('/cortes-por-cerrar', verifyToken, verifyRole('Planeacion', 'Admin', 'Director'), controller.enviarCortesPorCerrar);
+
 // Reenvío del aviso de apertura de período
 router.post('/periodo/:id', verifyToken, verifyRole('Planeacion', 'Admin'), controller.enviarAvisoPeriodo);
 

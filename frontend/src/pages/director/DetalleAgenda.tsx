@@ -317,7 +317,7 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
                     <h3 className="text-base font-bold text-slate-800">No se pudo cargar la agenda</h3>
                     <p className="text-sm text-slate-500 mt-1">Es posible que la agenda no exista o haya ocurrido un error temporal.</p>
                     <button
-                        onClick={() => navigate(rutaVolver)}
+                        onClick={() => navigate(rutaVolver, { state: { tab: (location.state as { tab?: string } | null)?.tab } })}
                         className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
                     >
                         <ArrowLeft className="w-4 h-4" /> {etiquetaVolver}
@@ -364,7 +364,7 @@ export default function DetalleAgenda({ modulo = 'director', soloLectura = false
                 {/* Barra de navegación superior con botón Volver y Breadcrumbs visuales */}
                 <div className="flex flex-wrap items-center justify-between gap-4">
                     <button
-                        onClick={() => navigate(rutaVolver)}
+                        onClick={() => navigate(rutaVolver, { state: { tab: (location.state as { tab?: string } | null)?.tab } })}
                         className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200/80 text-slate-700 text-sm font-semibold hover:bg-slate-50 hover:border-slate-300 transition-all shadow-xs group cursor-pointer"
                     >
                         <ArrowLeft className="w-4 h-4 text-slate-400 group-hover:-translate-x-0.5 group-hover:text-slate-700 transition-transform" />
