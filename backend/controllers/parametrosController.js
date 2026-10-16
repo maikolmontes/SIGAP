@@ -17,7 +17,8 @@
 //  - Las actividades "Otro/Cuál" y las funciones Docencia Directa/Indirecta
 //    están protegidas: el importador y la agenda dependen de ellas.
 //  - En Docencia Indirecta el catálogo llega hasta la descripción: el
-//    indicador lo registra el docente.
+//    indicador lo registra el docente. Planeación puede agregar uno de todos
+//    modos (opcional, desde la descripción): la agenda lo propone al docente.
 //  - La meta la registra cada docente en su agenda. En el catálogo solo
 //    existe la de Docencia Directa, que va por defecto; en las demás
 //    funciones no se pide ni se modifica.
@@ -414,9 +415,6 @@ const crearDescripcion = conTransaccion('crear_descripcion', async (client, req)
 // POST /descripciones/:id/indicadores { nombre }
 const crearIndicador = conTransaccion('crear_indicador', async (client, req) => {
     const desc = await cargarDescripcion(client, idDe(req));
-    if (!usaIndicadores(desc.funcion_sustantiva)) {
-        throw new ErrorParametros(`En "${desc.funcion_sustantiva}" el indicador lo registra el docente en su agenda.`, 409);
-    }
     const errores = [];
     const nombre = texto(req.body?.nombre, 'El indicador', MAX_TEXTO, errores);
     lanzarSiHayErrores(errores);
@@ -656,10 +654,14 @@ const ELIMINAR = {
         const i = await cargarIndicador(client, id);
         const activo = (await client.query('SELECT COALESCE(activo, TRUE) AS a FROM indicadores WHERE id_indicadores = $1', [id])).rows[0].a;
         exigirSinUso([await usoIndicador(client, i.funcion_sustantiva, i.nombre_indicador)], 'Este indicador');
-        await exigirOtroVisible(client,
-            'SELECT COUNT(*) AS n FROM indicadores WHERE id_descripcion = $1 AND id_indicadores <> $2 AND COALESCE(activo, TRUE) = TRUE',
-            [i.id_descripcion, id], activo,
-            'Es el único indicador visible de la descripción: agrega otro primero, o elimina la descripción completa.');
+        // Donde el indicador es obligatorio no se deja la descripción sin ninguno; en Docencia Indirecta es opcional
+        // (si se elimina el último, vuelve a escribirlo el docente en su agenda)
+        if (usaIndicadores(i.funcion_sustantiva)) {
+            await exigirOtroVisible(client,
+                'SELECT COUNT(*) AS n FROM indicadores WHERE id_descripcion = $1 AND id_indicadores <> $2 AND COALESCE(activo, TRUE) = TRUE',
+                [i.id_descripcion, id], activo,
+                'Es el único indicador visible de la descripción: agrega otro primero, o elimina la descripción completa.');
+        }
         await client.query('DELETE FROM indicadores WHERE id_indicadores = $1', [id]);
         return { funcion: i.funcion_sustantiva, indicador: i.nombre_indicador };
     },

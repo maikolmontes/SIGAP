@@ -8,7 +8,8 @@
 // Las definiciones son las mismas de la analítica (analiticaController):
 //   · estado de la agenda de un docente: una función devuelta marca toda la
 //     agenda; "Aprobada" solo si todas lo están; "En revisión" si todas están
-//     diligenciadas (Aceptado/Aprobada); si no, "Pendiente".
+//     diligenciadas (Aceptado/Aprobada); "Por aprobar" si alguna función sigue
+//     con la carga sin liberar al docente ('Por Aprobar'); si no, "Pendiente".
 //   · avance: ejecución de los indicadores (ejecucion_8 / ejecucion_16) frente
 //     a la meta de la descripción.
 //   · solo cuentan funciones con docente asignado (se excluye el catálogo).
@@ -26,10 +27,11 @@ const estadoAgenda = (d) => {
     if (d.alguna_devuelta) return 'Devuelta';
     if (d.todas_aprobadas) return 'Aprobada';
     if (d.todas_diligenciadas) return 'En revisión';
+    if (d.alguna_por_aprobar) return 'Por aprobar';
     return 'Pendiente';
 };
 
-const ESTADOS_AGENDA = ['Aprobada', 'En revisión', 'Pendiente', 'Devuelta', 'Sin agenda'];
+const ESTADOS_AGENDA = ['Aprobada', 'En revisión', 'Pendiente', 'Por aprobar', 'Devuelta', 'Sin agenda'];
 
 class BalanceError extends Error {
     constructor(mensaje, estado = 400) {
@@ -62,6 +64,8 @@ const construirBalance = async (db, { idPrograma, idPeriodo }) => {
                COALESCE(tc.horas_contrato, 0)::numeric AS horas_contrato,
                COALESCE(ag.horas, 0)::numeric         AS horas_asignadas,
                COALESCE(ag.funciones, 0)::int         AS funciones,
+               COALESCE(ag.funciones_liberadas, 0)::int AS funciones_liberadas,
+               COALESCE(ag.alguna_por_aprobar, FALSE) AS alguna_por_aprobar,
                COALESCE(ag.alguna_devuelta, FALSE)    AS alguna_devuelta,
                COALESCE(ag.todas_aprobadas, FALSE)    AS todas_aprobadas,
                COALESCE(ag.todas_diligenciadas, FALSE) AS todas_diligenciadas,
@@ -77,6 +81,8 @@ const construirBalance = async (db, { idPrograma, idPeriodo }) => {
         LEFT JOIN LATERAL (
             SELECT SUM(COALESCE(af.horas_funcion, 0)) AS horas,
                    COUNT(*)                           AS funciones,
+                   COUNT(*) FILTER (WHERE af.estado_agenda <> 'Por Aprobar') AS funciones_liberadas,
+                   BOOL_OR(af.estado_agenda = 'Por Aprobar')                 AS alguna_por_aprobar,
                    BOOL_OR(af.estado_agenda = 'Devuelta')                    AS alguna_devuelta,
                    BOOL_AND(af.estado_agenda = 'Aprobada')                   AS todas_aprobadas,
                    BOOL_AND(af.estado_agenda IN ('Aceptado', 'Aprobada'))    AS todas_diligenciadas
@@ -114,6 +120,7 @@ const construirBalance = async (db, { idPrograma, idPeriodo }) => {
             horasAsignadas,
             ocupacion: porcentaje(horasAsignadas, horasContrato),
             funciones: d.funciones,
+            funcionesLiberadas: d.funciones_liberadas,
             estado: estadoAgenda(d),
             meta: num(d.meta),
             ejecucionCorte1: num(d.ejec8),
@@ -148,7 +155,7 @@ const construirBalance = async (db, { idPrograma, idPeriodo }) => {
                COALESCE(i.nombre_indicador, '')            AS indicador,
                COUNT(DISTINCT u.id_usuario)::int           AS docentes,
                ARRAY_AGG(DISTINCT u.id_usuario)            AS ids_docentes,
-               COALESCE(SUM(d.meta), 0)::numeric           AS meta,
+               COALESCE(SUM(d.meta) FILTER (WHERE i.id_indicadores IS NOT NULL), 0)::numeric AS meta,
                COALESCE(SUM(i.ejecucion_8), 0)::numeric    AS ejec8,
                COALESCE(SUM(i.ejecucion_16), 0)::numeric   AS ejec16,
                COALESCE(SUM(ev.n), 0)::int                 AS evidencias
@@ -285,6 +292,7 @@ const construirBalance = async (db, { idPrograma, idPeriodo }) => {
 
     // ---- Revisión de los cortes (por función de cada docente) ----
     const totalFunciones = docentes.reduce((s, d) => s + d.funciones, 0);
+    const funcionesLiberadas = docentes.reduce((s, d) => s + d.funcionesLiberadas, 0);
     const revisadas = (await db.query(`
         SELECT rc.semana, rc.estado, COUNT(*)::int AS n
         FROM revision_corte rc
@@ -297,14 +305,20 @@ const construirBalance = async (db, { idPrograma, idPeriodo }) => {
     const corte = (semana) => {
         const filas = revisadas.filter((r) => Number(r.semana) === semana);
         const cuenta = (e) => filas.filter((r) => r.estado === e).reduce((s, r) => s + r.n, 0);
-        const aprobadas = cuenta('Aprobado'), vistoBueno = cuenta('Visto bueno'), devueltas = cuenta('Devuelto');
+        const aprobadas = cuenta('Aprobado'), vistoBueno = cuenta('Visto bueno'), devueltas = cuenta('Devuelto'), porRevisar = cuenta('Pendiente');
         return {
             nombre: etiquetaCorte(semana, periodo.semestre),
-            aprobadas, vistoBueno, devueltas,
-            pendientes: Math.max(0, totalFunciones - aprobadas - vistoBueno - devueltas),
+            aprobadas, vistoBueno, devueltas, porRevisar,
+            // Funciones liberadas de las que el docente todavía no ha reportado este corte
+            sinReportar: Math.max(0, funcionesLiberadas - aprobadas - vistoBueno - devueltas - porRevisar),
         };
     };
-    const cortes = { corte1: corte(8), corte2: corte(16) };
+    const cortes = {
+        funcionesLiberadas,
+        funcionesPorLiberar: totalFunciones - funcionesLiberadas, // carga todavía 'Por Aprobar': el docente aún no puede reportar
+        corte1: corte(8),
+        corte2: corte(16),
+    };
 
     // ---- Observaciones del director ----
     const observaciones = (await db.query(`

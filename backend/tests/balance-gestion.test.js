@@ -4,12 +4,14 @@ const assert = require('node:assert/strict');
 const { estadoAgenda, porcentaje, construirBalance, BalanceError } = require('../services/balanceGestion');
 
 test('el estado de la agenda sigue la misma precedencia que la analítica', () => {
-    const base = { funciones: 2, alguna_devuelta: false, todas_aprobadas: false, todas_diligenciadas: false };
+    const base = { funciones: 2, alguna_devuelta: false, todas_aprobadas: false, todas_diligenciadas: false, alguna_por_aprobar: false };
     assert.equal(estadoAgenda({ ...base, funciones: 0 }), 'Sin agenda');
     assert.equal(estadoAgenda({ ...base, alguna_devuelta: true, todas_aprobadas: true }), 'Devuelta', 'una función devuelta marca toda la agenda');
     assert.equal(estadoAgenda({ ...base, todas_aprobadas: true, todas_diligenciadas: true }), 'Aprobada');
     assert.equal(estadoAgenda({ ...base, todas_diligenciadas: true }), 'En revisión');
     assert.equal(estadoAgenda(base), 'Pendiente');
+    assert.equal(estadoAgenda({ ...base, alguna_por_aprobar: true }), 'Por aprobar', 'carga sin liberar al docente: no es "pendiente de diligenciar"');
+    assert.equal(estadoAgenda({ ...base, alguna_por_aprobar: true, alguna_devuelta: true }), 'Devuelta');
 });
 
 test('los porcentajes no dividen por cero ni inventan datos', () => {
@@ -38,6 +40,7 @@ const baseFalsa = ({ programa = true, periodo = true, docentes = [], funciones =
 
 const docente = (extra) => ({
     docente: 'Docente Uno', tipo_contrato: 'Tiempo Completo', horas_contrato: '40', horas_asignadas: '40', funciones: 4,
+    funciones_liberadas: 4, alguna_por_aprobar: false,
     alguna_devuelta: false, todas_aprobadas: true, todas_diligenciadas: true,
     meta: '8', ejec8: '2', ejec16: '2', indicadores: 2, sin_soporte: 1, evidencias: 1, ...extra,
 });
@@ -49,7 +52,7 @@ test('un programa o un período inexistente da 404 con un mensaje claro', async 
 
 test('el informe junta docentes, funciones y cortes, y el resumen cuadra con las tablas', async () => {
     const inf = await construirBalance(baseFalsa({
-        docentes: [docente(), docente({ docente: 'Docente Dos', todas_aprobadas: false, alguna_devuelta: true, funciones: 3, horas_asignadas: '30', meta: '0', ejec8: '0', ejec16: '0', sin_soporte: 0, evidencias: 0 }), docente({ docente: 'Docente Tres', funciones: 0, horas_asignadas: '0' })],
+        docentes: [docente(), docente({ docente: 'Docente Dos', todas_aprobadas: false, alguna_devuelta: true, funciones: 3, funciones_liberadas: 3, horas_asignadas: '30', meta: '0', ejec8: '0', ejec16: '0', sin_soporte: 0, evidencias: 0 }), docente({ docente: 'Docente Tres', funciones: 0, funciones_liberadas: 0, horas_asignadas: '0' })],
         funciones: [{ funcion: 'Investigación', horas: '5', docentes: 1 }],
         actividades: [
             { funcion: 'Investigación', actividad: 'Egresados', asignatura: '', descripcion: 'Artículo', indicador: 'Artículos', docentes: 1, ids_docentes: [7], meta: '4', ejec8: '1', ejec16: '2', evidencias: 1 },
@@ -68,7 +71,7 @@ test('el informe junta docentes, funciones y cortes, y el resumen cuadra con las
     assert.deepEqual(inf.docentes.map((d) => d.estado), ['Aprobada', 'Devuelta', 'Sin agenda']);
     assert.equal(inf.resumen.docentes, 3);
     assert.equal(inf.resumen.docentesConAgenda, 2);
-    assert.deepEqual(inf.resumen.estados, { Aprobada: 1, 'En revisión': 0, Pendiente: 0, Devuelta: 1, 'Sin agenda': 1 });
+    assert.deepEqual(inf.resumen.estados, { Aprobada: 1, 'En revisión': 0, Pendiente: 0, 'Por aprobar': 0, Devuelta: 1, 'Sin agenda': 1 });
     assert.equal(inf.resumen.porcentajeAprobadas, 33.3);
     assert.equal(inf.resumen.horasAsignadas, 70);
     assert.equal(inf.resumen.horasContratadas, 120);
@@ -81,11 +84,13 @@ test('el informe junta docentes, funciones y cortes, y el resumen cuadra con las
     assert.equal(inv.avanceFinal, 50);
     assert.equal(inf.resumen.avanceFinal, 50);
 
-    // 3 funciones con docente en total (4 + 3 + 0 = 7); 2 revisadas en el corte 1 y 1 en el 2
+    // 7 funciones liberadas (4 + 3 + 0); 2 aprobadas en el corte 1 y 1 devuelta en el 2; el resto, sin reportar
+    assert.equal(inf.cortes.funcionesLiberadas, 7);
+    assert.equal(inf.cortes.funcionesPorLiberar, 0);
     assert.equal(inf.cortes.corte1.aprobadas, 2);
-    assert.equal(inf.cortes.corte1.pendientes, 5);
+    assert.equal(inf.cortes.corte1.sinReportar, 5);
     assert.equal(inf.cortes.corte2.devueltas, 1);
-    assert.equal(inf.cortes.corte2.pendientes, 6);
+    assert.equal(inf.cortes.corte2.sinReportar, 6);
 
     assert.equal(inf.observaciones[0].corte, 'Semana 16');
     assert.equal(inf.observaciones[0].texto, 'faltan cosas', 'se recorta el texto');

@@ -36,6 +36,7 @@ interface Docente {
     activo: boolean
     fecha_asignacion?: string
     programa?: string
+    facultad?: string
     tipo_documento?: string
     numero_documento?: string
 }
@@ -259,6 +260,24 @@ export default function Periodos() {
             setError(err.response?.data?.error || 'Error al asignar los docentes.')
         } finally {
             setAsignando(false)
+        }
+    }
+
+    // Quita a varios docentes del período de una vez: se intenta con cada uno y se recarga una sola vez al final
+    const handleDesasignarVarios = async (ids: number[]) => {
+        if (!periodoSeleccionado || ids.length === 0) return
+        setError('')
+        let fallidos = 0
+        for (const id of ids) {
+            try { await desasignarDocentePeriodo(periodoSeleccionado.id_periodo, id) } catch { fallidos++ }
+        }
+        await abrirModalAsignar(periodoSeleccionado, true)
+        await cargarPeriodos()
+        if (fallidos > 0) {
+            setError(`No se pudo remover a ${fallidos} de ${ids.length} docentes. Inténtelo de nuevo.`)
+        } else {
+            setExito(`Se removieron ${ids.length} docente(s) del período.`)
+            setTimeout(() => setExito(''), 4000)
         }
     }
 
@@ -793,6 +812,7 @@ export default function Periodos() {
                     onLimpiarSeleccion={() => setSeleccionados([])}
                     onAsignar={handleAsignar}
                     onRemover={handleDesasignar}
+                    onRemoverVarios={handleDesasignarVarios}
                     onCerrar={() => { setModalAsignar(false); setError('') }}
                 />
             )}

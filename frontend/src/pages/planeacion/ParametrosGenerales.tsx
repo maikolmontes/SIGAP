@@ -573,13 +573,14 @@ export default function ParametrosGenerales() {
             <div className="min-w-0">
                 <p className={rotulo}>Indicadores (entregables)</p>
                 {d.indicadores.length === 0
-                    ? <p className="text-xs text-gray-400">{usaIndicadores ? 'Sin indicadores visibles.' : 'El docente registra el indicador en su agenda.'}</p>
+                    ? <p className="text-xs text-gray-400">{usaIndicadores ? 'Sin indicadores visibles.' : 'El docente registra el indicador en su agenda. Puedes agregar uno si hace falta.'}</p>
                     : <ul className="divide-y divide-gray-100">{d.indicadores.map(renderIndicador)}</ul>}
-                {puedeCrear && usaIndicadores && (
+                {puedeCrear && (
                     <div className="mt-2">
-                        <Boton tono="crear" alinear="izquierda" ayuda="Agregar otro indicador (entregable) a esta descripción"
+                        <Boton tono="crear" alinear="izquierda"
+                            ayuda={usaIndicadores ? 'Agregar otro indicador (entregable) a esta descripción' : 'Opcional: agregar un indicador (entregable) a esta descripción; la agenda se lo propondrá al docente'}
                             onClick={() => abrirFormulario({ tipo: 'indicador-nuevo', descripcion: d })}>
-                            <Plus className="w-3.5 h-3.5" /> Agregar indicador
+                            <Plus className="w-3.5 h-3.5" /> {usaIndicadores ? 'Agregar indicador' : 'Agregar indicador (opcional)'}
                         </Boton>
                     </div>
                 )}

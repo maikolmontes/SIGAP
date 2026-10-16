@@ -26,9 +26,11 @@ export interface ResumenNumerico {
   porcentajeSinDocenciaDirecta?: number | null;
   /** IND-10: parte de la meta total que aporta Docencia Directa */
   pesoDocenciaDirecta?: number | null;
-  /** IND-11: % de funciones aprobadas en cada corte */
+  /** IND-11: % de funciones liberadas que están aprobadas en cada corte */
   porcentajeCorte1?: number;
   porcentajeCorte2?: number;
+  /** IND-11: funciones cuya carga sigue por aprobar (el docente aún no puede reportarlas) */
+  porLiberar?: number;
 }
 
 export interface FilaBalanceDocente {
@@ -43,7 +45,7 @@ export interface FilaBalanceDocente {
   porcentajeOcupacion: number | null;
   funciones: number;
   balance: 'Balanceada' | 'Subcarga' | 'Sobrecarga' | 'Sin parámetro contractual';
-  estadoAgenda: 'Aprobada' | 'Devuelta' | 'En revisión' | 'Pendiente';
+  estadoAgenda: 'Aprobada' | 'Devuelta' | 'En revisión' | 'Pendiente' | 'Por aprobar';
 }
 
 export interface FilaConsolidadoPrograma {
@@ -54,6 +56,7 @@ export interface FilaConsolidadoPrograma {
   aprobadas: number;
   enRevision: number;
   pendientes: number;
+  porAprobar: number;
   devueltas: number;
   horas: number;
   cumplimiento: number;

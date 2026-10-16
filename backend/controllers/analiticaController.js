@@ -28,7 +28,9 @@ const pool = require('../db/connection');
 const { calcularAlcance, alcanceProgramas } = require('../utils/rolActivo');
 const catalogo = require('../config/catalogoAnalitica');
 const gemini = require('../services/geminiService');
-const { indicadorPesoMetas, indicadorRevisionCortes, indicadorCobertura } = require('../services/analiticaDescriptiva');
+const { indicadorPesoMetas, indicadorRevisionCortes } = require('../services/analiticaDescriptiva');
+const { ESTADOS_DOCENTE, estadoConsolidado, contarEstados } = require('../utils/estadoDocente');
+const { ordenarPorFuncion } = require('../utils/ordenFunciones');
 
 // ----------------------------------------------------------------
 // Utilidades internas
@@ -157,10 +159,14 @@ const getPeriodos = async (req, res) => {
     try {
         const r = await pool.query(`
             SELECT p.id_periodo, p.anio, p.semestre, p.activo,
-                   COUNT(DISTINCT ua.id_usuario) AS docentes_con_agenda
+                   COUNT(DISTINCT d.id_usuario) AS docentes_con_agenda
             FROM periodo p
-            LEFT JOIN asignacion_funciones af ON af.id_periodo = p.id_periodo
-            LEFT JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            LEFT JOIN (
+                SELECT id_periodo, id_usuario FROM docente_periodo
+                UNION
+                SELECT af.id_periodo, ua.id_usuario
+                FROM asignacion_funciones af JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            ) d ON d.id_periodo = p.id_periodo
             GROUP BY p.id_periodo, p.anio, p.semestre, p.activo
             ORDER BY p.anio DESC, p.semestre DESC
         `);
@@ -217,41 +223,46 @@ const armarResumen = async (req) => {
             )
         `;
 
-        // --- IND-01 / IND-02: estado consolidado por docente ---
-        // Precedencia: una función devuelta marca toda la agenda.
-        const estados = await pool.query(`
-            ${baseCte},
-            por_docente AS (
-                SELECT id_usuario,
-                       BOOL_OR(estado_agenda = 'Devuelta')                      AS alguna_devuelta,
-                       BOOL_AND(estado_agenda = 'Aprobada')                     AS todas_aprobadas,
-                       BOOL_AND(estado_agenda IN ('Aceptado', 'Aprobada'))      AS todas_diligenciadas
-                FROM base GROUP BY id_usuario
-            )
-            SELECT
-                COUNT(*)::int                                                                                       AS total,
-                COUNT(*) FILTER (WHERE alguna_devuelta)::int                                                        AS devueltas,
-                COUNT(*) FILTER (WHERE NOT alguna_devuelta AND todas_aprobadas)::int                                AS aprobadas,
-                COUNT(*) FILTER (WHERE NOT alguna_devuelta AND NOT todas_aprobadas AND todas_diligenciadas)::int    AS en_revision,
-                COUNT(*) FILTER (WHERE NOT alguna_devuelta AND NOT todas_diligenciadas)::int                        AS pendientes
-            FROM por_docente
+        // --- IND-01 / IND-02: estado de cada docente asignado al período ---
+        // Se parte de los docentes del período (igual que Reportes), no solo de quienes ya tienen funciones:
+        // así "Por aprobar" (carga sin liberar) y "Sin carga" también aparecen y todo suma el total de docentes.
+        // Precedencia y definiciones en utils/estadoDocente.js.
+        const docentesPeriodo = await pool.query(`
+            SELECT u.id_usuario,
+                   COUNT(af.id_funciones)::int                                  AS funciones,
+                   BOOL_OR(af.estado_agenda = 'Devuelta')                       AS alguna_devuelta,
+                   BOOL_AND(af.estado_agenda = 'Aprobada')                      AS todas_aprobadas,
+                   BOOL_AND(af.estado_agenda IN ('Aceptado', 'Aprobada'))       AS todas_diligenciadas,
+                   BOOL_OR(af.estado_agenda = 'Por Aprobar')                    AS alguna_por_aprobar
+            FROM (
+                SELECT id_usuario FROM docente_periodo WHERE id_periodo = $1
+                UNION
+                SELECT ua2.id_usuario FROM usuario_asignacion ua2
+                JOIN asignacion_funciones af2 ON af2.id_funciones = ua2.id_funciones AND af2.id_periodo = $1
+            ) dp
+            JOIN usuarios u ON u.id_usuario = dp.id_usuario AND u.activo = TRUE
+            LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
+            LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
+            WHERE TRUE${filtro}
+            GROUP BY u.id_usuario
         `, params);
 
-        const e = estados.rows[0] || { total: 0, devueltas: 0, aprobadas: 0, en_revision: 0, pendientes: 0 };
+        const porEstado = contarEstados(docentesPeriodo.rows);
+        const totalDocentes = docentesPeriodo.rows.length;
 
         const indAgendas = catalogo.construirMetrica('IND-01', {
             periodo: etiqueta,
             programa,
-            categorias: ['Aprobada', 'En revisión', 'Pendiente', 'Devuelta'],
+            categorias: [...ESTADOS_DOCENTE],
             series: [{
                 nombre: 'Docentes',
                 clave: 'docentes',
                 unidad: 'docentes',
-                datos: [num(e.aprobadas), num(e.en_revision), num(e.pendientes), num(e.devueltas)]
+                datos: ESTADOS_DOCENTE.map((estado) => porEstado[estado])
             }],
             resumenNumerico: {
-                total: num(e.total),
-                porcentajeGlobal: pct(e.aprobadas, e.total)
+                total: totalDocentes,
+                porcentajeGlobal: pct(porEstado['Aprobada'], totalDocentes)
             }
         });
 
@@ -263,11 +274,11 @@ const armarResumen = async (req) => {
                 nombre: 'Docentes',
                 clave: 'docentes',
                 unidad: 'docentes',
-                datos: [num(e.devueltas), num(e.total) - num(e.devueltas)]
+                datos: [porEstado['Devuelta'], totalDocentes - porEstado['Devuelta']]
             }],
             resumenNumerico: {
-                total: num(e.devueltas),
-                porcentajeGlobal: pct(e.devueltas, e.total)
+                total: porEstado['Devuelta'],
+                porcentajeGlobal: pct(porEstado['Devuelta'], totalDocentes)
             }
         });
 
@@ -317,6 +328,9 @@ const armarResumen = async (req) => {
             ORDER BY af.funcion_sustantiva
         `, params);
 
+        // Mismo orden que en la agenda del docente: Docencia Directa, Docencia Indirecta y las demás
+        cortes.rows = ordenarPorFuncion(cortes.rows, (r) => r.funcion_sustantiva);
+
         const categoriasCorte = cortes.rows.map((r) => r.funcion_sustantiva || 'Sin clasificar');
         const metaTotal = cortes.rows.reduce((a, r) => a + num(r.meta), 0);
         const e8Total = cortes.rows.reduce((a, r) => a + num(r.ejec8), 0);
@@ -340,6 +354,8 @@ const armarResumen = async (req) => {
             categorias: categoriasCorte,
             series: [
                 { nombre: 'Meta', clave: 'meta', datos: cortes.rows.map((r) => num(r.meta)) },
+                { nombre: 'Ejecutado Semana 8', clave: 'ejecucion8', datos: cortes.rows.map((r) => num(r.ejec8)) },
+                { nombre: 'Ejecutado Semana 16', clave: 'ejecucion16', datos: cortes.rows.map((r) => num(r.ejec16)) },
                 { nombre: 'Semana 8', clave: 'avance8', unidad: '%', datos: cortes.rows.map((r) => pct(r.ejec8, r.meta)) },
                 {
                     nombre: 'Acumulado Semana 16',
@@ -383,15 +399,14 @@ const armarResumen = async (req) => {
             resumenNumerico: { total: totalEvidencias }
         });
 
-        // --- IND-10 / IND-11 / IND-12: peso de las funciones, revisión de cortes y cobertura ---
+        // --- IND-10 / IND-11: peso de las funciones y revisión de cortes ---
         const contexto = { periodo, etiqueta, programa, params, filtro };
         const indPeso = indicadorPesoMetas({ filas: cortes.rows, etiqueta, programa });
         const indRevision = await indicadorRevisionCortes(pool, contexto);
-        const indCobertura = await indicadorCobertura(pool, contexto);
 
         // --- Filtrado por rol: cada indicador declara quién puede verlo ---
         const { roles } = calcularAlcance(req);
-        const indicadores = [indAgendas, indDevolucion, indHoras, indCorte1, indCorte2, indEvidencias, indPeso, indRevision, indCobertura]
+        const indicadores = [indAgendas, indDevolucion, indHoras, indCorte1, indCorte2, indEvidencias, indPeso, indRevision]
             .filter((m) => catalogo.puedeVer(m.indicadorId, roles));
 
         const ms = Date.now() - inicio;
@@ -454,7 +469,8 @@ const getDetalleDocentes = async (req, res) => {
                    COUNT(DISTINCT af.id_funciones)::int         AS funciones,
                    BOOL_OR(af.estado_agenda = 'Devuelta')       AS alguna_devuelta,
                    BOOL_AND(af.estado_agenda = 'Aprobada')      AS todas_aprobadas,
-                   BOOL_AND(af.estado_agenda IN ('Aceptado', 'Aprobada')) AS todas_diligenciadas
+                   BOOL_AND(af.estado_agenda IN ('Aceptado', 'Aprobada')) AS todas_diligenciadas,
+                   BOOL_OR(af.estado_agenda = 'Por Aprobar')    AS alguna_por_aprobar
             FROM asignacion_funciones af
             JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
             JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
@@ -476,10 +492,7 @@ const getDetalleDocentes = async (req, res) => {
             else if (asignadas < contratadas) balance = 'Subcarga';
             else balance = 'Sobrecarga';
 
-            const estado = d.alguna_devuelta ? 'Devuelta'
-                : d.todas_aprobadas ? 'Aprobada'
-                : d.todas_diligenciadas ? 'En revisión'
-                : 'Pendiente';
+            const estado = estadoConsolidado(d);
 
             return {
                 id_usuario: d.id_usuario,
@@ -625,6 +638,7 @@ const armarConsolidado = async (req) => {
                        BOOL_OR(af.estado_agenda = 'Devuelta')                   AS devuelta,
                        BOOL_AND(af.estado_agenda = 'Aprobada')                  AS aprobada,
                        BOOL_AND(af.estado_agenda IN ('Aceptado', 'Aprobada'))   AS diligenciada,
+                       BOOL_OR(af.estado_agenda = 'Por Aprobar')                AS por_aprobar,
                        SUM(COALESCE(af.horas_funcion, 0))                       AS horas
                 FROM asignacion_funciones af
                 JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
@@ -654,7 +668,8 @@ const armarConsolidado = async (req) => {
                    COUNT(*) FILTER (WHERE a.devuelta)::int                          AS devueltas,
                    COUNT(*) FILTER (WHERE NOT a.devuelta AND NOT a.aprobada
                                       AND a.diligenciada)::int                      AS en_revision,
-                   COUNT(*) FILTER (WHERE NOT a.devuelta AND NOT a.diligenciada)::int AS pendientes,
+                   COUNT(*) FILTER (WHERE NOT a.devuelta AND NOT a.diligenciada AND a.por_aprobar)::int     AS por_aprobar,
+                   COUNT(*) FILTER (WHERE NOT a.devuelta AND NOT a.diligenciada AND NOT a.por_aprobar)::int AS pendientes,
                    SUM(a.horas)::numeric                                            AS horas,
                    COALESCE(av.meta, 0)::numeric                                    AS meta,
                    COALESCE(av.acumulado, 0)::numeric                               AS acumulado
@@ -673,6 +688,7 @@ const armarConsolidado = async (req) => {
             aprobadas: num(p.aprobadas),
             enRevision: num(p.en_revision),
             pendientes: num(p.pendientes),
+            porAprobar: num(p.por_aprobar),
             devueltas: num(p.devueltas),
             horas: num(p.horas),
             cumplimiento: pct(p.aprobadas, p.docentes),

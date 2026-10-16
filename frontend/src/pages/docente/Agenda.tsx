@@ -4,6 +4,7 @@ import { BookOpen, ClipboardList, Target, Flag, Plus, Trash2, Save, CheckCircle2
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { getPeriodoActivo } from '../../services/periodosService';
+import { ordenarPorFuncion } from '../../utils/ordenFunciones';
 
 interface Indicador {
     id: string;
@@ -33,11 +34,9 @@ interface FuncionBloque {
     actividades: Actividad[];
 }
 
-// Orden en que se presentan las funciones: Docencia Directa, luego Docencia Indirecta y después
-// las demás en el orden en que llegan de la base (sort estable: no mueve las que empatan).
-const PRIORIDAD_FUNCION: Record<string, number> = { 'Docencia Directa': 0, 'Docencia Indirecta': 1 };
+// Orden en que se presentan las funciones (compartido con el avance semanal): utils/ordenFunciones.ts
 const ordenarFunciones = <T extends { funcionSustantiva: string }>(lista: T[]): T[] =>
-    [...lista].sort((a, b) => (PRIORIDAD_FUNCION[a.funcionSustantiva] ?? 2) - (PRIORIDAD_FUNCION[b.funcionSustantiva] ?? 2));
+    ordenarPorFuncion(lista, (f) => f.funcionSustantiva);
 
 // La meta que escribe el docente es un número de entregas, no un porcentaje: de 0 a 20
 const META_MAXIMA = 20;

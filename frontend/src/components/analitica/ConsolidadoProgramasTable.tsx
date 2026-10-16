@@ -8,6 +8,7 @@ function BarraEstados({ fila }: { fila: FilaConsolidadoPrograma }) {
     { n: fila.aprobadas, color: COLOR_ESTADO['Aprobada'], etiqueta: 'Aprobadas' },
     { n: fila.enRevision, color: COLOR_ESTADO['En revisión'], etiqueta: 'En revisión' },
     { n: fila.pendientes, color: COLOR_ESTADO['Pendiente'], etiqueta: 'Pendientes' },
+    { n: fila.porAprobar, color: COLOR_ESTADO['Por aprobar'], etiqueta: 'Con la carga por aprobar' },
     { n: fila.devueltas, color: COLOR_ESTADO['Devuelta'], etiqueta: 'Devueltas' }
   ].filter((p) => p.n > 0);
 

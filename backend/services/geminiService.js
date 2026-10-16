@@ -137,7 +137,7 @@ const guardarCache = (clave, resultado) => {
 // Cualquier campo ajeno al contrato se descarta de forma explícita.
 // ----------------------------------------------------------------
 // Cifras agregadas extra que algunos indicadores aportan (IND-10 e IND-11). Solo números.
-const RESUMEN_EXTRA = ['porcentajeSinDocenciaDirecta', 'pesoDocenciaDirecta', 'porcentajeCorte1', 'porcentajeCorte2'];
+const RESUMEN_EXTRA = ['porcentajeSinDocenciaDirecta', 'pesoDocenciaDirecta', 'porcentajeCorte1', 'porcentajeCorte2', 'porLiberar'];
 const resumenExtra = (resumen = {}) => Object.fromEntries(
     RESUMEN_EXTRA.filter((k) => resumen[k] !== undefined && resumen[k] !== null).map((k) => [k, Number(resumen[k]) || 0])
 );
@@ -180,7 +180,7 @@ Reglas estrictas:
 1. Basa tu análisis EXCLUSIVAMENTE en las cifras del JSON que recibes.
 2. NO inventes datos, porcentajes, causas ni nombres de personas.
 3. NO emitas recomendaciones estratégicas, juicios sobre contratación ni cambios de política.
-4. Limítate a describir: proporciones, funciones con mayor y menor carga, variaciones entre la semana 8 y la semana 16, y niveles de cumplimiento. Si hay un indicador de peso de las funciones en la meta, di cuánto pesa Docencia Directa y compara el avance total con el avance sin ella; si hay revisión de cortes, describe cuántas funciones están aprobadas, devueltas y pendientes en cada corte; si hay cobertura de agendas, describe cuántos docentes tienen agenda enviada y cuántos no tienen agenda.
+4. Limítate a describir: proporciones, funciones con mayor y menor carga, variaciones entre la semana 8 y la semana 16, y niveles de cumplimiento. Si hay un indicador de peso de las funciones en la meta, di cuánto pesa Docencia Directa y compara el avance total con el avance sin ella; si hay revisión de cortes, describe cuántas funciones están aprobadas, con visto bueno, devueltas, por revisar (el docente ya reportó) y sin reportar en cada corte, y cuántas siguen sin liberar (porLiberar: su carga académica aún está por aprobar y el docente no puede reportarla); en el estado de las agendas, "Por aprobar" son docentes cuya carga académica todavía no se libera y "Sin carga" son docentes del período sin funciones asignadas.
 5. Si un indicador viene en cero o vacío, dilo como un hecho ("no hay ejecución registrada"), sin especular por qué.
 6. Escribe en español de Colombia, en tercera persona, sin adjetivos valorativos.`;
 

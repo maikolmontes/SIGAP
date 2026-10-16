@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, CheckCircle2, Lock, Search, UserMinus, UserPlus, Users, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronDown, Filter, Lock, Search, UserMinus, UserPlus, Users, X } from 'lucide-react'
 
 export interface DocenteModal {
     id_usuario: number
@@ -8,6 +8,7 @@ export interface DocenteModal {
     correo: string
     activo?: boolean
     programa?: string
+    facultad?: string
     tipo_documento?: string
     numero_documento?: string
 }
@@ -26,6 +27,7 @@ interface Props {
     onLimpiarSeleccion: () => void
     onAsignar: () => void
     onRemover: (id: number) => Promise<void>
+    onRemoverVarios: (ids: number[]) => Promise<void>
     onCerrar: () => void
 }
 
@@ -165,8 +167,33 @@ export default function ModalDocentesPeriodo(p: Props) {
     const [confirmando, setConfirmando] = useState<number | null>(null)
     const [quitando, setQuitando] = useState<number | null>(null)
 
-    const asignadosFiltrados = useMemo(() => p.asignados.filter(d => coincide(d, busquedaAsignados)), [p.asignados, busquedaAsignados])
-    const disponiblesFiltrados = useMemo(() => p.disponibles.filter(d => coincide(d, busquedaDisponibles)), [p.disponibles, busquedaDisponibles])
+    // Filtros por facultad y programa (valen para las dos listas) y selección para remover varios a la vez
+    const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)
+    const [filtroFacultad, setFiltroFacultad] = useState('')
+    const [filtroPrograma, setFiltroPrograma] = useState('')
+    const [marcadosRemover, setMarcadosRemover] = useState<number[]>([])
+    const [confirmandoVarios, setConfirmandoVarios] = useState(false)
+    const [quitandoVarios, setQuitandoVarios] = useState(false)
+
+    const todos = useMemo(() => [...p.asignados, ...p.disponibles], [p.asignados, p.disponibles])
+    const facultades = useMemo(() => [...new Set(todos.map(d => d.facultad).filter((x): x is string => !!x))].sort((a, b) => a.localeCompare(b, 'es')), [todos])
+    const programas = useMemo(
+        () => [...new Set(todos.filter(d => !filtroFacultad || d.facultad === filtroFacultad).map(d => d.programa).filter((x): x is string => !!x))].sort((a, b) => a.localeCompare(b, 'es')),
+        [todos, filtroFacultad]
+    )
+    const hayFiltros = !!(filtroFacultad || filtroPrograma)
+    const pasaFiltros = (d: DocenteModal) => (!filtroFacultad || d.facultad === filtroFacultad) && (!filtroPrograma || d.programa === filtroPrograma)
+    const limpiarFiltros = () => { setFiltroFacultad(''); setFiltroPrograma('') }
+
+    const asignadosFiltrados = useMemo(() => p.asignados.filter(d => pasaFiltros(d) && coincide(d, busquedaAsignados)), [p.asignados, busquedaAsignados, filtroFacultad, filtroPrograma]) // eslint-disable-line react-hooks/exhaustive-deps
+    const disponiblesFiltrados = useMemo(() => p.disponibles.filter(d => pasaFiltros(d) && coincide(d, busquedaDisponibles)), [p.disponibles, busquedaDisponibles, filtroFacultad, filtroPrograma]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Solo cuentan los marcados que siguen asignados (al remover, la lista se recarga)
+    const marcadosValidos = useMemo(() => marcadosRemover.filter(id => p.asignados.some(d => d.id_usuario === id)), [marcadosRemover, p.asignados])
+    const todosAsignadosMarcados = asignadosFiltrados.length > 0 && asignadosFiltrados.every(d => marcadosValidos.includes(d.id_usuario))
+    const alternarMarcado = (id: number) => setMarcadosRemover(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
+    const marcarAsignados = (ids: number[], marcar: boolean) =>
+        setMarcadosRemover(prev => (marcar ? Array.from(new Set([...prev, ...ids])) : prev.filter(id => !ids.includes(id))))
 
     const todosMarcados = disponiblesFiltrados.length > 0 && disponiblesFiltrados.every(d => p.seleccionados.includes(d.id_usuario))
 
@@ -188,6 +215,17 @@ export default function ModalDocentesPeriodo(p: Props) {
         } finally {
             setQuitando(null)
             setConfirmando(null)
+        }
+    }
+
+    const removerVarios = async () => {
+        setQuitandoVarios(true)
+        try {
+            await p.onRemoverVarios(marcadosValidos)
+            setMarcadosRemover([])
+        } finally {
+            setQuitandoVarios(false)
+            setConfirmandoVarios(false)
         }
     }
 
@@ -253,6 +291,61 @@ export default function ModalDocentesPeriodo(p: Props) {
                     </div>
                 )}
 
+                {/* ───── Filtros por facultad y programa ───── */}
+                <div className="px-6 py-2.5 border-b border-gray-100 bg-white shrink-0">
+                    <div className="flex items-center justify-between gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setFiltrosAbiertos(v => !v)}
+                            aria-expanded={filtrosAbiertos}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                                hayFiltros ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                            }`}
+                        >
+                            <Filter className="w-3.5 h-3.5" />
+                            Filtros
+                            {hayFiltros && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />}
+                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${filtrosAbiertos ? 'rotate-180' : ''}`} />
+                        </button>
+                        {hayFiltros && (
+                            <span className="text-xs text-gray-500">
+                                Se muestran solo los docentes {filtroPrograma ? `de ${filtroPrograma}` : `de ${filtroFacultad}`} en las dos listas
+                            </span>
+                        )}
+                    </div>
+                    {filtrosAbiertos && (
+                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+                            <label className="flex flex-col gap-1 min-w-0">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Facultad</span>
+                                <select
+                                    value={filtroFacultad}
+                                    onChange={e => { setFiltroFacultad(e.target.value); setFiltroPrograma('') }}
+                                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                                >
+                                    <option value="">Todas las facultades</option>
+                                    {facultades.map(f => <option key={f} value={f}>{f}</option>)}
+                                </select>
+                            </label>
+                            <label className="flex flex-col gap-1 min-w-0">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Programa</span>
+                                <select
+                                    value={filtroPrograma}
+                                    onChange={e => setFiltroPrograma(e.target.value)}
+                                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                                >
+                                    <option value="">Todos los programas</option>
+                                    {programas.map(pr => <option key={pr} value={pr}>{pr}</option>)}
+                                </select>
+                            </label>
+                            {hayFiltros && (
+                                <button type="button" onClick={limpiarFiltros} className="px-2.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors">
+                                    Limpiar filtros
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+
                 {/* ───── Pestañas (solo en pantallas pequeñas) ───── */}
                 {mostrarDisponibles && (
                     <div className="md:hidden flex border-b border-gray-200 shrink-0" role="tablist">
@@ -286,7 +379,7 @@ export default function ModalDocentesPeriodo(p: Props) {
                                     <Users className="w-3.5 h-3.5" /> Asignados al período
                                 </h4>
                                 <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full tabular-nums">
-                                    {busquedaAsignados.trim() ? `${asignadosFiltrados.length} de ${p.asignados.length}` : p.asignados.length}
+                                    {(busquedaAsignados.trim() || hayFiltros) ? `${asignadosFiltrados.length} de ${p.asignados.length}` : p.asignados.length}
                                 </span>
                             </div>
                             <Buscador
@@ -295,6 +388,53 @@ export default function ModalDocentesPeriodo(p: Props) {
                                 placeholder="Buscar asignado por nombre, correo, programa o documento…"
                                 etiqueta="Buscar entre los docentes asignados"
                             />
+                            {p.periodoActivo && asignadosFiltrados.length > 0 && (
+                                <div className="flex items-center justify-between gap-2 min-h-[1.5rem]">
+                                    <button
+                                        type="button"
+                                        onClick={() => marcarAsignados(asignadosFiltrados.map(d => d.id_usuario), !todosAsignadosMarcados)}
+                                        className="text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                                    >
+                                        {todosAsignadosMarcados ? 'Deseleccionar mostrados' : `Seleccionar mostrados (${asignadosFiltrados.length})`}
+                                    </button>
+                                    {marcadosValidos.length > 0 && (
+                                        confirmandoVarios ? (
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-xs text-red-700 font-semibold">¿Remover {marcadosValidos.length}?</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={removerVarios}
+                                                    disabled={quitandoVarios}
+                                                    className="text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60 px-2.5 py-1.5 rounded-lg"
+                                                >
+                                                    {quitandoVarios ? 'Quitando…' : 'Sí, remover'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConfirmandoVarios(false)}
+                                                    disabled={quitandoVarios}
+                                                    className="text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 px-2.5 py-1.5 rounded-lg"
+                                                >
+                                                    No
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2">
+                                                <button type="button" onClick={() => setMarcadosRemover([])} className="text-xs text-gray-500 hover:text-gray-700 underline">
+                                                    Limpiar
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConfirmandoVarios(true)}
+                                                    className="inline-flex items-center gap-1 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-100 px-2.5 py-1.5 rounded-lg"
+                                                >
+                                                    <UserMinus className="w-3.5 h-3.5" /> Remover {marcadosValidos.length} seleccionado(s)
+                                                </button>
+                                            </div>
+                                        )
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex-1 overflow-y-auto border-t border-gray-100 max-h-[52vh] md:max-h-[56vh]">
@@ -305,7 +445,16 @@ export default function ModalDocentesPeriodo(p: Props) {
                             ) : (
                                 <ul className="divide-y divide-gray-100">
                                     {asignadosFiltrados.map(d => (
-                                        <li key={d.id_usuario} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50/80 transition-colors">
+                                        <li key={d.id_usuario} className={`flex items-center gap-3 px-5 py-3 transition-colors ${marcadosValidos.includes(d.id_usuario) ? 'bg-red-50/50' : 'hover:bg-gray-50/80'}`}>
+                                            {p.periodoActivo && (
+                                                <input
+                                                    type="checkbox"
+                                                    checked={marcadosValidos.includes(d.id_usuario)}
+                                                    onChange={() => { alternarMarcado(d.id_usuario); setConfirmandoVarios(false) }}
+                                                    aria-label={`Seleccionar a ${nombreCompleto(d)} para remover`}
+                                                    className="w-4 h-4 text-red-600 rounded border-gray-300 focus:ring-red-500 shrink-0"
+                                                />
+                                            )}
                                             <Avatar d={d} />
                                             <Detalle d={d} />
                                             {p.periodoActivo && (

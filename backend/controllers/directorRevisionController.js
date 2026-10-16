@@ -7,6 +7,7 @@ const notificaciones = require('../services/notificacionesService');
 const { alcanceProgramas, docenteEnAlcance, alcanceFunciones } = require('../utils/rolActivo');
 const { perfilAgenda, revisarIndirecta } = require('../utils/perfilAgenda');
 const { asegurarCorregidoEn } = require('../utils/esquemaRevisionCorte');
+const { sqlFuncionCompletaEnSemana8, sqlIndicadorExento } = require('../utils/avanceObligatorio');
 
 const SIN_PERMISO_DOCENTE = { error: 'Este docente no pertenece a los programas que gestionas.' };
 const SIN_PERMISO_FUNCION = { error: 'Tu rol no revisa esta función sustantiva.' };
@@ -200,6 +201,7 @@ const getAgendas = async (req, res) => {
             const cortesRes = await pool.query(`
                 SELECT ua.id_usuario,
                        COUNT(i.id_indicadores)::int AS total_indicadores,
+                       COUNT(*) FILTER (WHERE NOT (${sqlIndicadorExento('i')} AND COALESCE(i.ejecucion_8, 0) = 0))::int AS total_indicadores_8,
                        COUNT(*) FILTER (WHERE COALESCE(i.ejecucion_8, 0) > 0)::int  AS reportados_8,
                        COUNT(*) FILTER (WHERE COALESCE(i.ejecucion_16, 0) > 0)::int AS reportados_16
                 FROM usuario_asignacion ua
@@ -234,7 +236,7 @@ const getAgendas = async (req, res) => {
                         JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
                         WHERE aa.id_funciones = af.id_funciones
                           AND COALESCE(CASE WHEN s.semana = 8 THEN i.ejecucion_8 ELSE i.ejecucion_16 END, 0) > 0
-                  ))
+                  ) OR (s.semana = 16 AND ${sqlFuncionCompletaEnSemana8('af.id_funciones')}))
                 GROUP BY ua.id_usuario, s.semana
             `, [idPeriodo, idsDocentes, alcanceFunc.restringido ? alcanceFunc.funciones : null]);
 
@@ -258,12 +260,12 @@ const getAgendas = async (req, res) => {
             };
 
             for (const a of agendas) {
-                const c = porDocente.get(a.id_usuario) || { total_indicadores: 0, reportados_8: 0, reportados_16: 0 };
+                const c = porDocente.get(a.id_usuario) || { total_indicadores: 0, total_indicadores_8: 0, reportados_8: 0, reportados_16: 0 };
                 a.total_indicadores = c.total_indicadores;
                 const rev = revPorDocente.get(a.id_usuario) || {};
                 a.corte_8  = {
-                    reportados: c.reportados_8, total: c.total_indicadores,
-                    estado: estadoCorte(c.total_indicadores, c.reportados_8),
+                    reportados: c.reportados_8, total: c.total_indicadores_8,
+                    estado: estadoCorte(c.total_indicadores_8, c.reportados_8),
                     revision: estadoRevision(rev[8]),
                 };
                 a.corte_16 = {
@@ -452,6 +454,7 @@ const getAgendaDetalle = async (req, res) => {
                         WHERE aa.id_funciones = $1
                           AND COALESCE(CASE WHEN s.semana = 8 THEN i.ejecucion_8 ELSE i.ejecucion_16 END, 0) > 0
                    )
+                   OR (s.semana = 16 AND ${sqlFuncionCompletaEnSemana8('$1')})
             `, [func.id_funciones]);
             const cortes = {};
             for (const c of cortesRes.rows) cortes[c.semana] = c;
@@ -851,21 +854,29 @@ const getReportesResumen = async (req, res) => {
             SELECT
                 pa.nombre_programa,
                 COUNT(DISTINCT u.id_usuario) AS total_docentes,
-                COALESCE(AVG(sub.horas_directas), 0) AS promedio_horas_directas,
-                COUNT(DISTINCT CASE WHEN sub.todas_aprobadas THEN u.id_usuario END) AS agendas_aprobadas,
-                COUNT(DISTINCT CASE WHEN sub.alguna_devuelta THEN u.id_usuario END) AS agendas_devueltas,
-                COUNT(DISTINCT CASE WHEN sub.todas_pendiente THEN u.id_usuario END) AS agendas_pendientes
+                COALESCE(AVG(sub.horas_directas) FILTER (WHERE sub.categoria <> 'sin_carga'), 0) AS promedio_horas_directas,
+                COUNT(DISTINCT u.id_usuario) FILTER (WHERE sub.categoria = 'aprobada') AS agendas_aprobadas,
+                COUNT(DISTINCT u.id_usuario) FILTER (WHERE sub.categoria = 'devuelta') AS agendas_devueltas,
+                COUNT(DISTINCT u.id_usuario) FILTER (WHERE sub.categoria = 'pendiente') AS agendas_pendientes,
+                COUNT(DISTINCT u.id_usuario) FILTER (WHERE sub.categoria = 'por_aprobar') AS agendas_por_aprobar,
+                COUNT(DISTINCT u.id_usuario) FILTER (WHERE sub.categoria = 'sin_carga') AS agendas_sin_carga
             FROM usuarios u
             JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
             JOIN programa_academico pa ON pa.id_programa = u.id_programa
             JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
             JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
             LEFT JOIN LATERAL (
+                -- Cada docente cae en UNA categoría (por precedencia): Devuelta > Aprobada (todas) > Por aprobar > Pendiente.
+                -- "Por Aprobar" = asignaciones todavía sin liberar al docente; sin funciones = sin carga asignada.
                 SELECT
                     COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
-                    BOOL_AND(af.estado_agenda = 'Aprobada') AS todas_aprobadas,
-                    BOOL_OR(af.estado_agenda = 'Devuelta') AS alguna_devuelta,
-                    BOOL_AND(af.estado_agenda = 'Pendiente') AS todas_pendiente
+                    CASE
+                        WHEN COUNT(af.id_funciones) = 0 THEN 'sin_carga'
+                        WHEN BOOL_OR(af.estado_agenda = 'Devuelta') THEN 'devuelta'
+                        WHEN BOOL_AND(af.estado_agenda = 'Aprobada') THEN 'aprobada'
+                        WHEN BOOL_OR(af.estado_agenda = 'Por Aprobar') THEN 'por_aprobar'
+                        ELSE 'pendiente'
+                    END AS categoria
                 FROM usuario_asignacion ua2
                 JOIN asignacion_funciones af ON af.id_funciones = ua2.id_funciones AND af.id_periodo = $1
                 WHERE ua2.id_usuario = u.id_usuario
@@ -884,103 +895,21 @@ const getReportesResumen = async (req, res) => {
         `;
         const progRes = await pool.query(progQuery, progParams);
 
-        // 2. Distribución de perfiles docentes
-        let perfilesQuery = `
-            SELECT
-                u.id_usuario,
-                tc.tipo AS tipo_contrato,
-                tc.horas_contrato AS horas_contrato,
-                COALESCE(SUM(af.horas_funcion), 0) AS total_horas,
-                COALESCE(SUM(CASE WHEN af.funcion_sustantiva = 'Docencia Directa' THEN af.horas_funcion ELSE 0 END), 0) AS horas_directas,
-                COALESCE(SUM(CASE WHEN af.funcion_sustantiva ILIKE '%investigación%' THEN af.horas_funcion ELSE 0 END), 0) AS horas_investigacion
-            FROM usuarios u
-            JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
-            JOIN programa_academico pa ON pa.id_programa = u.id_programa
-            JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
-            JOIN usuario_rol ur ON ur.id_usuario = u.id_usuario
-            JOIN roles r ON r.id_rol = ur.id_rol AND LOWER(r.nombre_rol) = 'docente'
-            LEFT JOIN usuario_asignacion ua ON ua.id_usuario = u.id_usuario
-            LEFT JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
-            WHERE u.activo = TRUE
-        `;
-        const perfilesParams = [idPeriodo];
-        if (alcance.restringido) {
-            perfilesQuery += ' AND u.id_programa = ANY($2::int[])';
-            perfilesParams.push(alcance.ids);
-        }
-        perfilesQuery += `
-            GROUP BY u.id_usuario, tc.tipo, tc.horas_contrato
-        `;
-        const perfilesRes = await pool.query(perfilesQuery, perfilesParams);
-
-        // Contar perfiles
-        const perfilCount = {};
-        for (const row of perfilesRes.rows) {
-            const perfil = calcularPerfilDocente(row.tipo_contrato, row.horas_directas, row.horas_investigacion, row.total_horas, row.horas_contrato);
-            perfilCount[perfil] = (perfilCount[perfil] || 0) + 1;
-        }
-        const distribucionPerfiles = Object.entries(perfilCount).map(([perfil, cantidad]) => ({ perfil, cantidad }));
-
-        // 3. Avance por bloque (semana 8 y 16) — logro parcial y final
-        const avanceParams = [idPeriodo];
-        let filtroAvance = '';
-        if (alcance.restringido) {
-            filtroAvance = ' AND u.id_programa = ANY($2::int[])';
-            avanceParams.push(alcance.ids);
-        }
-        const avanceRes = await pool.query(`
-            SELECT
-                af.funcion_sustantiva AS bloque,
-                COALESCE(SUM(d.meta), 0) AS total_metas,
-                COALESCE(SUM(i.ejecucion_8), 0) AS avance_sem8,
-                COALESCE(SUM(i.ejecucion_16), 0) AS avance_sem16
-            FROM asignacion_funciones af
-            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
-            JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
-            JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
-            JOIN asignacion_actividades aa ON aa.id_funciones = af.id_funciones
-            JOIN descripcion d ON d.id_asignacionact = aa.id_asignacionact AND d.activo IS NOT FALSE
-            LEFT JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
-            WHERE af.id_periodo = $1${filtroAvance}
-            GROUP BY af.funcion_sustantiva
-            ORDER BY af.funcion_sustantiva
-        `, avanceParams);
-
-        const avancePorBloque = avanceRes.rows.map(row => {
-            const totalMetas = parseFloat(row.total_metas) || 1;
-            const sem8 = parseFloat(row.avance_sem8) || 0;
-            const sem16 = parseFloat(row.avance_sem16) || 0;
-            const logroParcial = Math.min(sem8 / totalMetas, 1.0);
-            const logroFinal = Math.min((sem8 + sem16) / totalMetas, 1.0);
-            return {
-                bloque: row.bloque,
-                total_metas: totalMetas,
-                avance_sem8: sem8,
-                avance_sem16: sem16,
-                logro_parcial: Math.round(logroParcial * 100) / 100,
-                logro_final: Math.round(logroFinal * 100) / 100
-            };
-        });
-
-        // 4. Totales generales
-        const totalesRes = await pool.query(`
-            SELECT
-                COUNT(DISTINCT ua.id_usuario) AS total_docentes,
-                COUNT(DISTINCT CASE WHEN af.estado_agenda = 'Aprobada' THEN ua.id_usuario END) AS docentes_aprobados,
-                COUNT(DISTINCT CASE WHEN af.estado_agenda = 'Devuelta' THEN ua.id_usuario END) AS docentes_devueltos,
-                COUNT(DISTINCT CASE WHEN af.estado_agenda = 'Pendiente' OR af.estado_agenda = 'Aceptado' THEN ua.id_usuario END) AS docentes_pendientes
-            FROM usuario_asignacion ua
-            JOIN asignacion_funciones af ON af.id_funciones = ua.id_funciones AND af.id_periodo = $1
-            JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
-            JOIN docente_periodo dp ON dp.id_usuario = u.id_usuario AND dp.id_periodo = $1
-        `, [idPeriodo]);
+        // 4. Totales generales: suma de las filas por programa (mismo alcance y mismas categorías, así siempre cuadran)
+        const suma = (campo) => progRes.rows.reduce((acc, p) => acc + (parseInt(p[campo], 10) || 0), 0);
+        const totales = {
+            total_docentes: suma('total_docentes'),
+            docentes_aprobados: suma('agendas_aprobadas'),
+            docentes_devueltos: suma('agendas_devueltas'),
+            docentes_pendientes: suma('agendas_pendientes'),
+            docentes_por_aprobar: suma('agendas_por_aprobar'),
+            docentes_sin_carga: suma('agendas_sin_carga')
+        };
 
         res.json({
             periodo,
             estadisticas_programa: progRes.rows,
-            distribucion_perfiles: distribucionPerfiles,
-            avance_por_bloque: avancePorBloque,
-            totales: totalesRes.rows[0] || {}
+            totales
         });
 
     } catch (error) {

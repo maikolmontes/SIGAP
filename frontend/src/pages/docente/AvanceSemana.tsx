@@ -3,7 +3,9 @@ import Layout from '../../components/common/Layout';
 import { FileText, AlertCircle, UploadCloud, Save, BookOpen, Target, ClipboardList, ExternalLink, Download, Eye, MessageSquare, Trash2, CheckCircle2, Clock, ArrowRight } from 'lucide-react';
 import api from '../../services/api';
 import { confirmar, avisar } from '../../components/common/dialogo';
-import { resumenAvance, firmaDeAvance, fmtCantidad } from '../../utils/avanceSemana';
+import { resumenAvance, firmaDeAvance, fmtCantidad, indicadoresSinAvance } from '../../utils/avanceSemana'
+import type { SinAvance } from '../../utils/avanceSemana'
+import { ordenarPorFuncion } from '../../utils/ordenFunciones';
 import { useAuth } from '../../context/AuthContext';
 import SubirEvidenciaModal from '../../components/evidencias/SubirEvidenciaModal';
 import VisorEvidenciaModal from '../../components/evidencias/VisorEvidenciaModal';
@@ -57,6 +59,9 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   const [modalAvance, setModalAvance] = useState<{ guardado: boolean; aviso?: string } | null>(null);
   // Ventana con las funciones que el director devolvió en este corte y el motivo
   const [modalDevueltas, setModalDevueltas] = useState(false);
+  // Avance obligatorio: indicadores a los que les falta el valor (mayor que 0) y si ya se intentó guardar
+  const [modalSinAvance, setModalSinAvance] = useState<SinAvance[] | null>(null);
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
   // Confirmación de que la corrección de una función devuelta ya fue enviada al director
   const [modalCorreccion, setModalCorreccion] = useState<{ nombre: string; faltan: string[] } | null>(null);
   // Indicador al que se llegó desde "dónde falta": su fila se resalta unos segundos
@@ -146,7 +151,8 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
          const acts = agRes.data.actividades || [];
 
          // Map activities into functions structure
-         const struct = funs.map((f: any) => ({
+         // Mismo orden que al crear la agenda: Docencia Directa, Docencia Indirecta y luego las demás
+         const struct = ordenarPorFuncion(funs as { funcion_sustantiva: string }[], (f) => f.funcion_sustantiva).map((f: any) => ({
              ...f,
              actividades: acts.filter((a: any) => a.id_funciones === f.id_funciones).reduce((acc: any[], curr: any) => {
                  let existing = acc.find(x => x.id_asignacionact === curr.id_asignacionact);
@@ -257,7 +263,17 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     return () => { window.clearTimeout(ver); document.removeEventListener('mousedown', alPulsar); };
   }, [resaltado]);
 
+  // Para guardar, todos los indicadores del corte deben quedar en más de 0 (excepto la entrega de notas finales en la semana 8)
+  const hayIndicadoresSinAvance = (): boolean => {
+    const faltan = indicadoresSinAvance(data, semana);
+    if (faltan.length === 0) return false;
+    setIntentoGuardar(true);
+    setModalSinAvance(faltan);
+    return true;
+  };
+
   const guardarAvance = async () => {
+    if (hayIndicadoresSinAvance()) return;
     try {
         setGuardando(true);
 
@@ -484,6 +500,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
     [data, semana]
   );
   const sinGuardar = firmaGuardada !== null && firmaDeAvance(data) !== firmaGuardada;
+  const idsSinAvance = useMemo(() => new Set(indicadoresSinAvance(data, semana).map((x) => x.idIndicador)), [data, semana]);
 
   // ¿La función que se está viendo fue devuelta por el director en este corte?
   const funcionActivaDevuelta = (data[selectedFunctionIndex] as FuncionConCortes | undefined)?.revision_cortes?.[semana]?.estado === 'Devuelto';
@@ -492,6 +509,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
   const enviarCorreccion = async () => {
     const fn = data[selectedFunctionIndex] as FuncionConCortes | undefined;
     if (!fn) return;
+    if (hayIndicadoresSinAvance()) return;
     if (!sinGuardar) {
       const sigue = await confirmar({
         tipo: 'pregunta',
@@ -742,6 +760,55 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
             >
               Entendido
             </button>
+          </div>
+        </div>
+      )}
+
+      {modalSinAvance && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-sin-avance"
+          onClick={() => setModalSinAvance(null)}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 pb-3 text-center shrink-0">
+              <div className="flex items-center justify-center w-14 h-14 rounded-full bg-red-100 mx-auto mb-4">
+                <AlertCircle className="w-8 h-8 text-red-600" />
+              </div>
+              <h2 id="titulo-sin-avance" className="text-xl font-bold text-[#1a2744]">
+                Falta registrar el avance de {modalSinAvance.length} {modalSinAvance.length === 1 ? 'indicador' : 'indicadores'}
+              </h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Para guardar el avance de la {nombreCorte} debes registrar un valor <strong>mayor que 0</strong> en todos tus indicadores (por ejemplo, 0,1).
+                {semana === '8' && ' La única excepción es «Evidencia de entrega de notas finales», que puede quedar en 0 en esta semana.'}
+              </p>
+            </div>
+            <ul className="px-6 pb-2 space-y-1.5 overflow-y-auto">
+              {modalSinAvance.map((x, k) => (
+                <li key={k}>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedFunctionIndex(x.funcion); setSelectedActivityIndex(x.actividad); setModalSinAvance(null); setResaltado(x.idIndicador); }}
+                    className="w-full text-left bg-red-50/60 border border-red-100 hover:border-red-300 rounded-lg px-3 py-2 transition-colors"
+                    title="Ir a este indicador"
+                  >
+                    <span className="block text-xs text-gray-400 truncate">{x.rutaFuncion} › {x.rutaActividad}</span>
+                    <span className="block text-sm font-medium text-gray-800">{x.indicador}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="p-6 pt-4 shrink-0">
+              <button
+                autoFocus
+                onClick={() => setModalSinAvance(null)}
+                className="w-full px-4 py-2.5 rounded-xl bg-[#1a2744] text-white font-semibold text-sm hover:bg-[#243560] transition-colors"
+              >
+                Entendido
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1074,7 +1141,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                         onFocus={(e) => alEnfocarCampo(e, 'ejecucion_8', iIndex)}
                                                         onChange={(e) => handleIndicadorChange(selectedFunctionIndex, aIndex, iIndex, 'ejecucion_8', e.target.value)}
                                                         disabled={semana !== '8' || soloLectura}
-                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${semana !== '8' || soloLectura ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : filaSeleccionada('ejecucion_8', iIndex) ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 font-semibold' : 'bg-white border-gray-300'}`}
+                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${semana !== '8' || soloLectura ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : intentoGuardar && ind.id_indicador != null && idsSinAvance.has(ind.id_indicador) ? 'bg-red-50 border-red-400' : filaSeleccionada('ejecucion_8', iIndex) ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 font-semibold' : 'bg-white border-gray-300'}`}
                                                     />
                                                 </td>
                                                 {semana === '16' && (
@@ -1094,7 +1161,7 @@ export default function AvanceSemana({ semana, rolActual = 'docente' }: AvanceSe
                                                         onKeyDown={(e) => teclasAvance(e, 'ejecucion_16', selectedFunctionIndex, aIndex, iIndex, actividad.indicadores.length)}
                                                         onFocus={(e) => alEnfocarCampo(e, 'ejecucion_16', iIndex)}
                                                         onChange={(e) => handleIndicadorChange(selectedFunctionIndex, aIndex, iIndex, 'ejecucion_16', e.target.value)}
-                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${soloLectura ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : filaSeleccionada('ejecucion_16', iIndex) ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 font-semibold' : 'bg-white border-gray-300'}`}
+                                                        className={`w-full text-center border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-colors ${soloLectura ? 'bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200' : intentoGuardar && ind.id_indicador != null && idsSinAvance.has(ind.id_indicador) ? 'bg-red-50 border-red-400' : filaSeleccionada('ejecucion_16', iIndex) ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 font-semibold' : 'bg-white border-gray-300'}`}
                                                     />
                                                 </td>
                                                 )}

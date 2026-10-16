@@ -10,12 +10,11 @@ import type {
 import FiltroAmbitoSelector from '../../components/analitica/FiltroAmbitoSelector';
 
 import KpiGrid from '../../components/analitica/KpiGrid';
+import PendientesPanel from '../../components/analitica/PendientesPanel';
 import AgendasChart from '../../components/analitica/AgendasChart';
 import HorasChart from '../../components/analitica/HorasChart';
-import CortesComparisonChart from '../../components/analitica/CortesComparisonChart';
-import CoberturaAgendasChart from '../../components/analitica/CoberturaAgendasChart';
+import AvanceFuncionesChart from '../../components/analitica/AvanceFuncionesChart';
 import RevisionCortesChart from '../../components/analitica/RevisionCortesChart';
-import PesoMetasChart from '../../components/analitica/PesoMetasChart';
 import DocentesAnalyticsTable from '../../components/analitica/DocentesAnalyticsTable';
 import ConsolidadoProgramasTable from '../../components/analitica/ConsolidadoProgramasTable';
 import BrechaEvidenciasTable from '../../components/analitica/BrechaEvidenciasTable';
@@ -133,8 +132,9 @@ export default function Analitica({ rol }: AnaliticaProps) {
     cargar(periodoId, nuevo);
   };
 
+  // Hay actividad si algún docente tiene horas asignadas (el estado de las agendas también cuenta docentes sin carga)
   const hayDatos = useMemo(
-    () => indicadores.some((i) => (i.resumenNumerico.total ?? 0) > 0),
+    () => (indicadores.find((i) => i.indicadorId === 'IND-03')?.resumenNumerico.total ?? 0) > 0,
     [indicadores]
   );
 
@@ -228,19 +228,17 @@ export default function Analitica({ rol }: AnaliticaProps) {
             </div>
           )}
 
+          <PendientesPanel agendas={buscar('IND-01')} revision={buscar('IND-11')} rol={rol} />
+
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <AgendasChart metrica={buscar('IND-01')} />
             <HorasChart metrica={buscar('IND-03')} />
           </div>
 
-          <CortesComparisonChart metrica={buscar('IND-06')} />
-
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            <CoberturaAgendasChart metrica={buscar('IND-12')} />
+            <AvanceFuncionesChart metrica={buscar('IND-06')} peso={buscar('IND-10')} />
             <RevisionCortesChart metrica={buscar('IND-11')} />
           </div>
-
-          <PesoMetasChart metrica={buscar('IND-10')} />
 
           <InterpretacionCard
             interpretacion={interpretacion}

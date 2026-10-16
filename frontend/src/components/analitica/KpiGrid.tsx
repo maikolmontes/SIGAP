@@ -21,7 +21,7 @@ interface Tarjeta {
 export default function KpiGrid({ agendas, devolucion, horas, evidencias }: Props) {
   const docentes = serie(agendas, 'docentes');
   const totalDocentes = agendas?.resumenNumerico.total ?? 0;
-  const aprobadas = docentes[0] ?? 0;
+  const aprobadas = docentes[agendas?.categorias.indexOf('Aprobada') ?? -1] ?? 0;
 
   const tarjetas: Tarjeta[] = [];
 

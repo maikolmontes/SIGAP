@@ -64,20 +64,22 @@ function seccionResumen(b) {
         return { nivel: 1, titulo: 'Resumen general', bloques };
     }
 
+    const porAprobar = e['Por aprobar'] || 0;
     const estados = unir([
-        e['Aprobada'] > 0 && `${e['Aprobada']} ${plural(e['Aprobada'], 'fue aprobada', 'fueron aprobadas')} (${fmtPct(r.porcentajeAprobadas)})`,
-        e['En revisión'] > 0 && `${e['En revisión']} ${plural(e['En revisión'], 'está en revisión del director', 'están en revisión del director')}`,
-        e['Devuelta'] > 0 && `${e['Devuelta']} ${plural(e['Devuelta'], 'fue devuelta para corrección', 'fueron devueltas para corrección')}`,
-        e['Pendiente'] > 0 && `${e['Pendiente']} ${plural(e['Pendiente'], 'sigue pendiente', 'siguen pendientes')} de diligenciar`,
+        e['Aprobada'] > 0 && `${e['Aprobada']} ${plural(e['Aprobada'], 'agenda fue aprobada', 'agendas fueron aprobadas')} (${fmtPct(r.porcentajeAprobadas)} del total de docentes)`,
+        e['En revisión'] > 0 && `${e['En revisión']} ${plural(e['En revisión'], 'agenda está en revisión del director', 'agendas están en revisión del director')}`,
+        e['Devuelta'] > 0 && `${e['Devuelta']} ${plural(e['Devuelta'], 'agenda fue devuelta para corrección', 'agendas fueron devueltas para corrección')}`,
+        e['Pendiente'] > 0 && `${e['Pendiente']} ${plural(e['Pendiente'], 'agenda sigue pendiente', 'agendas siguen pendientes')} de diligenciar`,
+        porAprobar > 0 && `${porAprobar} ${plural(porAprobar, 'docente tiene su carga académica por aprobar (todavía no la ve)', 'docentes tienen su carga académica por aprobar (todavía no la ven)')}`,
     ]);
     bloques.push(parrafo(
         `El programa tuvo ${r.docentes} ${plural(r.docentes, 'docente asignado', 'docentes asignados')} al período`
         + `${e['Sin agenda'] > 0 ? `, de los cuales ${e['Sin agenda']} ${plural(e['Sin agenda'], 'todavía no tiene agenda', 'todavía no tienen agenda')}` : ' y todos tienen agenda'}. `
-        + `${r.docentesConAgenda > 0 ? `De ${plural(r.docentesConAgenda, 'la agenda registrada', `las ${r.docentesConAgenda} agendas registradas`)}, ${estados}.` : ''}`));
+        + `${r.docentesConAgenda > 0 ? `${plural(r.docentesConAgenda, 'Del docente con carga asignada', `De los ${r.docentesConAgenda} docentes con carga asignada`)}: ${estados}.` : ''}`));
 
     const ocup = r.ocupacion;
     bloques.push(parrafo(
-        `En las agendas se planearon ${fmtNum(r.horasAsignadas)} horas frente a ${fmtNum(r.horasContratadas)} contratadas`
+        `Se asignaron ${fmtNum(r.horasAsignadas)} horas de carga frente a ${fmtNum(r.horasContratadas)} contratadas`
         + `${ocup !== null ? ` (${fmtPct(ocup)} de ocupación)` : ''}`
         + `${ocup !== null && ocup > 100 ? ': la carga asignada supera lo contratado' : ocup !== null && ocup < 100 ? ': queda carga contratada sin asignar' : ''}.`));
 
@@ -99,7 +101,8 @@ function seccionResumen(b) {
         ['Agendas aprobadas', `${fmtNum(e['Aprobada'] || 0)} (${fmtPct(r.porcentajeAprobadas)})`],
         ['Agendas en revisión', fmtNum(e['En revisión'] || 0)],
         ['Agendas devueltas', fmtNum(e['Devuelta'] || 0)],
-        ['Agendas pendientes', fmtNum(e['Pendiente'] || 0)],
+        ['Agendas pendientes de diligenciar', fmtNum(e['Pendiente'] || 0)],
+        ['Docentes con la carga por aprobar (aún sin liberar)', fmtNum(porAprobar)],
         ['Docentes sin agenda', fmtNum(e['Sin agenda'] || 0)],
         ['Horas contratadas', fmtNum(r.horasContratadas)],
         ['Horas asignadas en las agendas', `${fmtNum(r.horasAsignadas)} (${fmtPct(r.ocupacion)})`],
@@ -116,25 +119,32 @@ function seccionResumen(b) {
 
 // ---------------------------------------------------------------- 2. Cortes
 function seccionCortes(b) {
-    const total = b.docentes.reduce((s, d) => s + d.funciones, 0);
+    const total = b.cortes.funcionesLiberadas;
+    const porLiberar = b.cortes.funcionesPorLiberar;
     const frase = (k) => {
         const partes = unir([
             k.aprobadas > 0 && `${k.aprobadas} ${plural(k.aprobadas, 'fue aprobada', 'fueron aprobadas')}`,
             k.vistoBueno > 0 && `${k.vistoBueno} ${plural(k.vistoBueno, 'tiene visto bueno', 'tienen visto bueno')}`,
             k.devueltas > 0 && `${k.devueltas} ${plural(k.devueltas, 'fue devuelta', 'fueron devueltas')}`,
-            k.pendientes > 0 && `${k.pendientes} ${plural(k.pendientes, 'está pendiente de revisión', 'están pendientes de revisión')}`,
+            k.porRevisar > 0 && `${k.porRevisar} ${plural(k.porRevisar, 'espera la revisión del director (el docente ya la reportó)', 'esperan la revisión del director (el docente ya las reportó)')}`,
+            k.sinReportar > 0 && `${k.sinReportar} ${plural(k.sinReportar, 'aún no la reporta el docente', 'aún no las reportan los docentes')}`,
         ]);
-        return `En ${k.nombre}, de ${total} ${plural(total, 'función', 'funciones')} de las agendas, ${partes}.`;
+        return `En ${k.nombre}, de ${total} ${plural(total, 'función liberada', 'funciones liberadas')} a los docentes: ${partes || 'ninguna tiene movimiento'}.`;
     };
-    const bloques = total === 0
-        ? [parrafo('No hay funciones asignadas en el período, por eso no hay cortes que revisar.')]
-        : [
-            parrafo('Cada corte se revisa por separado y por función de cada agenda: lo aprobado en el primer corte no cuenta para el segundo.'),
-            parrafo(frase(b.cortes.corte1)),
-            parrafo(frase(b.cortes.corte2)),
-            tabla(['Corte', 'Aprobadas', 'Con visto bueno', 'Devueltas', 'Pendientes'],
-                [b.cortes.corte1, b.cortes.corte2].map((k) => [k.nombre, fmtNum(k.aprobadas), fmtNum(k.vistoBueno), fmtNum(k.devueltas), fmtNum(k.pendientes)]), [1, 2, 3, 4]),
-        ];
+    const bloques = [];
+    if (total === 0) {
+        bloques.push(parrafo(porLiberar > 0
+            ? `Todavía no hay funciones liberadas a los docentes (${porLiberar} ${plural(porLiberar, 'sigue con la carga por aprobar', 'siguen con la carga por aprobar')}), por eso no hay cortes que revisar.`
+            : 'No hay funciones asignadas en el período, por eso no hay cortes que revisar.'));
+    } else {
+        bloques.push(parrafo('Cada corte se revisa por separado y por función de cada agenda: lo aprobado en el primer corte no cuenta para el segundo.'));
+        bloques.push(parrafo(frase(b.cortes.corte1)));
+        bloques.push(parrafo(frase(b.cortes.corte2)));
+        if (porLiberar > 0) bloques.push(parrafo(`Otras ${porLiberar} ${plural(porLiberar, 'función sigue', 'funciones siguen')} con la carga por aprobar: el docente todavía no puede reportarla${porLiberar === 1 ? '' : 's'}, por eso no entran en estas cuentas.`));
+        bloques.push(tabla(['Corte', 'Aprobadas', 'Con visto bueno', 'Devueltas', 'Por revisar', 'Sin reportar'],
+            [b.cortes.corte1, b.cortes.corte2].map((k) => [k.nombre, fmtNum(k.aprobadas), fmtNum(k.vistoBueno), fmtNum(k.devueltas), fmtNum(k.porRevisar), fmtNum(k.sinReportar)]), [1, 2, 3, 4, 5],
+            'Funciones liberadas a los docentes. «Por revisar»: el docente ya reportó y falta la revisión del director.'));
+    }
     return { nivel: 1, titulo: 'Revisión de los cortes', bloques };
 }
 
@@ -142,9 +152,9 @@ function seccionCortes(b) {
 function textoActividad(a, esIndirecta, b) {
     const c = b.nombresCortes;
     const partes = [];
-    partes.push(`Actividad: ${a.actividad}${a.asignatura && a.asignatura !== a.actividad ? ` (${a.asignatura})` : ''}. La ${plural(a.docentes, 'reportó', 'reportaron')} ${a.docentes} ${plural(a.docentes, 'docente', 'docentes')}.`);
+    partes.push(`Actividad: ${a.actividad}${a.asignatura && a.asignatura !== a.actividad ? ` (${a.asignatura})` : ''}. Asignada a ${a.docentes} ${plural(a.docentes, 'docente', 'docentes')}.`);
     if (a.indicadores.length === 0) {
-        partes.push(esIndirecta ? 'Esta función no lleva indicadores.' : 'No tiene indicadores registrados.');
+        partes.push('No tiene indicadores registrados.');
     } else {
         if (a.meta > 0) partes.push(`En conjunto, la meta fue ${fmtNum(a.meta)} y la ejecución, ${fmtNum(a.ejecucionCorte1 + a.ejecucionCorte2)} (${fmtPct(a.cumplimiento)}): ${fmtNum(a.ejecucionCorte1)} en ${c.corte1} y ${fmtNum(a.ejecucionCorte2)} en ${c.corte2}.`);
         for (const i of a.indicadores) {
@@ -171,7 +181,7 @@ function seccionFunciones(b) {
             `${plural(f.docentes, 'Participó', 'Participaron')} ${f.docentes} ${plural(f.docentes, 'docente', 'docentes')} con ${fmtNum(f.horas)} ${plural(f.horas, 'hora', 'horas')} en total${f.actividades > 0 ? `, repartidas en ${f.actividades} ${plural(f.actividades, 'actividad', 'actividades')}` : ''}.`,
         ];
         if (f.meta > 0) frases.push(`Frente a una meta de ${fmtNum(f.meta)}, la ejecución fue de ${fmtNum(f.ejecucionCorte1)} en ${b.nombresCortes.corte1} (${fmtPct(f.avanceCorte1)}) y de ${fmtNum(f.ejecucionCorte1 + f.ejecucionCorte2)} acumulada al segundo corte (${fmtPct(f.avanceFinal)}).`);
-        else frases.push(esIndirecta ? 'Esta función no maneja metas ni indicadores.' : 'No tiene metas numéricas registradas.');
+        else frases.push('No tiene metas ni indicadores registrados.');
         if (f.evidencias > 0) frases.push(`Se cargaron ${fmtNum(f.evidencias)} ${plural(f.evidencias, 'evidencia', 'evidencias')}.`);
         else if (!esIndirecta) frases.push('No hay evidencias cargadas.');
         sub.push(parrafo(frases.join(' ')));
@@ -197,7 +207,7 @@ function seccionDocentes(b) {
 
     const grupos = [
         ['Aprobada', 'Agendas aprobadas'], ['En revisión', 'Agendas en revisión del director'], ['Devuelta', 'Agendas devueltas para corrección'],
-        ['Pendiente', 'Agendas pendientes de diligenciar'], ['Sin agenda', 'Docentes sin agenda'],
+        ['Pendiente', 'Agendas pendientes de diligenciar'], ['Por aprobar', 'Carga académica por aprobar (aún sin liberar al docente)'], ['Sin agenda', 'Docentes sin agenda'],
     ];
     const items = [];
     for (const [estado, titulo] of grupos) {

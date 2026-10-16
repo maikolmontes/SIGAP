@@ -10,7 +10,7 @@ const base = (extra = {}) => ({
     directores: ['Ana Directora'],
     nombresCortes: { corte1: 'Semana 8', corte2: 'Semana 16' },
     resumen: {
-        docentes: 3, docentesConAgenda: 3, estados: { Aprobada: 1, 'En revisión': 1, Pendiente: 0, Devuelta: 1, 'Sin agenda': 0 },
+        docentes: 3, docentesConAgenda: 3, estados: { Aprobada: 1, 'En revisión': 1, Pendiente: 0, 'Por aprobar': 0, Devuelta: 1, 'Sin agenda': 0 },
         porcentajeAprobadas: 33.3, horasContratadas: 100, horasAsignadas: 120, ocupacion: 120, meta: 10, ejecucionCorte1: 3, ejecucionCorte2: 2,
         avanceCorte1: 30, avanceFinal: 50, evidencias: 2, indicadoresSinSoporte: 1, observaciones: 1,
     },
@@ -23,7 +23,11 @@ const base = (extra = {}) => ({
             indicadores: [{ indicador: 'Artículos publicados', meta: 10, ejecucionCorte1: 3, ejecucionCorte2: 2, cumplimiento: 50, evidencias: 2 }], evidencias: [] },
         { funcion: 'Docencia Indirecta', actividad: 'Docencia Indirecta', asignatura: '', titulo: 'Preparación de clases y atención a estudiantes', docentes: 3, meta: 0, ejecucionCorte1: 0, ejecucionCorte2: 0, cumplimiento: null, indicadores: [], evidencias: [] },
     ],
-    cortes: { corte1: { nombre: 'Semana 8', aprobadas: 1, vistoBueno: 0, devueltas: 1, pendientes: 4 }, corte2: { nombre: 'Semana 16', aprobadas: 0, vistoBueno: 0, devueltas: 0, pendientes: 6 } },
+    cortes: {
+        funcionesLiberadas: 6, funcionesPorLiberar: 0,
+        corte1: { nombre: 'Semana 8', aprobadas: 1, vistoBueno: 0, devueltas: 1, porRevisar: 1, sinReportar: 3 },
+        corte2: { nombre: 'Semana 16', aprobadas: 0, vistoBueno: 0, devueltas: 0, porRevisar: 0, sinReportar: 6 },
+    },
     docentes: [
         { docente: 'Uno', tipoContrato: 'Tiempo Completo', horasContrato: 40, horasAsignadas: 50, estado: 'Aprobada', funciones: 2, meta: 5, ejecucionCorte1: 2, ejecucionCorte2: 1, avanceFinal: 60, indicadoresSinSoporte: 1, evidencias: 1 },
         { docente: 'Dos', tipoContrato: 'Tiempo Completo', horasContrato: 40, horasAsignadas: 30, estado: 'En revisión', funciones: 2, meta: 5, ejecucionCorte1: 1, ejecucionCorte2: 1, avanceFinal: 40, indicadoresSinSoporte: 0, evidencias: 1 },
@@ -61,8 +65,8 @@ test('el resumen redacta las cifras con la concordancia correcta', () => {
     assert.match(t, /programa de Ingeniería de Sistemas \(Facultad de Ingeniería\) durante el período 2026-II/);
     assert.match(t, /Lo presenta Ana Directora/);
     assert.match(t, /3 docentes asignados al período y todos tienen agenda/);
-    assert.match(t, /1 fue aprobada \(33,3 %\), 1 está en revisión del director y 1 fue devuelta para corrección/);
-    assert.match(t, /120 horas frente a 100 contratadas \(120 % de ocupación\): la carga asignada supera lo contratado/);
+    assert.match(t, /De los 3 docentes con carga asignada: 1 agenda fue aprobada \(33,3 % del total de docentes\), 1 agenda está en revisión del director y 1 agenda fue devuelta para corrección/);
+    assert.match(t, /Se asignaron 120 horas de carga frente a 100 contratadas \(120 % de ocupación\): la carga asignada supera lo contratado/);
     assert.match(t, /suman 10\. En Semana 8 se reportó una ejecución de 3 \(30 %\) y, sumando Semana 16, de 5 \(50 %\)/);
     assert.match(t, /2 evidencias como soporte; 1 indicador reporta ejecución sin ninguna evidencia/);
     assert.match(t, /1 observación sobre/);
@@ -76,14 +80,14 @@ test('cada actividad aparece con su descripción, sus indicadores y su concordan
     assert.match(parrafo, /Frente a una meta de 10, la ejecución fue de 3 en Semana 8 \(30 %\) y de 5 acumulada al segundo corte \(50 %\)\./);
     const item = inv.bloques.find((b) => b.tipo === 'lista').items[0];
     assert.equal(item.titulo, 'Artículo publicado en revista indexada');
-    assert.match(item.texto, /Actividad: Egresados\. La reportó 1 docente\./);
+    assert.match(item.texto, /Actividad: Egresados\. Asignada a 1 docente\./);
     assert.match(item.texto, /la meta fue 10 y la ejecución, 5 \(50 %\): 3 en Semana 8 y 2 en Semana 16\./);
     assert.match(item.texto, /Indicador «Artículos publicados»: meta 10, ejecutado 5 \(50 %\), 2 evidencias\./);
 
     const di = doc.secciones.find((s) => s.titulo === 'Docencia Indirecta');
-    assert.match(di.bloques[0].texto, /Esta función no maneja metas ni indicadores\./);
+    assert.match(di.bloques[0].texto, /No tiene metas ni indicadores registrados\./);
     assert.ok(!/ $/.test(di.bloques[0].texto), 'sin espacios sobrantes al final');
-    assert.match(di.bloques[1].items[0].texto, /La reportaron 3 docentes\. Esta función no lleva indicadores\./);
+    assert.match(di.bloques[1].items[0].texto, /Asignada a 3 docentes\. No tiene indicadores registrados\./);
 });
 
 test('los docentes se agrupan por estado y se señalan los problemas', () => {
@@ -110,9 +114,9 @@ test('sin docentes el documento es corto y lo dice', () => {
 });
 
 test('un solo docente: singular en todo el texto', () => {
-    const uno = base({ resumen: { ...base().resumen, docentes: 1, docentesConAgenda: 1, estados: { Aprobada: 1, 'En revisión': 0, Pendiente: 0, Devuelta: 0, 'Sin agenda': 0 }, evidencias: 1, indicadoresSinSoporte: 0, observaciones: 0 } });
+    const uno = base({ resumen: { ...base().resumen, docentes: 1, docentesConAgenda: 1, estados: { Aprobada: 1, 'En revisión': 0, Pendiente: 0, 'Por aprobar': 0, Devuelta: 0, 'Sin agenda': 0 }, evidencias: 1, indicadoresSinSoporte: 0, observaciones: 0 } });
     const t = textoDe(construirDocumento(uno), 'Resumen general');
-    assert.match(t, /1 docente asignado al período y todos tienen agenda\. De la agenda registrada, 1 fue aprobada/);
+    assert.match(t, /1 docente asignado al período y todos tienen agenda\. Del docente con carga asignada: 1 agenda fue aprobada/);
     assert.match(t, /1 evidencia como soporte\./);
 });
 
