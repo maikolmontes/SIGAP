@@ -14,7 +14,9 @@ export const COLOR_ESTADO: Record<string, string> = {
   'Aprobada': '#10B981',
   'En revisión': '#3B82F6',
   'Pendiente': '#F59E0B',
+  'Por aprobar': '#6366F1',
   'Devuelta': '#EF4444',
+  'Sin carga': '#94A3B8',
   'Sin devolución': '#E2E8F0'
 };
 
@@ -37,6 +39,7 @@ export const COLOR_ESTADO_BADGE: Record<string, string> = {
   'Aprobada': 'bg-emerald-50 text-emerald-700 border-emerald-200',
   'En revisión': 'bg-blue-50 text-blue-700 border-blue-200',
   'Pendiente': 'bg-amber-50 text-amber-700 border-amber-200',
+  'Por aprobar': 'bg-indigo-50 text-indigo-700 border-indigo-200',
   'Devuelta': 'bg-rose-50 text-rose-700 border-rose-200'
 };
 

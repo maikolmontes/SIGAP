@@ -1,71 +1,86 @@
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList } from 'recharts';
 import type { MetricaAnalitica } from '../../services/analiticaService';
-import { aDatosGrafico } from '../../services/analiticaService';
-import { estiloTooltip } from './paleta';
+import { serie } from '../../services/analiticaService';
 import PanelGrafico from './PanelGrafico';
 
-// Colores de la revisión: verde aprobado, azul visto bueno, rojo devuelto, gris pendiente
-const SERIES = [
-  { clave: 'aprobadas', nombre: 'Aprobadas', color: '#10B981' },
-  { clave: 'vistoBueno', nombre: 'Con visto bueno', color: '#3B82F6' },
-  { clave: 'devueltas', nombre: 'Devueltas', color: '#EF4444' },
-  { clave: 'pendientes', nombre: 'Pendientes', color: '#CBD5E1' }
+// Verde aprobado, azul visto bueno, rojo devuelto, ámbar por revisar (el docente ya reportó), gris sin reportar
+const PARTES = [
+  { clave: 'aprobadas', nombre: 'Aprobadas', color: '#10B981', texto: '#ffffff' },
+  { clave: 'vistoBueno', nombre: 'Con visto bueno', color: '#3B82F6', texto: '#ffffff' },
+  { clave: 'devueltas', nombre: 'Devueltas', color: '#EF4444', texto: '#ffffff' },
+  { clave: 'porRevisar', nombre: 'Por revisar', color: '#F59E0B', texto: '#ffffff' },
+  { clave: 'sinReportar', nombre: 'Sin reportar', color: '#E2E8F0', texto: '#475569' }
 ] as const;
 
 const formato = (n: number) => n.toLocaleString('es-CO', { maximumFractionDigits: 1 });
 
-/** IND-11 — estado de la revisión de las funciones en cada corte. */
+/** IND-11 — cómo va la revisión de las funciones ya liberadas a los docentes, corte por corte. */
 export default function RevisionCortesChart({ metrica }: { metrica?: MetricaAnalitica }) {
   if (!metrica) return null;
 
-  const datos = aDatosGrafico<{ aprobadas: number; vistoBueno: number; devueltas: number; pendientes: number }>(metrica, {
-    aprobadas: 'aprobadas',
-    vistoBueno: 'vistoBueno',
-    devueltas: 'devueltas',
-    pendientes: 'pendientes'
-  });
   const total = metrica.resumenNumerico.total ?? 0;
+  const porLiberar = metrica.resumenNumerico.porLiberar ?? 0;
+  const datos = Object.fromEntries(PARTES.map((p) => [p.clave, serie(metrica, p.clave)]));
 
   return (
     <PanelGrafico
-      titulo={metrica.titulo}
-      descripcion={metrica.descripcion}
-      notaTecnica={metrica.notaTecnica}
+      titulo="Revisión de los cortes"
+      descripcion="De las funciones que ya les llegaron a los docentes, cuántas están aprobadas, cuántas esperan tu revisión y cuántas falta reportar."
       vacio={total === 0}
-      mensajeVacio="Todavía no hay funciones asignadas en este período."
-      acciones={
-        <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700">
-          Aprobadas: {formato(metrica.resumenNumerico.porcentajeCorte1 ?? 0)} % · {formato(metrica.resumenNumerico.porcentajeCorte2 ?? 0)} %
-        </span>
-      }
+      mensajeVacio={porLiberar > 0
+        ? `Todavía no hay funciones liberadas a los docentes: ${porLiberar} ${porLiberar === 1 ? 'sigue' : 'siguen'} con la carga por aprobar.`
+        : 'Todavía no hay funciones asignadas en este período.'}
     >
-      <ResponsiveContainer width="100%" height={240}>
-        <BarChart data={datos} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }} barCategoryGap="28%">
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-          <XAxis type="number" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
-          <YAxis type="category" dataKey="categoria" width={96} tick={{ fontSize: 12, fill: '#475569', fontWeight: 600 }} axisLine={false} tickLine={false} />
-          <Tooltip
-            {...estiloTooltip}
-            cursor={{ fill: 'rgba(15,23,42,.04)' }}
-            formatter={(v, n) => {
-              const cantidad = Number(v) || 0;
-              return [`${cantidad} función${cantidad === 1 ? '' : 'es'}`, String(n)];
-            }}
-          />
-          <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ fontSize: '12px', paddingBottom: 8 }} />
-          {SERIES.map((s) => (
-            <Bar key={s.clave} dataKey={s.clave} name={s.nombre} stackId="revision" fill={s.color} maxBarSize={34}>
-              <LabelList
-                dataKey={s.clave}
-                position="center"
-                formatter={(v: unknown) => (Number(v) > 0 ? String(v) : '')}
-                style={{ fontSize: 11, fontWeight: 700, fill: s.clave === 'pendientes' ? '#475569' : '#ffffff' }}
-              />
-            </Bar>
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-      <p className="text-xs text-slate-500 mt-2">{total} {total === 1 ? 'función' : 'funciones'} de las agendas del período.</p>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mb-4 text-xs text-slate-600">
+        {PARTES.map((p) => (
+          <span key={p.clave} className="inline-flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: p.color }} />{p.nombre}
+          </span>
+        ))}
+      </div>
+
+      <ul className="space-y-4">
+        {metrica.categorias.map((corte, i) => {
+          const aprobadas = datos.aprobadas[i] ?? 0;
+          return (
+            <li key={corte}>
+              <div className="flex items-baseline justify-between gap-3 mb-1.5">
+                <span className="text-sm font-semibold text-slate-800">{corte}</span>
+                <span className="text-xs text-slate-500 tabular-nums">
+                  <strong className="text-slate-800">{aprobadas}</strong> de {total} aprobadas ({formato(total > 0 ? (aprobadas / total) * 100 : 0)} %)
+                </span>
+              </div>
+              <div
+                className="flex h-7 rounded-lg overflow-hidden bg-slate-100"
+                role="img"
+                aria-label={`${corte}: ${PARTES.map((p) => `${datos[p.clave][i] ?? 0} ${p.nombre.toLowerCase()}`).join(', ')}`}
+              >
+                {PARTES.map((p) => {
+                  const n = datos[p.clave][i] ?? 0;
+                  if (n <= 0) return null;
+                  const ancho = (n / total) * 100;
+                  return (
+                    <div
+                      key={p.clave}
+                      className="flex items-center justify-center text-[11px] font-bold tabular-nums"
+                      style={{ width: `${ancho}%`, backgroundColor: p.color, color: p.texto }}
+                      title={`${p.nombre}: ${n}`}
+                    >
+                      {ancho >= 6 ? n : ''}
+                    </div>
+                  );
+                })}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+        {total} {total === 1 ? 'función liberada' : 'funciones liberadas'} a los docentes. «Por revisar» son las que el docente ya reportó y esperan la revisión del director.
+        {porLiberar > 0 && (
+          <> Otras <strong className="text-slate-700">{porLiberar}</strong> {porLiberar === 1 ? 'sigue' : 'siguen'} con la carga por aprobar: el docente todavía no puede reportar{porLiberar === 1 ? 'la' : 'las'}, por eso no entran en estas cuentas.</>
+        )}
+      </p>
     </PanelGrafico>
   );
 }

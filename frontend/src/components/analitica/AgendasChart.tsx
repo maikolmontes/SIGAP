@@ -44,6 +44,7 @@ export default function AgendasChart({ metrica }: { metrica?: MetricaAnalitica }
               verticalAlign="bottom"
               iconType="circle"
               wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }}
+              formatter={(nombre: string) => `${nombre}: ${datos.find((d) => d.name === nombre)?.value ?? 0}`}
             />
           </PieChart>
         </ResponsiveContainer>

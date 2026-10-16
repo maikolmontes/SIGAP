@@ -99,14 +99,16 @@ export default function ReportesDirector() {
             ) : (
             <>
             {/* Tarjetas totales */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-7">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-7">
                 {[
                     { label: 'Total Docentes', value: totales.total_docentes || 0, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
                     { label: 'Aprobadas', value: totales.docentes_aprobados || 0, icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
                     { label: 'Devueltas', value: totales.docentes_devueltos || 0, icon: TrendingUp, color: 'text-red-600', bg: 'bg-red-50' },
-                    { label: 'Pendientes', value: totales.docentes_pendientes || 0, icon: TrendingUp, color: 'text-yellow-600', bg: 'bg-yellow-50' },
+                    { label: 'Pendientes', value: totales.docentes_pendientes || 0, icon: TrendingUp, color: 'text-yellow-600', bg: 'bg-yellow-50', ayuda: 'Agenda en proceso o enviada, sin aprobar' },
+                    { label: 'Por aprobar', value: totales.docentes_por_aprobar || 0, icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50', ayuda: 'Asignaciones sin liberar al docente' },
+                    { label: 'Sin carga', value: totales.docentes_sin_carga || 0, icon: TrendingUp, color: 'text-gray-500', bg: 'bg-gray-100', ayuda: 'Docentes del período sin funciones asignadas' },
                 ].map(m => (
-                    <div key={m.label} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all">
+                    <div key={m.label} title={'ayuda' in m ? m.ayuda : undefined} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all">
                         <div className={`w-10 h-10 ${m.bg} rounded-xl flex items-center justify-center mb-3`}>
                             <m.icon className={`w-5 h-5 ${m.color}`} />
                         </div>
@@ -184,13 +186,15 @@ export default function ReportesDirector() {
                                     <th className="px-5 py-3 text-center font-bold">Aprobadas</th>
                                     <th className="px-5 py-3 text-center font-bold">Devueltas</th>
                                     <th className="px-5 py-3 text-center font-bold">Pendientes</th>
+                                    <th className="px-5 py-3 text-center font-bold">Por aprobar</th>
+                                    <th className="px-5 py-3 text-center font-bold">Sin carga</th>
                                     <th className="px-5 py-3 text-center font-bold">% Aprobación</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
                                 {programasPagina.length === 0 ? (
                                     <tr>
-                                        <td colSpan={7} className="px-5 py-8 text-center text-gray-400 text-xs">
+                                        <td colSpan={9} className="px-5 py-8 text-center text-gray-400 text-xs">
                                             No se encontraron programas que coincidan con la búsqueda.
                                         </td>
                                     </tr>
@@ -213,6 +217,12 @@ export default function ReportesDirector() {
                                                 </td>
                                                 <td className="px-5 py-3.5 text-center">
                                                     <span className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_pendientes}</span>
+                                                </td>
+                                                <td className="px-5 py-3.5 text-center">
+                                                    <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_por_aprobar}</span>
+                                                </td>
+                                                <td className="px-5 py-3.5 text-center">
+                                                    <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-bold">{ep.agendas_sin_carga}</span>
                                                 </td>
                                                 <td className="px-5 py-3.5 text-center">
                                                     <div className="flex items-center justify-center gap-2">

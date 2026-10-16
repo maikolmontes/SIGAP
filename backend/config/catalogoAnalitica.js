@@ -33,7 +33,9 @@ const ESTADOS_CONSOLIDADOS = Object.freeze([
     'Devuelta',
     'Aprobada',
     'En revisión',
-    'Pendiente'
+    'Por aprobar',
+    'Pendiente',
+    'Sin carga'
 ]);
 
 const ROLES = Object.freeze({
@@ -52,8 +54,8 @@ const SOLO_GESTION = Object.freeze([ROLES.PLANEACION, ROLES.ADMIN, ROLES.DIRECTO
 const INDICADORES = Object.freeze({
     'IND-01': {
         id: 'IND-01',
-        nombre: 'Tasa de Cumplimiento de Agendas',
-        descripcion: 'Proporción de docentes que completaron el ciclo de formulación y aprobación de su agenda en el período.',
+        nombre: 'Estado de las Agendas de los Docentes',
+        descripcion: 'En qué punto está cada docente del período: agenda aprobada, en revisión, pendiente de diligenciar, devuelta, con la carga por aprobar (aún sin liberar) o sin carga asignada.',
         tipoGrafico: 'donut',
         unidad: 'docentes',
         dimensiones: ['periodo', 'programa'],
@@ -62,7 +64,7 @@ const INDICADORES = Object.freeze({
     'IND-02': {
         id: 'IND-02',
         nombre: 'Índice de Devolución de Agendas',
-        descripcion: 'Porcentaje de docentes cuya agenda fue devuelta por la dirección para ajuste.',
+        descripcion: 'Porcentaje de los docentes del período cuya agenda fue devuelta por la dirección para ajuste.',
         tipoGrafico: 'kpi_card',
         unidad: '%',
         dimensiones: ['periodo', 'programa'],
@@ -152,21 +154,12 @@ const INDICADORES = Object.freeze({
     'IND-11': {
         id: 'IND-11',
         nombre: 'Revisión de los Cortes',
-        descripcion: 'Estado de la revisión de las funciones de las agendas en cada corte: aprobadas, con visto bueno, devueltas y pendientes.',
+        descripcion: 'Estado de la revisión de las funciones ya liberadas a los docentes en cada corte: aprobadas, con visto bueno, devueltas, por revisar (el docente ya reportó) y sin reportar.',
         tipoGrafico: 'stacked_bar',
         unidad: 'funciones',
         dimensiones: ['corte', 'periodo', 'programa'],
         rolesAutorizados: TODOS_SUPERVISORES,
-        notaTecnica: 'Cada función de cada agenda se revisa por separado en cada corte; lo aprobado en el primer corte no cuenta para el segundo.'
-    },
-    'IND-12': {
-        id: 'IND-12',
-        nombre: 'Cobertura de Agendas',
-        descripcion: 'De los docentes asignados al período, cuántos tienen la agenda enviada, cuántos la están construyendo, cuántos la tienen devuelta y cuántos aún no tienen agenda.',
-        tipoGrafico: 'bar',
-        unidad: 'docentes',
-        dimensiones: ['periodo', 'programa'],
-        rolesAutorizados: TODOS_SUPERVISORES
+        notaTecnica: 'Cada función de cada agenda se revisa por separado en cada corte; lo aprobado en el primer corte no cuenta para el segundo. Las funciones con la carga por aprobar todavía no se pueden reportar y se cuentan aparte.'
     }
 });
 

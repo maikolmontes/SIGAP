@@ -1,7 +1,7 @@
-// IND-10, IND-11 e IND-12 de la analítica descriptiva, con base falsa.
+// IND-10 e IND-11 de la analítica descriptiva, con base falsa.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { indicadorPesoMetas, indicadorRevisionCortes, indicadorCobertura, clasificarCobertura } = require('../services/analiticaDescriptiva');
+const { indicadorPesoMetas, indicadorRevisionCortes } = require('../services/analiticaDescriptiva');
 const { construirPayload } = require('../services/geminiService');
 const catalogo = require('../config/catalogoAnalitica');
 
@@ -34,12 +34,14 @@ test('IND-10: sin metas no inventa porcentajes', () => {
 
 const contexto = (extra = {}) => ({ periodo: { semestre: 2 }, etiqueta: '2026-II', programa: 'X', params: [8], filtro: '', ...extra });
 
-test('IND-11: cuenta las funciones por estado de revisión y completa con pendientes', async () => {
+test('IND-11: solo cuenta las funciones liberadas; separa "por revisar" de "sin reportar" y informa las que faltan por liberar', async () => {
+    const consultas = [];
     const db = {
         query: async (sql) => {
-            if (/COUNT\(DISTINCT af\.id_funciones\)/.test(sql)) return { rows: [{ n: 10 }] };
+            consultas.push(sql);
+            if (/COUNT\(DISTINCT af\.id_funciones\)/.test(sql)) return { rows: [{ total: 14, liberadas: 10 }] };
             return { rows: [
-                { semana: 8, estado: 'Aprobado', n: 6 }, { semana: 8, estado: 'Devuelto', n: 1 },
+                { semana: 8, estado: 'Aprobado', n: 6 }, { semana: 8, estado: 'Devuelto', n: 1 }, { semana: 8, estado: 'Pendiente', n: 2 },
                 { semana: 16, estado: 'Aprobado', n: 2 }, { semana: 16, estado: 'Visto bueno', n: 3 },
             ] };
         },
@@ -47,48 +49,36 @@ test('IND-11: cuenta las funciones por estado de revisión y completa con pendie
     const m = await indicadorRevisionCortes(db, contexto());
     assert.equal(m.indicadorId, 'IND-11');
     assert.deepEqual(m.categorias, ['Semana 8', 'Semana 16']);
-    const serie = (c) => m.series.find((s) => s.clave === c).datos;
+    const serie = (c) => m.series.find((x) => x.clave === c).datos;
     assert.deepEqual(serie('aprobadas'), [6, 2]);
     assert.deepEqual(serie('vistoBueno'), [0, 3]);
     assert.deepEqual(serie('devueltas'), [1, 0]);
-    assert.deepEqual(serie('pendientes'), [3, 5]);
-    assert.equal(m.resumenNumerico.total, 10);
+    assert.deepEqual(serie('porRevisar'), [2, 0], 'el docente ya reportó y falta la revisión del director');
+    assert.deepEqual(serie('sinReportar'), [1, 5], '10 liberadas menos las que ya tienen estado');
+    assert.equal(m.resumenNumerico.total, 10, 'el total son las funciones liberadas, no todas');
+    assert.equal(m.resumenNumerico.porLiberar, 4, '14 asignadas - 10 liberadas: su carga sigue por aprobar');
     assert.equal(m.resumenNumerico.porcentajeCorte1, 60);
     assert.equal(m.resumenNumerico.porcentajeCorte2, 20);
+    assert.ok(consultas.every((q) => /'Por Aprobar'/.test(q)), 'las dos consultas distinguen las funciones sin liberar');
+});
+
+test('IND-11: nunca da negativos aunque haya más filas de revisión que funciones liberadas', async () => {
+    const db = { query: async (sql) => (/COUNT\(DISTINCT af\.id_funciones\)/.test(sql) ? { rows: [{ total: 2, liberadas: 2 }] } : { rows: [{ semana: 8, estado: 'Aprobado', n: 5 }] }) };
+    const m = await indicadorRevisionCortes(db, contexto());
+    assert.deepEqual(m.series.find((x) => x.clave === 'sinReportar').datos, [0, 2]);
 });
 
 test('IND-11: en un intersemestral los cortes también se llaman Semana 8 y Semana 16', async () => {
-    const db = { query: async (sql) => (/COUNT\(DISTINCT af\.id_funciones\)/.test(sql) ? { rows: [{ n: 0 }] } : { rows: [] }) };
+    const db = { query: async (sql) => (/COUNT\(DISTINCT af\.id_funciones\)/.test(sql) ? { rows: [{ total: 0, liberadas: 0 }] } : { rows: [] }) };
     const m = await indicadorRevisionCortes(db, contexto({ periodo: { semestre: 3 } }));
     assert.deepEqual(m.categorias, ['Semana 8', 'Semana 16']);
     assert.equal(m.resumenNumerico.porcentajeCorte1, 0, 'sin funciones no hay división por cero');
+    assert.equal(m.resumenNumerico.porLiberar, 0);
 });
 
-test('IND-12: clasifica a cada docente según su agenda', () => {
-    assert.equal(clasificarCobertura({ funciones: 0 }), 'Sin agenda');
-    assert.equal(clasificarCobertura({ funciones: 3, alguna_devuelta: true, todas_diligenciadas: false }), 'Devuelta');
-    assert.equal(clasificarCobertura({ funciones: 3, alguna_devuelta: false, todas_diligenciadas: true }), 'Agenda enviada');
-    assert.equal(clasificarCobertura({ funciones: 3, alguna_devuelta: false, todas_diligenciadas: false }), 'En construcción');
-    assert.equal(clasificarCobertura({ funciones: 2, alguna_devuelta: true, todas_diligenciadas: true }), 'Devuelta', 'una devuelta marca toda la agenda');
-});
-
-test('IND-12: la cobertura se calcula sobre los docentes asignados, incluidos los sin agenda', async () => {
-    const db = { query: async () => ({ rows: [
-        { funciones: 4, alguna_devuelta: false, todas_diligenciadas: true },
-        { funciones: 3, alguna_devuelta: false, todas_diligenciadas: true },
-        { funciones: 2, alguna_devuelta: false, todas_diligenciadas: false },
-        { funciones: 4, alguna_devuelta: true, todas_diligenciadas: false },
-        { funciones: 0, alguna_devuelta: null, todas_diligenciadas: null },
-    ] }) };
-    const m = await indicadorCobertura(db, contexto());
-    assert.deepEqual(m.categorias, ['Agenda enviada', 'En construcción', 'Devuelta', 'Sin agenda']);
-    assert.deepEqual(m.series[0].datos, [2, 1, 1, 1]);
-    assert.equal(m.resumenNumerico.total, 5);
-    assert.equal(m.resumenNumerico.porcentajeGlobal, 40);
-});
-
-test('los tres indicadores están en el catálogo y los ven todos los roles de supervisión', () => {
-    for (const id of ['IND-10', 'IND-11', 'IND-12']) {
+test('los indicadores están en el catálogo y los ven todos los roles de supervisión; IND-12 se integró a IND-01', () => {
+    assert.equal(catalogo.obtenerIndicador('IND-12'), null, 'la cobertura ahora es parte del estado de las agendas (IND-01)');
+    for (const id of ['IND-10', 'IND-11']) {
         assert.ok(catalogo.obtenerIndicador(id), id);
         for (const rol of ['Planeacion', 'Admin', 'Director', 'Consultor']) assert.equal(catalogo.puedeVer(id, [rol]), true, id + ' ' + rol);
         assert.equal(catalogo.puedeVer(id, ['Docente']), false, id + ' no es para docentes');

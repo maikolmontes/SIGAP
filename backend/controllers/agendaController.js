@@ -3,6 +3,7 @@ const notificaciones = require('../services/notificacionesService');
 const { rolesEfectivos } = require('../utils/rolActivo');
 const { verificarSemana } = require('../utils/semanaAbierta');
 const { asegurarCorregidoEn } = require('../utils/esquemaRevisionCorte');
+const { indicadoresSinAvance } = require('../utils/avanceObligatorio');
 const { idUsuarioDe, puedeVerDocente } = require('../middleware/accesoEvidencias');
 
 // Meta máxima que puede escribir un docente en una actividad de su agenda
@@ -547,6 +548,37 @@ const guardarAvanceDocente = async (req, res) => {
             if (propios.rows.length !== ids.length) {
                 return res.status(403).json({ error: 'Algún indicador no pertenece a tu agenda.' });
             }
+        }
+    }
+
+    // Avance obligatorio: para guardar un corte, TODOS los indicadores del docente deben quedar en más de 0
+    // (basta 0,1). Única excepción: "Evidencia de entrega de notas finales" puede ir en 0 en la semana 8.
+    // Se evalúa con lo que quedaría guardado: lo enviado para este corte y, de lo demás, lo que ya hay en la base.
+    if (!esPlaneacionOAdmin(req) && corteGuardado) {
+        const propios = await pool.query(`
+            SELECT i.id_indicadores AS id_indicador, i.nombre_indicador, d.meta, i.ejecucion_8, i.ejecucion_16,
+                   af.funcion_sustantiva, aa.rol_seleccionado AS actividad
+            FROM indicadores i
+            JOIN descripcion d ON d.id_descripcion = i.id_descripcion
+            JOIN asignacion_actividades aa ON aa.id_asignacionact = d.id_asignacionact
+            JOIN asignacion_funciones af ON af.id_funciones = aa.id_funciones
+            JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
+            JOIN periodo p ON p.id_periodo = af.id_periodo AND p.activo = TRUE
+            WHERE ua.id_usuario = $1 AND af.estado_agenda <> 'Por Aprobar'
+              AND i.activo IS NOT FALSE AND d.activo IS NOT FALSE
+        `, [idUsuarioDe(req)]);
+        const columna = `ejecucion_${corteGuardado}`;
+        const enviados = new Map(indicadores.map((i) => [Number(i.id_indicador), i]));
+        const resultantes = propios.rows.map((r) => {
+            const e = enviados.get(Number(r.id_indicador));
+            return e ? { ...r, [columna]: e[columna] } : r;
+        });
+        const faltan = indicadoresSinAvance(resultantes, corteGuardado);
+        if (faltan.length > 0) {
+            return res.status(400).json({
+                error: `Para guardar el avance de la Semana ${corteGuardado} debes registrar un valor mayor que 0 en todos tus indicadores (por ejemplo 0,1). Faltan ${faltan.length}.`,
+                faltantes: faltan.map((i) => ({ id_indicador: i.id_indicador, indicador: i.nombre_indicador, funcion: i.funcion_sustantiva, actividad: i.actividad })),
+            });
         }
     }
 

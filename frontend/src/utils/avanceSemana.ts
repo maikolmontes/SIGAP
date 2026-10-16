@@ -87,6 +87,49 @@ export function resumenAvance(data: FuncionPantalla[]): ResumenAvance {
   return { metaTotal, cumplido, porcentaje, completo, faltantes }
 }
 
+const INDICADOR_EXENTO_SEMANA_8 = 'evidencia de entrega de notas finales'
+const normalizar = (t?: string | null) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+export interface SinAvance {
+  funcion: number
+  actividad: number
+  idIndicador: number
+  indicador: string
+  rutaFuncion: string
+  rutaActividad: string
+}
+
+/**
+ * Avance semanal obligatorio: para guardar un corte todos los indicadores deben quedar en más de 0 (basta 0,1).
+ * Única excepción: "Evidencia de entrega de notas finales" puede quedar en 0 en la semana 8. En la semana 16, si la meta
+ * ya se cumplió en la 8 no queda nada por registrar. El servidor aplica la misma regla; esto avisa antes de enviar.
+ */
+export function indicadoresSinAvance(data: FuncionPantalla[], corte: '8' | '16'): SinAvance[] {
+  const faltan: SinAvance[] = []
+  data.forEach((funcion, f) => {
+    (funcion.actividades || []).forEach((actividad, a) => {
+      (actividad.indicadores || []).forEach((indicador) => {
+        const meta = num(indicador.meta) || num(actividad.meta)
+        if (meta <= 0) return
+        if (corte === '8' && normalizar(indicador.nombre_indicador) === INDICADOR_EXENTO_SEMANA_8) return
+        const sinValor = corte === '8'
+          ? num(indicador.ejecucion_8) <= 0
+          : meta - num(indicador.ejecucion_8) > 0 && num(indicador.ejecucion_16) <= 0
+        if (!sinValor) return
+        faltan.push({
+          funcion: f,
+          actividad: a,
+          idIndicador: indicador.id_indicador,
+          indicador: indicador.nombre_indicador,
+          rutaFuncion: funcion.funcion_sustantiva,
+          rutaActividad: [actividad.rol_seleccionado || 'Actividad', actividad.grupo_nombre && `Grupo ${actividad.grupo_nombre}`].filter(Boolean).join(' · '),
+        })
+      })
+    })
+  })
+  return faltan
+}
+
 /** Huella de lo que hay en pantalla (ejecución de cada indicador): si cambia respecto a la última guardada, hay cambios sin guardar. */
 export const firmaDeAvance = (data: FuncionPantalla[]): string =>
   data

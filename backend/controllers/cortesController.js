@@ -15,6 +15,7 @@
 const pool = require('../db/connection');
 const { alcanceFunciones, docenteEnAlcance } = require('../utils/rolActivo');
 const notificaciones = require('../services/notificacionesService');
+const { sqlFuncionCompletaEnSemana8 } = require('../utils/avanceObligatorio');
 
 /**
  * Resuelve quién puede hacer qué sobre una función concreta.
@@ -75,7 +76,7 @@ const tieneReporte = async (idFunciones, semana) => {
             JOIN indicadores i ON i.id_descripcion = d.id_descripcion AND i.activo IS NOT FALSE
             WHERE aa.id_funciones = $1
               AND COALESCE(CASE WHEN $2::int = 8 THEN i.ejecucion_8 ELSE i.ejecucion_16 END, 0) > 0
-        ) AS hay
+        ) OR ($2::int = 16 AND ${sqlFuncionCompletaEnSemana8('$1')}) AS hay
     `, [idFunciones, semana]);
     return rows[0].hay;
 };
