@@ -61,7 +61,7 @@ const construirBalance = async (db, { idPrograma, idPeriodo }) => {
         SELECT u.id_usuario,
                TRIM(u.nombres || ' ' || u.apellidos)  AS docente,
                COALESCE(tc.tipo, 'Sin definir')       AS tipo_contrato,
-               COALESCE(tc.horas_contrato, 0)::numeric AS horas_contrato,
+               COALESCE(dp.horas_contrato, tc.horas_contrato, 0)::numeric AS horas_contrato,
                COALESCE(ag.horas, 0)::numeric         AS horas_asignadas,
                COALESCE(ag.funciones, 0)::int         AS funciones,
                COALESCE(ag.funciones_liberadas, 0)::int AS funciones_liberadas,
@@ -77,7 +77,7 @@ const construirBalance = async (db, { idPrograma, idPeriodo }) => {
                COALESCE(av.evidencias, 0)::int        AS evidencias
         FROM docente_periodo dp
         JOIN usuarios u ON u.id_usuario = dp.id_usuario AND u.activo = TRUE
-        LEFT JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+        LEFT JOIN tipo_contrato tc ON tc.id_contrato = COALESCE(dp.id_contrato, u.id_contrato)
         LEFT JOIN LATERAL (
             SELECT SUM(COALESCE(af.horas_funcion, 0)) AS horas,
                    COUNT(*)                           AS funciones,

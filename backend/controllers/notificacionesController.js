@@ -8,6 +8,7 @@
 
 const { sendEmail, verificarConexion, estaHabilitado } = require('../services/emailService');
 const plantillas = require('../utils/emailTemplates');
+const { urlFrontend } = require('../utils/urlFrontend');
 const notificaciones = require('../services/notificacionesService');
 
 // GET /api/notificaciones/estado
@@ -22,7 +23,7 @@ const getEstado = async (req, res) => {
         puerto: process.env.EMAIL_PORT || '465',
         remitente: process.env.EMAIL_USER || null,
         redireccion_pruebas: process.env.EMAIL_REDIRECT_TO || null,
-        frontend_url: process.env.FRONTEND_URL || 'http://localhost:5173'
+        frontend_url: urlFrontend()
     });
 };
 

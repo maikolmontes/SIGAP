@@ -31,6 +31,7 @@ const gemini = require('../services/geminiService');
 const { indicadorPesoMetas, indicadorRevisionCortes } = require('../services/analiticaDescriptiva');
 const { ESTADOS_DOCENTE, estadoConsolidado, contarEstados } = require('../utils/estadoDocente');
 const { ordenarPorFuncion } = require('../utils/ordenFunciones');
+const { joinContratoPeriodo, horasContratoSql } = require('../utils/contratoPeriodo');
 
 // ----------------------------------------------------------------
 // Utilidades internas
@@ -459,12 +460,12 @@ const getDetalleDocentes = async (req, res) => {
                    u.correo,
                    COALESCE(pa.nombre_programa, 'Sin programa') AS programa,
                    COALESCE(tc.tipo, 'Sin definir')             AS tipo_contrato,
-                   COALESCE(tc.horas_contrato, 0)::numeric      AS horas_contrato,
+                   COALESCE(${horasContratoSql()}, 0)::numeric AS horas_contrato,
                    SUM(COALESCE(af.horas_funcion, 0))::numeric  AS horas_asignadas,
                    -- NULLIF evita la división por cero de 'Hora Cátedra' y 'Por Definir'
                    ROUND(
                        SUM(COALESCE(af.horas_funcion, 0)) * 100.0
-                       / NULLIF(tc.horas_contrato, 0), 1
+                       / NULLIF(${horasContratoSql()}, 0), 1
                    )                                            AS porcentaje_ocupacion,
                    COUNT(DISTINCT af.id_funciones)::int         AS funciones,
                    BOOL_OR(af.estado_agenda = 'Devuelta')       AS alguna_devuelta,
@@ -474,11 +475,11 @@ const getDetalleDocentes = async (req, res) => {
             FROM asignacion_funciones af
             JOIN usuario_asignacion ua ON ua.id_funciones = af.id_funciones
             JOIN usuarios u ON u.id_usuario = ua.id_usuario AND u.activo = TRUE
-            LEFT JOIN tipo_contrato tc ON tc.id_contrato = u.id_contrato
+            ${joinContratoPeriodo({ periodo: '$1', tipoJoin: 'LEFT JOIN' })}
             LEFT JOIN programa_academico pa ON pa.id_programa = u.id_programa
             WHERE af.id_periodo = $1${filtro}
             GROUP BY u.id_usuario, u.nombres, u.apellidos, u.correo,
-                     pa.nombre_programa, tc.tipo, tc.horas_contrato
+                     pa.nombre_programa, tc.tipo, tc.horas_contrato, dpc.horas_contrato
             ORDER BY docente
         `, params);
 
