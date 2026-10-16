@@ -73,7 +73,7 @@ const muestras = () => [
     console.log('Host                :', process.env.EMAIL_HOST || 'smtp.gmail.com');
     console.log('Puerto              :', process.env.EMAIL_PORT || '465');
     console.log('Remitente           :', process.env.EMAIL_USER || '(sin configurar)');
-    console.log('FRONTEND_URL        :', process.env.FRONTEND_URL || 'http://localhost:5173');
+    console.log('Enlaces de correo    :', require('./utils/urlFrontend').urlFrontend());
     console.log('-----------------------------------');
 
     const conectado = await verificarConexion();

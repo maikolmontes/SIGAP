@@ -4,6 +4,7 @@
 // Diseño responsivo con tablas (compatible con Gmail/Outlook) y los
 // colores institucionales de la Universidad CESMAG.
 // ================================================================
+const { urlFrontend } = require('./urlFrontend');
 
 const COLORES = {
     azul: '#1a2744',
@@ -15,7 +16,8 @@ const COLORES = {
     fondo: '#f4f6f9'
 };
 
-const frontendUrl = () => (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+// Dirección pública del frontend (utils/urlFrontend.js): en producción nunca es localhost
+const frontendUrl = () => urlFrontend();
 
 // Construye una URL absoluta hacia una ruta del frontend
 const url = (ruta = '/') => `${frontendUrl()}/${String(ruta).replace(/^\/+/, '')}`;
