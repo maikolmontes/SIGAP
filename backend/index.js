@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
+const seguridad = require('./middleware/seguridad');
 
 require('./db/connection');
 
@@ -20,8 +20,11 @@ const programasRouter = require('./routes/programas');
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+// Seguridad (middleware/seguridad.js): proxy de Vercel, sin X-Powered-By, Helmet, CORS con lista blanca (CORS_ORIGINS) y JSON de hasta 1 MB
+const ORIGENES_PERMITIDOS = seguridad.aplicarSeguridad(app, express);
+
+// Límite de intentos del login con Google. Va antes que todo lo demás de /api (incluida la preparación de la base).
+app.post('/api/auth/google', seguridad.crearLimitadorLoginGoogle());
 
 // Contrato por período: columnas, rastro y trigger (idempotente; solo cuesta la primera petición)
 app.use('/api', require('./utils/contratoPeriodo').esperarEsquemaContrato);
@@ -47,7 +50,8 @@ app.use('/api/mis-notificaciones', require('./routes/misNotificaciones'));
 
 // Evidencias: ya no son una carpeta pública. Pasan por token + permiso por docente.
 const { verifyTokenFlexible, servirArchivo } = require('./middleware/accesoEvidencias');
-app.get('/uploads/evidencias/:archivo', verifyTokenFlexible, servirArchivo);
+// frame-ancestors: solo el frontend de SIGAP puede mostrar la evidencia en un <iframe> (no hay X-Frame-Options en esta ruta)
+app.get('/uploads/evidencias/:archivo', seguridad.crearFrameAncestors(ORIGENES_PERMITIDOS), verifyTokenFlexible, servirArchivo);
 
 app.get('/api', (req, res) => {
     res.json({
