@@ -107,7 +107,7 @@ export default function Login() {
                 <img src="/logo_cesmag.png" alt="CESMAG"
                   className="h-8 w-8 object-contain" />
                 <div>
-                  <div className="text-white font-black text-sm leading-none tracking-tight">CESMAG</div>
+                  <div className="text-white font-black text-sm leading-none tracking-tight">Universidad CESMAG</div>
                   <div className="text-blue-200/60 text-[9px] font-semibold uppercase tracking-widest">Pasto · Colombia</div>
                 </div>
               </div>
@@ -125,7 +125,7 @@ export default function Login() {
                 <img src="/logo_cesmag.png" alt="CESMAG"
                   className="h-11 w-11 object-contain" />
                 <div>
-                  <div className="text-white font-black text-xl leading-none tracking-tight">CESMAG</div>
+                  <div className="text-white font-black text-xl leading-none tracking-tight">Universidad CESMAG</div>
                   <div className="text-blue-200/60 text-[11px] font-semibold uppercase tracking-widest">Pasto · Colombia</div>
                 </div>
               </div>

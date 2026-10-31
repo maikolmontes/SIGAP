@@ -179,7 +179,7 @@ const RoleSelection = () => {
             <div className="flex items-center gap-3 mb-6">
               <img src="/logo_cesmag.png" alt="CESMAG" className="h-14 w-14 object-contain drop-shadow-lg" />
               <div>
-                <div className="text-white font-black text-2xl leading-none tracking-tight">CESMAG</div>
+                <div className="text-white font-black text-2xl leading-none tracking-tight">Universidad CESMAG</div>
                 <div className="text-blue-200/70 text-xs font-semibold uppercase tracking-widest">Pasto · Colombia</div>
               </div>
             </div>
