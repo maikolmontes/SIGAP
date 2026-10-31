@@ -26,3 +26,7 @@ dist-ssr
 
 frontend/.vite
 node_modules
+# Variables de entorno: nunca al repositorio (la plantilla .env.example sí se sube)
+.env
+.env.*
+!.env.example
