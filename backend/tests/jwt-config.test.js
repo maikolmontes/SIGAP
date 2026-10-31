@@ -1,4 +1,4 @@
-// El secreto de los JWT: obligatorio en producción, con aviso en desarrollo.
+// El secreto de los JWT: obligatorio en producción y en Vercel, con aviso en desarrollo.
 // Se prueba en un proceso hijo porque config/jwt.js resuelve el secreto al cargarse.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -36,10 +36,31 @@ test('en desarrollo sin secreto arranca, pero avisa', () => {
     assert.match(r.stderr, /JWT_SECRET no está definido/);
 });
 
-test('en Vercel sin secreto NO tumba el despliegue: arranca con aviso', () => {
+test('en Vercel sin secreto el servidor NO arranca y dice por qué (no firma con el secreto por defecto)', () => {
     const r = cargar({ NODE_ENV: 'production', VERCEL: '1', JWT_SECRET: '' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /JWT_SECRET no está definido en Vercel/);
+    assert.match(r.stderr, /Settings > Environment Variables/, 'el mensaje dice dónde corregirlo');
+    assert.doesNotMatch(r.stdout, /LONGITUD=/, 'no llegó a exportar ningún secreto');
+});
+
+test('en Vercel un secreto en blanco cuenta como no definido', () => {
+    const r = cargar({ NODE_ENV: 'production', VERCEL: '1', JWT_SECRET: '    ' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /JWT_SECRET no está definido en Vercel/);
+});
+
+test('en Vercel sin NODE_ENV tampoco se usa el secreto por defecto', () => {
+    const r = cargar({ NODE_ENV: '', VERCEL: '1', JWT_SECRET: '' });
+    assert.notEqual(r.status, 0);
+    assert.doesNotMatch(r.stdout + r.stderr, /jwt_secret_key_sigap_2026/, 'el secreto por defecto no se imprime ni se usa');
+});
+
+test('en Vercel un secreto válido arranca y se usa tal cual', () => {
+    const r = cargar({ NODE_ENV: 'production', VERCEL: '1', JWT_SECRET: 'y'.repeat(48) });
     assert.equal(r.status, 0);
-    assert.match(r.stderr, /NO está definido en Vercel/);
+    assert.match(r.stdout, /LONGITUD=48/);
+    assert.doesNotMatch(r.stderr, /JWT_SECRET/, 'sin avisos');
 });
 
 test('en Vercel un secreto ya configurado se respeta, aunque sea corto', () => {

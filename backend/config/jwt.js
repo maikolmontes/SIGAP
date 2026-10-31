@@ -8,7 +8,9 @@
 //   · Sin JWT_SECRET en desarrollo       → se usa un valor de respaldo y se
 //     avisa en consola (así no se rompe el entorno local).
 //   · Sin JWT_SECRET en producción       → el servidor NO arranca.
-//   · Sin JWT_SECRET en Vercel           → arranca con aviso (no tumbar el despliegue).
+//   · Sin JWT_SECRET en Vercel           → el servidor NO arranca, con un error claro en el log.
+//     Jamás se firma con el secreto por defecto del código: está en el repositorio y
+//     cualquiera podría fabricar tokens válidos.
 // ================================================================
 
 // Carga el .env aquí mismo: si este módulo se importara antes que dotenv, el
@@ -22,19 +24,18 @@ const resolverSecreto = () => {
     const configurado = process.env.JWT_SECRET;
     if (configurado && configurado.trim().length >= 16) return configurado.trim();
 
-    // Despliegue en Vercel: no se aborta el arranque (eso dejaría la aplicación
-    // caída si la variable aún no está cargada allí). Se conserva el secreto
-    // que ya estuviera configurado, aunque sea corto, y se avisa en el log.
+    // Despliegue en Vercel: sin secreto NO se arranca (la función falla y el log dice por qué).
+    // Un secreto ya configurado se respeta aunque sea corto —no se tumba un despliegue que hoy
+    // funciona— pero se avisa en el log para que se reemplace por uno más largo.
     if (process.env.VERCEL) {
         if (configurado && configurado.trim()) {
             console.warn('[seguridad] JWT_SECRET tiene menos de 16 caracteres: conviene reemplazarlo por uno más largo.');
             return configurado.trim();
         }
-        console.warn(
-            '[seguridad] JWT_SECRET NO está definido en Vercel: se usa el secreto por defecto del código. ' +
-            'Defínelo en Vercel > Settings > Environment Variables (mínimo 16 caracteres).'
+        throw new Error(
+            'JWT_SECRET no está definido en Vercel: el servidor no arranca para no firmar con el secreto por defecto. ' +
+            'Defínelo en Vercel > Settings > Environment Variables (mínimo 16 caracteres) y vuelve a desplegar.'
         );
-        return SECRETO_DESARROLLO;
     }
 
     if (process.env.NODE_ENV === 'production') {
