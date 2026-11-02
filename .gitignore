@@ -1,0 +1,32 @@
+# Dependencias y compilados
+node_modules/
+dist/
+dist-ssr/
+.vite/
+
+# Variables de entorno (las plantillas .env.example sí se suben)
+.env
+.env.*
+!.env.example
+
+# Datos y archivos locales del backend
+backend/backups/
+backend/uploads/
+backend/scratch/
+backend/_rutas.json
+
+# Volcados de la base de datos (traen datos reales de usuarios)
+restore.sql
+*.dump
+
+# Configuración local del editor / Claude Code
+.claude/settings.local.json
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Temporales
+*.log
+*.local
+.DS_Store
+~$*
