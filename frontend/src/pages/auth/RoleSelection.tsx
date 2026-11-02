@@ -163,7 +163,7 @@ const RoleSelection = () => {
   }
 
   return (
-    <div className="flex min-h-screen w-full font-sans bg-gray-50">
+    <div className="flex min-h-screen lg:h-screen lg:overflow-hidden w-full font-sans bg-gray-50">
 
       {/* ── Lado izquierdo: Panel institucional (oculto en móvil) ── */}
       <div className="hidden lg:flex w-5/12 relative bg-[#172554] text-white flex-col justify-between overflow-hidden shadow-2xl">
@@ -216,11 +216,13 @@ const RoleSelection = () => {
       </div>
 
       {/* ── Lado derecho: Selector de roles ── */}
-      <div className="w-full lg:w-7/12 flex flex-col bg-white/80 backdrop-blur-xl">
-        <div className="flex-1 flex flex-col justify-center px-6 sm:px-12 lg:px-16 xl:px-24 relative">
+      <div className="w-full lg:w-7/12 flex flex-col min-h-0 bg-white/80 backdrop-blur-xl">
+        {/* Cabe en una sola pantalla; si la ventana es muy baja, solo esta zona se desplaza */}
+        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col px-6 sm:px-12 lg:px-16 xl:px-24 py-5 relative">
+         <div className="my-auto w-full">
 
           {/* Cabecera con logo y perfil de usuario */}
-          <div className="flex items-center justify-between mb-12">
+          <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <LogoSigap className="h-14 w-auto shrink-0" />
               <span className="text-[#172554] font-black text-2xl tracking-tight">SIGAP</span>
@@ -251,15 +253,15 @@ const RoleSelection = () => {
           </div>
 
           {/* Título */}
-          <div className="mb-8">
-            <h2 className="text-3xl xl:text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">Selecciona tu perfil</h2>
-            <p className="text-gray-500 text-base font-medium leading-relaxed">
+          <div className="mb-5">
+            <h2 className="text-3xl xl:text-4xl font-extrabold text-gray-900 mb-2 tracking-tight">Selecciona tu perfil</h2>
+            <p className="text-gray-500 text-sm font-medium leading-relaxed">
               Tienes acceso a múltiples módulos académicos.<br className="hidden sm:block" /> ¿Cómo deseas ingresar hoy?
             </p>
           </div>
 
           {/* Tarjetas de roles */}
-          <div className="space-y-3 mb-8">
+          <div className="space-y-2.5 mb-5">
             {roles.map((rol) => {
               const isSelected = selectedRoleId === rol.id_rol;
               const isEntering = enteringRoleId === rol.id_rol;
@@ -272,7 +274,7 @@ const RoleSelection = () => {
                     if (!enteringRoleId) setSelectedRoleId(rol.id_rol);
                   }}
                   className={`
-                    relative bg-white border-2 rounded-xl p-5 cursor-pointer transition-all duration-200 group
+                    relative bg-white border-2 rounded-xl px-5 py-3 cursor-pointer transition-all duration-200 group
                     flex items-center gap-4
                     ${isSelected
                       ? `${styling.borderActive} shadow-md`
@@ -281,7 +283,7 @@ const RoleSelection = () => {
                   `}
                 >
                   {/* Icono */}
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-all ${isSelected ? styling.iconBg : 'bg-gray-50 group-hover:bg-gray-100'}`}>
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-all ${isSelected ? styling.iconBg : 'bg-gray-50 group-hover:bg-gray-100'}`}>
                     <div className={`${isSelected ? styling.iconColor : 'text-gray-400 group-hover:text-gray-600'} transition-colors`}>
                       {getRoleIcon(rol.nombre_rol)}
                     </div>
@@ -303,7 +305,7 @@ const RoleSelection = () => {
                     <h3 className={`font-bold text-base ${isSelected ? 'text-gray-900' : 'text-gray-700'}`}>
                       {rol.nombre_rol}
                     </h3>
-                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">
+                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-1 leading-relaxed">
                       {rol.descripcion_rol || styling.defaultDesc}
                     </p>
                   </div>
@@ -369,10 +371,11 @@ const RoleSelection = () => {
               </div>
             )}
           </button>
+         </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 sm:px-12 lg:px-16 py-6 text-sm font-medium text-gray-400 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50/50">
+        <div className="px-6 sm:px-12 lg:px-16 py-3 text-xs lg:text-sm font-medium text-gray-400 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50/50">
           <div className="flex gap-4">
             <span className="hover:text-gray-600 transition-colors">Universidad CESMAG</span>
             <span>•</span>
