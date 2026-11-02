@@ -88,6 +88,7 @@ frontend/vercel.json lleva Referrer-Policy, Permissions-Policy y Content-Securit
 
 Variables de entorno del frontend: frontend/.env NO está en git (se ignora); la plantilla es frontend/.env.example (VITE_GOOGLE_CLIENT_ID y VITE_API_URL, sin valores). En Vercel se definen en Settings > Environment Variables del proyecto del frontend; el build las toma de ahí, no de un archivo del repositorio.
 JWT: en Vercel, sin JWT_SECRET el backend NO arranca (error claro en el log); un secreto corto solo avisa para no tumbar un despliegue que ya funciona.
+Autorización de rutas (backend/middleware/soloPlaneacion.js y backend/middleware/accesoDatos.js; pruebas en tests/autorizacion-rutas.test.js): crear, editar, activar y eliminar facultades y programas, crear/cerrar/habilitar períodos, vincular o desvincular sus docentes, listar los docentes de un período y POST /api/funciones/asignar son SOLO de Planeación/Admin (el Director NO gestiona períodos ni programas). Las lecturas con dueño usan accesoDatos: GET /api/funciones/usuario/:id_usuario (el propio usuario, Planeación/Admin/Consultor o el Director del programa del docente), GET /api/observaciones/:actividad_id/:semana (el docente dueño, Planeación/Admin/Consultor, el Director en su alcance o un revisor de función) y GET /api/permisos/rol/:id_rol (solo los roles del propio usuario; Planeación, cualquiera). Una ruta nueva que escriba datos debe llevar su guardia de rol o validar la propiedad en el controlador; si la base falla, las guardias de acceso deniegan.
 
 Usuarios (backend/controllers/usuariosController.js)
 
@@ -130,7 +131,7 @@ Lo que NO hacer
 
 No editar porcentaje_avance directamente en la BD — es calculado por el sistema
 No modificar tablas N:N directamente sin pasar por los endpoints correspondientes
-No usar las vistas v_analitica_* — están obsoletas y defectuosas (ver database/v_analitica_sigap.sql)
+No usar las vistas v_analitica_* — están obsoletas y defectuosas (el script se eliminó del repositorio)
 No enviar a Gemini nombres, correos ni documentos — solo métricas agregadas; IND-04 está excluido por diseño
 
 Analítica descriptiva (React + Recharts + Gemini)

@@ -2,14 +2,15 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/facultadesController');
 const verifyToken = require('../middleware/verifyToken');
+const soloPlaneacion = require('../middleware/soloPlaneacion');
 
-// Todas estas rutas exigen iniciar sesión
+// Consultar: cualquier usuario con sesión. Crear, editar, activar y eliminar: solo Planeación.
 router.use(verifyToken);
 
 router.get('/', controller.getAll);
-router.post('/', controller.create);
-router.put('/:id', controller.update);
-router.patch('/:id/activa', controller.toggleActiva);
-router.delete('/:id', controller.deleteFacultad);
+router.post('/', soloPlaneacion, controller.create);
+router.put('/:id', soloPlaneacion, controller.update);
+router.patch('/:id/activa', soloPlaneacion, controller.toggleActiva);
+router.delete('/:id', soloPlaneacion, controller.deleteFacultad);
 
 module.exports = router;

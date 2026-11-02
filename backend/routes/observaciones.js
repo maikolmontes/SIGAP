@@ -6,6 +6,7 @@ const {
 } = require('../controllers/directorRevisionController');
 const verifyToken = require('../middleware/verifyToken');
 const { puedeVerRevision, puedeRevisar } = require('../middleware/verifyRevisor');
+const { lecturaObservacion } = require('../middleware/accesoDatos');
 
 // GET /api/observaciones/todas — Todas las observaciones del alcance
 router.get('/todas', verifyToken, puedeVerRevision, getTodasObservaciones);
@@ -21,6 +22,6 @@ router.post('/:actividad_id', verifyToken, puedeRevisar, agregarObservacion);
 router.put('/:actividad_id', verifyToken, puedeRevisar, guardarObservacion);
 
 // GET /api/observaciones/:actividad_id/:semana — Consultar observaciones
-router.get('/:actividad_id/:semana', verifyToken, getObservacion);
+router.get('/:actividad_id/:semana', verifyToken, lecturaObservacion, getObservacion);
 
 module.exports = router;
